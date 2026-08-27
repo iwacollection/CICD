@@ -31,7 +31,10 @@ IGNORED_FILES = {"README.md", ".gitignore"}
 
 
 def _normalise(path: str) -> str:
-    return path.strip().replace("\\", "/").lstrip("./")
+    normalised = path.strip().replace("\\", "/")
+    if normalised.startswith("./"):
+        normalised = normalised[2:]
+    return normalised
 
 
 def _matches(path: str, pattern: str) -> bool:
