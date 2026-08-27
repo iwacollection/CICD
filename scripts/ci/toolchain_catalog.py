@@ -14,6 +14,7 @@ from validate_config import load_catalog
 ALLOWED_STATUSES = {"active", "candidate", "planned", "retired"}
 ALLOWED_EXECUTION_MODES = {"host", "container"}
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+load_toolchain_catalog = load_catalog
 
 
 def validate_toolchain_catalog(data: dict) -> list[str]:
