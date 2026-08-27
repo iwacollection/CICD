@@ -1,0 +1,98 @@
+name: Toolchain Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docker/toolchains/**"
+      - ".github/workflows/toolchain-images.yml"
+  pull_request:
+    paths:
+      - "docker/toolchains/**"
+      - ".github/workflows/toolchain-images.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish immutable toolchain image to GHCR"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  gcc-host:
+    name: gcc-host container
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LOCAL_IMAGE: cicd-toolchain-gcc-host:${{ github.sha }}
+      REGISTRY_IMAGE: ghcr.io/${{ github.repository_owner }}/cicd-toolchain-gcc-host
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build toolchain image
+        run: >-
+          docker build --pull
+          -f docker/toolchains/gcc-host/Dockerfile
+          -t "$LOCAL_IMAGE"
+          .
+
+      - name: Smoke test toolchain
+        run: |
+          set -euo pipefail
+          docker run --rm "$LOCAL_IMAGE" bash -euo pipefail -c '
+            gcc --version
+            g++ --version
+            cmake --version
+            ccache --version
+            git --version
+          '
+
+      - name: Show local image identity
+        id: local
+        run: |
+          set -euo pipefail
+          identity="$(docker image inspect "$LOCAL_IMAGE" --format '{{.Id}}')"
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          echo "Local image identity: $identity"
+
+      - name: Login GHCR
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish immutable image
+        id: publish
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="sha-${GITHUB_SHA}"
+          docker tag "$LOCAL_IMAGE" "$REGISTRY_IMAGE:$tag"
+          output="$(docker push "$REGISTRY_IMAGE:$tag")"
+          printf '%s\n' "$output"
+          digest="$(printf '%s\n' "$output" | awk '/digest:/ {print $3; exit}')"
+          if [[ -z "$digest" ]]; then
+            echo "Unable to determine pushed image digest" >&2
+            exit 1
+          fi
+          echo "reference=$REGISTRY_IMAGE@$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Toolchain image validation"
+            echo "- Local identity: ${{ steps.local.outputs.identity }}"
+            echo "- Publish requested: ${{ github.event_name == 'workflow_dispatch' && inputs.publish || false }}"
+            if [[ -n "${{ steps.publish.outputs.reference }}" ]]; then
+              echo "- Immutable reference: ${{ steps.publish.outputs.reference }}"
+              echo "- Next step: register this digest in ci/toolchains and project catalog"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
