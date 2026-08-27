@@ -56,7 +56,18 @@ def validate_toolchain_catalog(data: dict) -> list[str]:
             continue
 
         if mode == "host":
-            forbidden = [key for key in ("image", "digest", "dockerfile", "context") if item.get(key)]
+            forbidden = [
+                key
+                for key in (
+                    "image",
+                    "digest",
+                    "dockerfile",
+                    "context",
+                    "source_paths",
+                    "build_args",
+                )
+                if item.get(key)
+            ]
             if forbidden:
                 errors.append(f"{prefix} host toolchain cannot define {', '.join(forbidden)}")
             continue
@@ -82,17 +93,38 @@ def validate_toolchain_catalog(data: dict) -> list[str]:
         dockerfile = item.get("dockerfile", "")
         context = item.get("context", "")
         smoke_command = item.get("smoke_command", "")
-        if dockerfile or context or smoke_command:
+        source_paths = item.get("source_paths", [])
+        build_args = item.get("build_args", {})
+        build_fields_present = bool(dockerfile or context or smoke_command or source_paths or build_args)
+        if build_fields_present:
             if not all(isinstance(value, str) for value in (dockerfile, context, smoke_command)):
                 errors.append(f"{prefix}.dockerfile/context/smoke_command must be strings")
             elif not dockerfile or not context or not smoke_command:
-                errors.append(f"{prefix} buildable container toolchain requires dockerfile, context and smoke_command")
+                errors.append(
+                    f"{prefix} buildable container toolchain requires dockerfile, context and smoke_command"
+                )
+            if not isinstance(source_paths, list) or not source_paths or not all(
+                isinstance(value, str) and value for value in source_paths
+            ):
+                errors.append(f"{prefix}.source_paths must be a non-empty string list")
+            if not isinstance(build_args, dict) or not all(
+                isinstance(key, str)
+                and key
+                and isinstance(value, str)
+                and value
+                for key, value in build_args.items()
+            ):
+                errors.append(f"{prefix}.build_args must be a string-to-string object")
 
     return errors
 
 
 def index_toolchains(data: dict) -> dict[str, dict]:
-    return {item["id"]: item for item in data.get("toolchains", []) if isinstance(item, dict) and item.get("id")}
+    return {
+        item["id"]: item
+        for item in data.get("toolchains", [])
+        if isinstance(item, dict) and item.get("id")
+    }
 
 
 def immutable_reference(item: dict) -> str:
@@ -105,7 +137,7 @@ def immutable_reference(item: dict) -> str:
     return f"{image}@{digest}"
 
 
-def build_publish_matrix(data: dict) -> dict:
+def build_publish_matrix(data: dict, toolchain_names: set[str] | None = None) -> dict:
     include: list[dict] = []
     for item in data.get("toolchains", []):
         if not isinstance(item, dict):
@@ -114,6 +146,9 @@ def build_publish_matrix(data: dict) -> dict:
             continue
         if item.get("status") not in {"candidate", "active"}:
             continue
+        if toolchain_names is not None and item.get("id") not in toolchain_names:
+            continue
+        build_args = item.get("build_args", {})
         include.append(
             {
                 "toolchain": item["id"],
@@ -122,6 +157,8 @@ def build_publish_matrix(data: dict) -> dict:
                 "context": item["context"],
                 "smoke_command": item["smoke_command"],
                 "platform": item.get("platforms", ["linux/amd64"])[0],
+                "build_args_json": json.dumps(build_args, separators=(",", ":")),
+                "build_args": "\n".join(f"{key}={value}" for key, value in build_args.items()),
             }
         )
     return {"include": include}
@@ -131,6 +168,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", default="ci/toolchains.json")
     parser.add_argument("--matrix", action="store_true")
+    parser.add_argument("--toolchains-json")
     args = parser.parse_args()
 
     try:
@@ -149,7 +187,14 @@ def main() -> int:
         print(f"OK: {len(data['toolchains'])} toolchain definitions validated")
         return 0
 
-    matrix = build_publish_matrix(data)
+    selected: set[str] | None = None
+    if args.toolchains_json is not None:
+        raw = json.loads(args.toolchains_json)
+        if not isinstance(raw, list) or not all(isinstance(name, str) for name in raw):
+            raise SystemExit("--toolchains-json must be a JSON array of toolchain IDs")
+        selected = set(raw)
+
+    matrix = build_publish_matrix(data, selected)
     encoded = json.dumps(matrix, separators=(",", ":"))
     print(encoded)
     output = os.environ.get("GITHUB_OUTPUT")
