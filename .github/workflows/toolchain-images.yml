@@ -96,9 +96,41 @@ jobs:
           echo "Dockerfile SHA256: $(sha256sum "$DOCKERFILE" | awk '{print $1}')"
           docker image inspect "ci-toolchain-verify:$GITHUB_SHA" --format 'Local image ID: {{.Id}}'
 
+  gate:
+    name: Toolchain gate
+    needs: [discover, verify]
+    if: always()
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enforce aggregate verification result
+        shell: bash
+        env:
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          MATRIX_COUNT: ${{ needs.discover.outputs.count }}
+        run: |
+          set -euo pipefail
+          if [[ "$DISCOVER_RESULT" != "success" ]]; then
+            echo "Toolchain discovery failed: $DISCOVER_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$MATRIX_COUNT" == "0" ]]; then
+            if [[ "$VERIFY_RESULT" != "skipped" && "$VERIFY_RESULT" != "success" ]]; then
+              echo "Zero-toolchain verification should be skipped/success, got: $VERIFY_RESULT" >&2
+              exit 1
+            fi
+          elif [[ "$VERIFY_RESULT" != "success" ]]; then
+            echo "One or more toolchain verification jobs failed: $VERIFY_RESULT" >&2
+            exit 1
+          fi
+          echo "Toolchain gate passed: matrix_count=$MATRIX_COUNT verify_result=$VERIFY_RESULT"
+
   publish:
     name: Publish / ${{ matrix.toolchain }}
-    needs: [discover, verify]
+    needs: [discover, gate]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.count != '0'
     permissions:
       contents: read
