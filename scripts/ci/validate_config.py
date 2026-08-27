@@ -49,6 +49,12 @@ def validate_catalog(data: dict) -> list[str]:
         if not isinstance(project.get("path"), str) or not project.get("path"):
             errors.append(f"{prefix}.path must be a non-empty string")
 
+        impact_paths = project.get("impact_paths", [])
+        if not isinstance(impact_paths, list) or not all(
+            isinstance(item, str) and item for item in impact_paths
+        ):
+            errors.append(f"{prefix}.impact_paths must be a string list")
+
         depends_on = project.get("depends_on", [])
         if not isinstance(depends_on, list) or not all(isinstance(x, str) for x in depends_on):
             errors.append(f"{prefix}.depends_on must be a list of project names")
@@ -103,6 +109,9 @@ def validate_catalog(data: dict) -> list[str]:
             test_command = target.get("test_command", "")
             if not isinstance(test_command, str):
                 errors.append(f"{tprefix}.test_command must be a string")
+            fast_test_command = target.get("fast_test_command", test_command)
+            if not isinstance(fast_test_command, str):
+                errors.append(f"{tprefix}.fast_test_command must be a string")
             artifacts = target.get("artifact_paths")
             if not isinstance(artifacts, list) or not artifacts or not all(isinstance(x, str) and x for x in artifacts):
                 errors.append(f"{tprefix}.artifact_paths must be a non-empty string list")
