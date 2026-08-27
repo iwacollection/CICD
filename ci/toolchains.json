@@ -21,7 +21,14 @@
       "image": "ghcr.io/iwacollection/cicd-toolchain-gcc-host",
       "digest": "sha256:3caf311bd69a8faf218417ec729acdcfb0cd6f164a0fe55a6c041ac20e4fe012",
       "dockerfile": "docker/toolchains/gcc-host/Dockerfile",
-      "context": ".",
+      "context": "docker/toolchains/gcc-host",
+      "source_paths": [
+        "docker/toolchains/gcc-host/**"
+      ],
+      "build_args": {
+        "BASE_IMAGE": "ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517",
+        "UBUNTU_SNAPSHOT": "20260810T000000Z"
+      },
       "platforms": [
         "linux/amd64"
       ],
