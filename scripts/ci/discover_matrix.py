@@ -30,6 +30,7 @@ def build_matrix(data: dict, project_filter: str | None = None) -> dict:
                     "toolchain": target["toolchain"],
                     "runner_labels": json.dumps(target["runner_labels"], separators=(",", ":")),
                     "build_command": target["build_command"],
+                    "test_command": target.get("test_command", ""),
                     "artifact_paths": json.dumps(target["artifact_paths"], separators=(",", ":")),
                     "cache_paths": "\n".join(target.get("cache_paths", [])),
                     "cache_key_files": "\n".join(target.get("cache_key_files", [])),
