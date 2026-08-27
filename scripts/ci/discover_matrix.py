@@ -58,7 +58,7 @@ def main() -> int:
     parser.add_argument("--catalog", default="ci/projects.json")
     parser.add_argument("--project")
     parser.add_argument("--projects-json")
-    parser.add_argument("--lane", choices=("fast", "full"), default="full")
+    parser.add_argument("--lane", choices=("fast", "full", "none"), default="full")
     args = parser.parse_args()
 
     data = load_catalog(Path(args.catalog))
