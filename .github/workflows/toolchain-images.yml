@@ -2,11 +2,6 @@ name: Toolchain Supply Chain
 
 on:
   pull_request:
-    paths:
-      - "ci/toolchains.json"
-      - "docker/toolchains/**"
-      - "scripts/ci/toolchain_catalog.py"
-      - ".github/workflows/toolchain-images.yml"
   push:
     branches: [main]
     paths:
@@ -31,16 +26,54 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       count: ${{ steps.matrix.outputs.count }}
+      relevant: ${{ steps.scope.outputs.relevant }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Validate toolchain catalog
         run: python3 scripts/ci/toolchain_catalog.py
 
+      - name: Detect toolchain-supply-chain change
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          relevant=true
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            relevant=false
+            while IFS= read -r path; do
+              case "$path" in
+                ci/toolchains.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|.github/workflows/toolchain-images.yml)
+                  relevant=true
+                  break
+                  ;;
+              esac
+            done < <(git diff --name-only "$PR_BASE_SHA" "$PR_HEAD_SHA" --)
+          fi
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
+          echo "Toolchain verification relevant: $relevant"
+
       - name: Discover buildable toolchains
         id: matrix
-        run: python3 scripts/ci/toolchain_catalog.py --matrix
+        shell: bash
+        env:
+          RELEVANT: ${{ steps.scope.outputs.relevant }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEVANT" == "true" ]]; then
+            python3 scripts/ci/toolchain_catalog.py --matrix
+          else
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo 'count=0' >> "$GITHUB_OUTPUT"
+            echo '{"include":[]}'
+          fi
 
   verify:
     name: Verify / ${{ matrix.toolchain }}
@@ -111,6 +144,7 @@ jobs:
           DISCOVER_RESULT: ${{ needs.discover.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
           MATRIX_COUNT: ${{ needs.discover.outputs.count }}
+          RELEVANT: ${{ needs.discover.outputs.relevant }}
         run: |
           set -euo pipefail
           if [[ "$DISCOVER_RESULT" != "success" ]]; then
@@ -126,7 +160,7 @@ jobs:
             echo "One or more toolchain verification jobs failed: $VERIFY_RESULT" >&2
             exit 1
           fi
-          echo "Toolchain gate passed: matrix_count=$MATRIX_COUNT verify_result=$VERIFY_RESULT"
+          echo "Toolchain gate passed: relevant=$RELEVANT matrix_count=$MATRIX_COUNT verify_result=$VERIFY_RESULT"
 
   publish:
     name: Publish / ${{ matrix.toolchain }}
