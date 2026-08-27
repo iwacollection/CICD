@@ -10,7 +10,7 @@ from pathlib import Path
 ALLOWED_SOCS = {"generic", "rk", "qualcomm", "mediatek"}
 ALLOWED_OSES = {"linux", "android"}
 ALLOWED_ARCHES = {"x86_64", "arm64", "armhf"}
-ALLOWED_EXECUTION_MODES = {"host", "container"}
+PROJECT_FORBIDDEN_TOOLCHAIN_FIELDS = {"execution_mode", "container_image", "container_dockerfile"}
 
 
 def load_catalog(path: Path) -> dict:
@@ -23,7 +23,20 @@ def load_catalog(path: Path) -> dict:
     return data
 
 
-def validate_catalog(data: dict) -> list[str]:
+def _toolchain_index(toolchain_data: dict | None) -> dict[str, dict]:
+    if not toolchain_data:
+        return {}
+    items = toolchain_data.get("toolchains", [])
+    if not isinstance(items, list):
+        return {}
+    return {
+        item["id"]: item
+        for item in items
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("id")
+    }
+
+
+def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str]:
     errors: list[str] = []
     if data.get("schema_version") != 1:
         errors.append("schema_version must be 1")
@@ -32,6 +45,7 @@ def validate_catalog(data: dict) -> list[str]:
     if not isinstance(projects, list) or not projects:
         return errors + ["projects must be a non-empty list"]
 
+    toolchains = _toolchain_index(toolchain_data)
     names: set[str] = set()
     for pidx, project in enumerate(projects):
         prefix = f"projects[{pidx}]"
@@ -87,22 +101,25 @@ def validate_catalog(data: dict) -> list[str]:
                 errors.append(f"{tprefix} duplicates target {key}")
             seen_targets.add(key)
 
+            forbidden = sorted(field for field in PROJECT_FORBIDDEN_TOOLCHAIN_FIELDS if field in target)
+            if forbidden:
+                errors.append(
+                    f"{tprefix} cannot define {', '.join(forbidden)}; toolchain execution and image ownership belong to ci/toolchains.json"
+                )
+
             runner_labels = target.get("runner_labels")
             if not isinstance(runner_labels, list) or not runner_labels or not all(isinstance(x, str) and x for x in runner_labels):
                 errors.append(f"{tprefix}.runner_labels must be a non-empty string list")
 
-            execution_mode = target.get("execution_mode", "host")
-            if execution_mode not in ALLOWED_EXECUTION_MODES:
-                errors.append(f"{tprefix}.execution_mode must be one of {sorted(ALLOWED_EXECUTION_MODES)}")
-            if execution_mode == "container":
-                image = target.get("container_image", "")
-                dockerfile = target.get("container_dockerfile", "")
-                if not isinstance(image, str) or not isinstance(dockerfile, str):
-                    errors.append(f"{tprefix}.container_image/container_dockerfile must be strings")
-                elif not image and not dockerfile:
-                    errors.append(f"{tprefix} container mode requires container_image or container_dockerfile")
-                elif image and dockerfile:
-                    errors.append(f"{tprefix} choose container_image or container_dockerfile, not both")
+            if toolchains and isinstance(toolchain, str):
+                definition = toolchains.get(toolchain)
+                if not definition:
+                    errors.append(f"{tprefix}.toolchain references unknown toolchain {toolchain}")
+                elif project.get("enabled", True) and target.get("enabled", True):
+                    if definition.get("status") != "active":
+                        errors.append(
+                            f"{tprefix}.toolchain {toolchain} must be active before an enabled target can consume it"
+                        )
 
             if not isinstance(target.get("build_command"), str) or not target.get("build_command"):
                 errors.append(f"{tprefix}.build_command must be a non-empty string")
@@ -127,10 +144,12 @@ def validate_catalog(data: dict) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("catalog", nargs="?", default="ci/projects.json")
+    parser.add_argument("--toolchains", default="ci/toolchains.json")
     args = parser.parse_args()
     try:
         data = load_catalog(Path(args.catalog))
-        errors = validate_catalog(data)
+        toolchain_data = load_catalog(Path(args.toolchains))
+        errors = validate_catalog(data, toolchain_data)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -138,7 +157,7 @@ def main() -> int:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    print(f"OK: {len(data['projects'])} project definitions validated")
+    print(f"OK: {len(data['projects'])} project definitions validated against central toolchains")
     return 0
 
 
