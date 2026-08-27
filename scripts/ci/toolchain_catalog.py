@@ -149,6 +149,7 @@ def build_publish_matrix(data: dict, toolchain_names: set[str] | None = None) ->
         if toolchain_names is not None and item.get("id") not in toolchain_names:
             continue
         build_args = item.get("build_args", {})
+        source_paths = item.get("source_paths", [])
         include.append(
             {
                 "toolchain": item["id"],
@@ -159,6 +160,7 @@ def build_publish_matrix(data: dict, toolchain_names: set[str] | None = None) ->
                 "platform": item.get("platforms", ["linux/amd64"])[0],
                 "build_args_json": json.dumps(build_args, separators=(",", ":")),
                 "build_args": "\n".join(f"{key}={value}" for key, value in build_args.items()),
+                "source_paths_json": json.dumps(source_paths, separators=(",", ":")),
             }
         )
     return {"include": include}
