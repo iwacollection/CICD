@@ -95,12 +95,16 @@ jobs:
         with:
           path: source
 
-      - name: Checkout CI platform
+      - name: Checkout CI platform scripts only
         uses: actions/checkout@v4
         with:
           repository: iwacollection/CICD
           ref: ${{ inputs.platform_ref }}
           path: .ci-platform
+          fetch-depth: 1
+          sparse-checkout: |
+            scripts/ci
+          sparse-checkout-cone-mode: true
 
       - name: Login private toolchain registry
         if: inputs.container_image != '' && inputs.container_registry != ''
@@ -196,6 +200,7 @@ jobs:
             ${{ steps.package.outputs.checksum }}
           if-no-files-found: error
           retention-days: 14
+          compression-level: 0
 
       - name: Summary
         run: |
