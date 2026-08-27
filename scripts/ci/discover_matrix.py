@@ -59,7 +59,9 @@ def build_matrix(
                     "test_command": test_command,
                     "artifact_paths": json.dumps(target["artifact_paths"], separators=(",", ":")),
                     "cache_paths": "\n".join(target.get("cache_paths", [])),
-                    "cache_key_files": "\n".join(target.get("cache_key_files", [])),
+                    "cache_key_files": json.dumps(
+                        target.get("cache_key_files", []), separators=(",", ":")
+                    ),
                     "lane": lane,
                 }
             )

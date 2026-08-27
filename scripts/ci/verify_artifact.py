@@ -16,10 +16,34 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def validate_manifest_identity(
+    manifest: dict,
+    *,
+    source_sha: str = "",
+    run_id: str = "",
+    repository: str = "",
+) -> list[str]:
+    errors: list[str] = []
+    expectations = {
+        "source_sha": source_sha,
+        "workflow_run_id": run_id,
+        "source_repository": repository,
+    }
+    for field, expected in expectations.items():
+        if expected and str(manifest.get(field, "")) != expected:
+            errors.append(
+                f"manifest {field} mismatch: expected={expected} actual={manifest.get(field, '')}"
+            )
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", required=True)
     parser.add_argument("--expected-sha256", default="")
+    parser.add_argument("--expected-source-sha", default="")
+    parser.add_argument("--expected-run-id", default="")
+    parser.add_argument("--expected-repository", default="")
     args = parser.parse_args()
 
     directory = Path(args.directory).resolve()
@@ -29,6 +53,14 @@ def main() -> int:
 
     manifest_path = manifests[0]
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    identity_errors = validate_manifest_identity(
+        manifest,
+        source_sha=args.expected_source_sha,
+        run_id=args.expected_run_id,
+        repository=args.expected_repository,
+    )
+    if identity_errors:
+        raise SystemExit("\n".join(identity_errors))
     bundle_name = manifest["bundle"]["file"]
     expected = manifest["bundle"]["sha256"]
     bundle_candidates = list(directory.rglob(bundle_name))

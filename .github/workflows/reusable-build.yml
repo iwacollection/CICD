@@ -45,7 +45,7 @@ on:
         required: true
         type: string
       container_image:
-        description: "Optional immutable build image, preferably registry/repo@sha256:digest"
+        description: "Optional build image; when set it must use registry/repo@sha256:digest"
         required: false
         default: ""
         type: string
@@ -69,10 +69,14 @@ on:
         required: false
         default: "v1"
         type: string
-      platform_ref:
-        description: "CICD platform ref; production callers should pin a release tag or commit"
+      cache_key_files_json:
+        description: "JSON cache inputs relative to working_directory; required with cache_paths"
         required: false
-        default: "main"
+        default: "[]"
+        type: string
+      platform_ref:
+        description: "Exact 40-character CICD platform commit SHA"
+        required: true
         type: string
     secrets:
       container_registry_username:
@@ -87,24 +91,49 @@ permissions:
 jobs:
   build:
     name: ${{ inputs.project_name }} / ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}
-    runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(inputs.runner_labels_json) }}
     timeout-minutes: 120
     steps:
       - name: Checkout caller source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: source
+          persist-credentials: false
+
+      - name: Require immutable CI platform revision
+        shell: bash
+        env:
+          CI_PLATFORM_REF: ${{ inputs.platform_ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CI_PLATFORM_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "platform_ref must be an exact 40-character commit SHA" >&2
+            exit 1
+          fi
 
       - name: Checkout CI platform scripts only
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: iwacollection/CICD
           ref: ${{ inputs.platform_ref }}
           path: .ci-platform
           fetch-depth: 1
+          persist-credentials: false
           sparse-checkout: |
             scripts/ci
           sparse-checkout-cone-mode: true
+
+      - name: Require immutable toolchain image
+        if: inputs.container_image != ''
+        shell: bash
+        env:
+          CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CI_CONTAINER_IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
+            echo "container_image must be pinned by an immutable sha256 digest" >&2
+            exit 1
+          fi
 
       - name: Login private toolchain registry
         if: inputs.container_image != '' && inputs.container_registry != ''
@@ -134,14 +163,25 @@ jobs:
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
           echo "Using toolchain container: $identity"
 
+      - name: Compute declared cache fingerprint
+        if: inputs.cache_paths != ''
+        id: cache
+        shell: bash
+        env:
+          CI_CACHE_KEY_FILES: ${{ inputs.cache_key_files_json }}
+        run: >-
+          python3 .ci-platform/scripts/ci/cache_fingerprint.py
+          --working-directory "source/${{ inputs.working_directory }}"
+          --patterns-json "$CI_CACHE_KEY_FILES"
+
       - name: Restore build cache
         if: inputs.cache_paths != ''
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ inputs.cache_paths }}
-          key: reusable-ci-v2-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-${{ hashFiles('source/**/deps.lock', 'source/**/toolchain.lock', 'source/**/package-lock.json', 'source/**/pnpm-lock.yaml', 'source/**/go.sum', 'source/**/poetry.lock', 'source/**/uv.lock', 'source/**/Cargo.lock', 'source/**/CMakeLists.txt') }}
+          key: reusable-ci-v3-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-${{ steps.cache.outputs.fingerprint }}
           restore-keys: |
-            reusable-ci-v2-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-
+            reusable-ci-v3-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-
 
       - name: Build
         shell: bash
@@ -191,7 +231,7 @@ jobs:
           --expected-sha256 "${{ steps.package.outputs.digest }}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ steps.package.outputs.artifact_name }}
           path: |

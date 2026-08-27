@@ -27,6 +27,7 @@ on:
 
 permissions:
   actions: read
+  attestations: read
   contents: read
 
 concurrency:
@@ -36,15 +37,34 @@ concurrency:
 jobs:
   promote:
     name: Promote to ${{ inputs.target_environment }}
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: ${{ inputs.target_environment }}
     steps:
       - name: Checkout platform verifier
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate inputs and source workflow run
+        id: source
+        shell: bash
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/ci/validate_promotion_source.py
+          --run-id "$SOURCE_RUN_ID"
+          --artifact-name "$ARTIFACT_NAME"
+          --expected-sha256 "$EXPECTED_SHA256"
+          --repository "$GITHUB_REPOSITORY"
 
       - name: Download exact existing artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ${{ inputs.artifact_name }}
           path: incoming
@@ -53,13 +73,34 @@ jobs:
           repository: ${{ github.repository }}
 
       - name: Verify digest and manifest
+        shell: bash
+        env:
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
         run: >-
           python3 scripts/ci/verify_artifact.py
           --directory incoming
-          --expected-sha256 "${{ inputs.expected_sha256 }}"
+          --expected-sha256 "$EXPECTED_SHA256"
+          --expected-source-sha "$SOURCE_SHA"
+          --expected-run-id "$SOURCE_RUN_ID"
+          --expected-repository "$GITHUB_REPOSITORY"
+
+      - name: Verify GitHub build provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' bundles < <(find incoming -type f -name '*.tar.gz' -print0)
+          if [[ "${#bundles[@]}" -ne 1 ]]; then
+            echo "Expected exactly one bundle for provenance verification, found ${#bundles[@]}" >&2
+            exit 1
+          fi
+          gh attestation verify "${bundles[0]}" --repo "$GITHUB_REPOSITORY"
 
       - name: Re-publish same bytes as promoted record
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: promoted-${{ inputs.target_environment }}-${{ inputs.artifact_name }}
           path: incoming/**
@@ -68,12 +109,17 @@ jobs:
           compression-level: 0
 
       - name: Promotion summary
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
         run: |
           {
             echo "### Artifact promotion"
-            echo "- Source run: ${{ inputs.source_run_id }}"
-            echo "- Artifact: ${{ inputs.artifact_name }}"
-            echo "- Target: ${{ inputs.target_environment }}"
-            echo "- Verified SHA256: ${{ inputs.expected_sha256 }}"
+            echo "- Source run: $SOURCE_RUN_ID"
+            echo "- Artifact: $ARTIFACT_NAME"
+            echo "- Target: $TARGET_ENVIRONMENT"
+            echo "- Verified SHA256: $EXPECTED_SHA256"
             echo "- Rebuild: NO"
           } >> "$GITHUB_STEP_SUMMARY"

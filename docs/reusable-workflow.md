@@ -16,8 +16,9 @@ on:
 
 jobs:
   build:
-    uses: iwacollection/CICD/.github/workflows/reusable-build.yml@main
+    uses: iwacollection/CICD/.github/workflows/reusable-build.yml@<CICD_FULL_COMMIT_SHA>
     with:
+      platform_ref: <CICD_FULL_COMMIT_SHA>
       project_name: my-cpp-service
       working_directory: .
       build_command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel 4
@@ -30,35 +31,22 @@ jobs:
       runner_labels_json: '["ubuntu-latest"]'
 ```
 
-## 2. 生产不要长期引用 `@main`
-
-学习阶段可以先用：
-
-```text
-@main
-```
-
-生产应该使用：
-
-```text
-@v1
-```
-
-或者更严格：
+## 2. 调用版本必须固定完整 Commit SHA
 
 ```text
 @<full commit sha>
 ```
 
-这样中央 CI 平台升级不会在没有审批的情况下突然改变所有业务项目。
+`uses` 后的 SHA 与 `platform_ref` 必须填写同一个经过审核的 40 位提交。前者固定 Reusable Workflow，后者固定它检出的中央脚本；不再允许脚本悄悄跟随 `main` 漂移。
 
 ## 3. RK 项目示例
 
 ```yaml
 jobs:
   rk-build:
-    uses: iwacollection/CICD/.github/workflows/reusable-build.yml@v1
+    uses: iwacollection/CICD/.github/workflows/reusable-build.yml@<CICD_FULL_COMMIT_SHA>
     with:
+      platform_ref: <CICD_FULL_COMMIT_SHA>
       project_name: camera-firmware
       working_directory: .
       build_command: ./ci/build.sh rk linux arm64
@@ -69,6 +57,7 @@ jobs:
       arch: arm64
       toolchain: rk-sdk-2026.08
       runner_labels_json: '["self-hosted","linux","arm64","soc-rk"]'
+      cache_key_files_json: '["deps.lock","toolchain.lock"]'
       cache_paths: |
         source/.cache/ccache
         source/.cache/vendor
@@ -161,3 +150,5 @@ CICD main
 ```
 
 不要修改 `main` 后让所有生产仓库在下一秒同时自动吃到新逻辑。
+
+无论业务仓库声明什么 Runner，`pull_request` 事件都会固定落到 GitHub Hosted Runner；Self-hosted SoC Runner 只处理合并后的受信代码。

@@ -42,6 +42,8 @@ ssh ...
 
 如果必须 PR 阶段使用 Self-hosted Runner，应配合审批、只读凭据、网络隔离和短生命周期 Runner。
 
+本仓库当前执行边界是：PR 的 Build Matrix 与 Reusable Build 均强制使用 GitHub Hosted Runner，并且 PR Build Job 不拥有 OIDC/Attestation 写权限；目录中的 Self-hosted 标签只在受信任的 main/手工执行中生效。仓库或组织侧仍应保持“公共仓库不可访问 Self-hosted Runner Group”的默认限制。
+
 ## 3. Runner 最好是短生命周期
 
 优先级：

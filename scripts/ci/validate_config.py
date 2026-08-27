@@ -133,6 +133,21 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
             if not isinstance(artifacts, list) or not artifacts or not all(isinstance(x, str) and x for x in artifacts):
                 errors.append(f"{tprefix}.artifact_paths must be a non-empty string list")
 
+            cache_paths = target.get("cache_paths", [])
+            if not isinstance(cache_paths, list) or not all(
+                isinstance(item, str) and item for item in cache_paths
+            ):
+                errors.append(f"{tprefix}.cache_paths must be a string list")
+                cache_paths = []
+            cache_key_files = target.get("cache_key_files", [])
+            if not isinstance(cache_key_files, list) or not all(
+                isinstance(item, str) and item for item in cache_key_files
+            ):
+                errors.append(f"{tprefix}.cache_key_files must be a string list")
+                cache_key_files = []
+            if cache_paths and not cache_key_files:
+                errors.append(f"{tprefix}.cache_key_files is required when cache_paths is configured")
+
     for project in projects:
         if isinstance(project, dict):
             for dep in project.get("depends_on", []):
