@@ -1,0 +1,109 @@
+name: Build Matrix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "examples/**"
+      - "ci/**"
+      - "scripts/ci/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "examples/**"
+      - "ci/**"
+      - "scripts/ci/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    name: Discover build matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      count: ${{ steps.matrix.outputs.count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate catalog
+        run: python3 scripts/ci/validate_config.py
+
+      - name: Build matrix
+        id: matrix
+        run: python3 scripts/ci/discover_matrix.py
+
+  build:
+    name: ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    runs-on: ${{ fromJSON(matrix.runner_labels) }}
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore build cache
+        if: matrix.cache_paths != ''
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.cache_paths }}
+          key: ci-v1-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-${{ hashFiles('**/CMakeLists.txt', '**/deps.lock', '**/toolchain.lock', '**/package-lock.json', '**/go.sum', '**/poetry.lock', '**/requirements*.txt') }}
+          restore-keys: |
+            ci-v1-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-
+
+      - name: Build
+        env:
+          CI_BUILD_COMMAND: ${{ matrix.build_command }}
+        run: python3 scripts/ci/run_build.py --working-directory "${{ matrix.path }}" --command "$CI_BUILD_COMMAND"
+
+      - name: Package immutable artifact
+        id: package
+        env:
+          CI_ARTIFACT_PATHS: ${{ matrix.artifact_paths }}
+        run: >-
+          python3 scripts/ci/package_artifact.py
+          --project "${{ matrix.project }}"
+          --working-directory "${{ matrix.path }}"
+          --artifacts-json "$CI_ARTIFACT_PATHS"
+          --soc "${{ matrix.soc }}"
+          --target-os "${{ matrix.target_os }}"
+          --arch "${{ matrix.arch }}"
+          --toolchain "${{ matrix.toolchain }}"
+
+      - name: Verify packaged artifact
+        run: python3 scripts/ci/verify_artifact.py --directory dist --expected-sha256 "${{ steps.package.outputs.digest }}"
+
+      - name: Upload immutable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: |
+            ${{ steps.package.outputs.bundle }}
+            ${{ steps.package.outputs.manifest }}
+            ${{ steps.package.outputs.checksum }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build summary
+        run: |
+          {
+            echo "### Build complete"
+            echo "- Project: ${{ matrix.project }}"
+            echo "- Target: ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}"
+            echo "- Toolchain: ${{ matrix.toolchain }}"
+            echo "- SHA256: ${{ steps.package.outputs.digest }}"
+            echo "- Artifact: ${{ steps.package.outputs.artifact_name }}"
+          } >> "$GITHUB_STEP_SUMMARY"
