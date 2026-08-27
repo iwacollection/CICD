@@ -1,0 +1,155 @@
+name: Reusable Build
+
+on:
+  workflow_call:
+    inputs:
+      project_name:
+        description: "Logical project name"
+        required: true
+        type: string
+      working_directory:
+        description: "Project directory inside the caller repository"
+        required: false
+        default: "."
+        type: string
+      build_command:
+        description: "Trusted non-interactive build command"
+        required: true
+        type: string
+      test_command:
+        description: "Optional trusted test command"
+        required: false
+        default: ""
+        type: string
+      artifact_paths_json:
+        description: "JSON array of artifact globs relative to working_directory"
+        required: true
+        type: string
+      soc:
+        description: "generic/rk/qualcomm/mediatek"
+        required: false
+        default: "generic"
+        type: string
+      target_os:
+        description: "linux/android"
+        required: false
+        default: "linux"
+        type: string
+      arch:
+        description: "x86_64/arm64/armhf"
+        required: false
+        default: "x86_64"
+        type: string
+      toolchain:
+        description: "Immutable logical toolchain version"
+        required: true
+        type: string
+      runner_labels_json:
+        description: "JSON runner label array, e.g. [\"ubuntu-latest\"]"
+        required: false
+        default: '["ubuntu-latest"]'
+        type: string
+      cache_paths:
+        description: "Optional multiline cache paths relative to workspace"
+        required: false
+        default: ""
+        type: string
+      cache_key_extra:
+        description: "Extra cache invalidation token"
+        required: false
+        default: "v1"
+        type: string
+      platform_ref:
+        description: "CICD platform ref; production callers should pin a release tag or commit"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ inputs.project_name }} / ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}
+    runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
+    timeout-minutes: 120
+    steps:
+      - name: Checkout caller source
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Checkout CI platform
+        uses: actions/checkout@v4
+        with:
+          repository: iwacollection/CICD
+          ref: ${{ inputs.platform_ref }}
+          path: .ci-platform
+
+      - name: Restore build cache
+        if: inputs.cache_paths != ''
+        uses: actions/cache@v4
+        with:
+          path: ${{ inputs.cache_paths }}
+          key: reusable-ci-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-${{ hashFiles('source/**/deps.lock', 'source/**/toolchain.lock', 'source/**/package-lock.json', 'source/**/pnpm-lock.yaml', 'source/**/go.sum', 'source/**/poetry.lock', 'source/**/uv.lock', 'source/**/Cargo.lock', 'source/**/CMakeLists.txt') }}
+          restore-keys: |
+            reusable-ci-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-
+
+      - name: Build
+        env:
+          CI_BUILD_COMMAND: ${{ inputs.build_command }}
+        run: >-
+          python3 .ci-platform/scripts/ci/run_build.py
+          --working-directory "source/${{ inputs.working_directory }}"
+          --command "$CI_BUILD_COMMAND"
+
+      - name: Test
+        if: inputs.test_command != ''
+        env:
+          CI_TEST_COMMAND: ${{ inputs.test_command }}
+        run: >-
+          python3 .ci-platform/scripts/ci/run_build.py
+          --working-directory "source/${{ inputs.working_directory }}"
+          --command "$CI_TEST_COMMAND"
+
+      - name: Package immutable artifact
+        id: package
+        env:
+          CI_ARTIFACT_PATHS: ${{ inputs.artifact_paths_json }}
+        run: >-
+          python3 .ci-platform/scripts/ci/package_artifact.py
+          --project "${{ inputs.project_name }}"
+          --working-directory "source/${{ inputs.working_directory }}"
+          --artifacts-json "$CI_ARTIFACT_PATHS"
+          --soc "${{ inputs.soc }}"
+          --target-os "${{ inputs.target_os }}"
+          --arch "${{ inputs.arch }}"
+          --toolchain "${{ inputs.toolchain }}"
+
+      - name: Verify artifact
+        run: >-
+          python3 .ci-platform/scripts/ci/verify_artifact.py
+          --directory dist
+          --expected-sha256 "${{ steps.package.outputs.digest }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: |
+            ${{ steps.package.outputs.bundle }}
+            ${{ steps.package.outputs.manifest }}
+            ${{ steps.package.outputs.checksum }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summary
+        run: |
+          {
+            echo "### Reusable CI build complete"
+            echo "- Project: ${{ inputs.project_name }}"
+            echo "- Target: ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}"
+            echo "- Toolchain: ${{ inputs.toolchain }}"
+            echo "- SHA256: ${{ steps.package.outputs.digest }}"
+            echo "- Rebuild-on-promotion: NO"
+          } >> "$GITHUB_STEP_SUMMARY"
