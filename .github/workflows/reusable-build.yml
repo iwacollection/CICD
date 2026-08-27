@@ -21,6 +21,11 @@ on:
         required: false
         default: ""
         type: string
+      pr_validation_command:
+        description: "Optional hosted-safe validation command for self-hosted targets on pull requests"
+        required: false
+        default: ""
+        type: string
       artifact_paths_json:
         description: "JSON array of artifact globs relative to working_directory"
         required: true
@@ -86,7 +91,6 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 jobs:
   build:
@@ -135,8 +139,49 @@ jobs:
             exit 1
           fi
 
+      - name: Select safe execution lane
+        id: lane
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUNNER_LABELS_JSON: ${{ inputs.runner_labels_json }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+
+          labels = json.loads(os.environ["RUNNER_LABELS_JSON"])
+          if not isinstance(labels, list) or not labels or not all(
+              isinstance(label, str) and label for label in labels
+          ):
+              raise SystemExit("runner_labels_json must be a non-empty JSON string array")
+          hardware_pr = (
+              os.environ["EVENT_NAME"] == "pull_request" and "self-hosted" in labels
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"hardware_pr={str(hardware_pr).lower()}\n")
+          PY
+
+      - name: Hosted PR validation lane
+        if: steps.lane.outputs.hardware_pr == 'true'
+        shell: bash
+        env:
+          CI_PR_VALIDATION_COMMAND: ${{ inputs.pr_validation_command }}
+          CI_WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CI_PR_VALIDATION_COMMAND" ]]; then
+            echo "Self-hosted hardware build skipped for untrusted pull-request code."
+            echo "Configure pr_validation_command to run a hosted-safe source validation."
+            exit 0
+          fi
+          python3 .ci-platform/scripts/ci/run_build.py \
+            --working-directory "source/$CI_WORKING_DIRECTORY" \
+            --command "$CI_PR_VALIDATION_COMMAND"
+
       - name: Login private toolchain registry
-        if: inputs.container_image != '' && inputs.container_registry != ''
+        if: steps.lane.outputs.hardware_pr != 'true' && inputs.container_image != '' && inputs.container_registry != ''
         shell: bash
         env:
           CI_REGISTRY: ${{ inputs.container_registry }}
@@ -152,7 +197,7 @@ jobs:
 
       - name: Pull toolchain container
         id: container
-        if: inputs.container_image != ''
+        if: steps.lane.outputs.hardware_pr != 'true' && inputs.container_image != ''
         shell: bash
         env:
           CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
@@ -164,18 +209,19 @@ jobs:
           echo "Using toolchain container: $identity"
 
       - name: Compute declared cache fingerprint
-        if: inputs.cache_paths != ''
+        if: steps.lane.outputs.hardware_pr != 'true' && inputs.cache_paths != ''
         id: cache
         shell: bash
         env:
           CI_CACHE_KEY_FILES: ${{ inputs.cache_key_files_json }}
+          CI_WORKING_DIRECTORY: ${{ inputs.working_directory }}
         run: >-
           python3 .ci-platform/scripts/ci/cache_fingerprint.py
-          --working-directory "source/${{ inputs.working_directory }}"
+          --working-directory "source/$CI_WORKING_DIRECTORY"
           --patterns-json "$CI_CACHE_KEY_FILES"
 
       - name: Restore build cache
-        if: inputs.cache_paths != ''
+        if: steps.lane.outputs.hardware_pr != 'true' && inputs.cache_paths != ''
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ inputs.cache_paths }}
@@ -184,27 +230,30 @@ jobs:
             reusable-ci-v3-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-
 
       - name: Build
+        if: steps.lane.outputs.hardware_pr != 'true'
         shell: bash
         env:
           CI_BUILD_COMMAND: ${{ inputs.build_command }}
           CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+          CI_WORKING_DIRECTORY: ${{ inputs.working_directory }}
         run: |
           set -euo pipefail
-          args=(--working-directory "source/${{ inputs.working_directory }}" --command "$CI_BUILD_COMMAND")
+          args=(--working-directory "source/$CI_WORKING_DIRECTORY" --command "$CI_BUILD_COMMAND")
           if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
             args+=(--container-image "$CI_CONTAINER_IMAGE")
           fi
           python3 .ci-platform/scripts/ci/run_build.py "${args[@]}"
 
       - name: Test
-        if: inputs.test_command != ''
+        if: steps.lane.outputs.hardware_pr != 'true' && inputs.test_command != ''
         shell: bash
         env:
           CI_TEST_COMMAND: ${{ inputs.test_command }}
           CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+          CI_WORKING_DIRECTORY: ${{ inputs.working_directory }}
         run: |
           set -euo pipefail
-          args=(--working-directory "source/${{ inputs.working_directory }}" --command "$CI_TEST_COMMAND")
+          args=(--working-directory "source/$CI_WORKING_DIRECTORY" --command "$CI_TEST_COMMAND")
           if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
             args+=(--container-image "$CI_CONTAINER_IMAGE")
           fi
@@ -212,25 +261,34 @@ jobs:
 
       - name: Package immutable artifact
         id: package
+        if: steps.lane.outputs.hardware_pr != 'true'
         env:
           CI_ARTIFACT_PATHS: ${{ inputs.artifact_paths_json }}
+          CI_PROJECT_NAME: ${{ inputs.project_name }}
+          CI_WORKING_DIRECTORY: ${{ inputs.working_directory }}
+          CI_SOC: ${{ inputs.soc }}
+          CI_TARGET_OS: ${{ inputs.target_os }}
+          CI_ARCH: ${{ inputs.arch }}
+          CI_TOOLCHAIN: ${{ inputs.toolchain }}
         run: >-
           python3 .ci-platform/scripts/ci/package_artifact.py
-          --project "${{ inputs.project_name }}"
-          --working-directory "source/${{ inputs.working_directory }}"
+          --project "$CI_PROJECT_NAME"
+          --working-directory "source/$CI_WORKING_DIRECTORY"
           --artifacts-json "$CI_ARTIFACT_PATHS"
-          --soc "${{ inputs.soc }}"
-          --target-os "${{ inputs.target_os }}"
-          --arch "${{ inputs.arch }}"
-          --toolchain "${{ inputs.toolchain }}"
+          --soc "$CI_SOC"
+          --target-os "$CI_TARGET_OS"
+          --arch "$CI_ARCH"
+          --toolchain "$CI_TOOLCHAIN"
 
       - name: Verify artifact
+        if: steps.lane.outputs.hardware_pr != 'true'
         run: >-
           python3 .ci-platform/scripts/ci/verify_artifact.py
           --directory dist
           --expected-sha256 "${{ steps.package.outputs.digest }}"
 
       - name: Upload artifact
+        if: steps.lane.outputs.hardware_pr != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ steps.package.outputs.artifact_name }}
@@ -243,14 +301,35 @@ jobs:
           compression-level: 0
 
       - name: Summary
+        env:
+          HARDWARE_PR: ${{ steps.lane.outputs.hardware_pr }}
+          PR_VALIDATION_COMMAND: ${{ inputs.pr_validation_command }}
+          PROJECT_NAME: ${{ inputs.project_name }}
+          SOC: ${{ inputs.soc }}
+          TARGET_OS: ${{ inputs.target_os }}
+          ARCH: ${{ inputs.arch }}
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          EXECUTION_MODE: ${{ inputs.container_image != '' && 'container' || 'host' }}
+          CONTAINER_IDENTITY: ${{ steps.container.outputs.identity || 'host execution' }}
+          ARTIFACT_SHA256: ${{ steps.package.outputs.digest }}
         run: |
           {
             echo "### Reusable CI build complete"
-            echo "- Project: ${{ inputs.project_name }}"
-            echo "- Target: ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}"
-            echo "- Toolchain: ${{ inputs.toolchain }}"
-            echo "- Execution: ${{ inputs.container_image != '' && 'container' || 'host' }}"
-            echo "- Container identity: ${{ steps.container.outputs.identity || 'host execution' }}"
-            echo "- SHA256: ${{ steps.package.outputs.digest }}"
-            echo "- Rebuild-on-promotion: NO"
+            echo "- Project: $PROJECT_NAME"
+            echo "- Target: $SOC / $TARGET_OS / $ARCH"
+            echo "- Toolchain: $TOOLCHAIN"
+            if [[ "$HARDWARE_PR" == "true" ]]; then
+              echo "- Execution: hosted pull-request validation lane"
+              if [[ -n "$PR_VALIDATION_COMMAND" ]]; then
+                echo "- Validation: hosted-safe command completed"
+              else
+                echo "- Validation: metadata only; hardware build deferred until trusted main"
+              fi
+              echo "- Artifact: skipped for pull-request hardware lane"
+            else
+              echo "- Execution: $EXECUTION_MODE"
+              echo "- Container identity: $CONTAINER_IDENTITY"
+              echo "- SHA256: $ARTIFACT_SHA256"
+              echo "- Rebuild-on-promotion: NO"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

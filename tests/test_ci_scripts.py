@@ -135,6 +135,14 @@ class CiPlatformTests(unittest.TestCase):
         self.assertNotIn("id-token: write", build_job)
         self.assertNotIn("attestations: write", build_job)
 
+        reusable = (
+            ROOT / ".github" / "workflows" / "reusable-build.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("name: Hosted PR validation lane", reusable)
+        self.assertIn('"self-hosted" in labels', reusable)
+        self.assertIn("if: steps.lane.outputs.hardware_pr != 'true'", reusable)
+        self.assertIn("pr_validation_command", reusable)
+
     def test_promotion_verifies_source_run_and_provenance(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "promote.yml").read_text(
             encoding="utf-8"

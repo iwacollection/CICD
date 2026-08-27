@@ -152,3 +152,10 @@ CICD main
 不要修改 `main` 后让所有生产仓库在下一秒同时自动吃到新逻辑。
 
 无论业务仓库声明什么 Runner，`pull_request` 事件都会固定落到 GitHub Hosted Runner；Self-hosted SoC Runner 只处理合并后的受信代码。
+
+如果目标的 `runner_labels_json` 包含 `self-hosted`，PR 不会在普通 x64 Hosted Runner 上误跑依赖 SDK、许可证或板卡能力的硬件构建：
+
+- 配置了 `pr_validation_command`：在 Hosted Runner 执行这条与硬件无关的源码检查，例如配置、格式、静态分析或单元测试。
+- 未配置 `pr_validation_command`：只校验平台版本、Runner 标签和不可变镜像输入，硬件构建与制品上传延后到合并后的受信 main 构建。
+
+因此，生产业务仓库应尽量提供一条不依赖厂商 SDK/许可证的 `pr_validation_command`，而不是把完整 RK/高通/MTK 编译命令硬塞到 Hosted Runner。

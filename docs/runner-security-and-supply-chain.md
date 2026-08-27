@@ -44,6 +44,8 @@ ssh ...
 
 本仓库当前执行边界是：PR 的 Build Matrix 与 Reusable Build 均强制使用 GitHub Hosted Runner，并且 PR Build Job 不拥有 OIDC/Attestation 写权限；目录中的 Self-hosted 标签只在受信任的 main/手工执行中生效。仓库或组织侧仍应保持“公共仓库不可访问 Self-hosted Runner Group”的默认限制。
 
+Reusable Build 遇到声明了 `self-hosted` 的目标时，会在 PR 上切换为 Hosted Validation Lane：执行可选的 `pr_validation_command`，或仅做输入校验；不会尝试在普通 x64 Runner 上执行依赖 SoC SDK、许可证或板卡的硬件命令。完整硬件构建只在受信代码阶段执行。
+
 ## 3. Runner 最好是短生命周期
 
 优先级：
