@@ -65,6 +65,7 @@ jobs:
           path: incoming/**
           if-no-files-found: error
           retention-days: 90
+          compression-level: 0
 
       - name: Promotion summary
         run: |
