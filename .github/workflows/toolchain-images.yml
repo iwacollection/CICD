@@ -1,98 +1,268 @@
-name: Toolchain Images
+name: Toolchain Supply Chain
 
 on:
+  pull_request:
   push:
     branches: [main]
     paths:
+      - "ci/toolchains.json"
       - "docker/toolchains/**"
-      - ".github/workflows/toolchain-images.yml"
-  pull_request:
-    paths:
-      - "docker/toolchains/**"
+      - "scripts/ci/toolchain_catalog.py"
       - ".github/workflows/toolchain-images.yml"
   workflow_dispatch:
-    inputs:
-      publish:
-        description: "Publish immutable toolchain image to GHCR"
-        required: true
-        type: boolean
-        default: false
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: toolchain-supply-chain-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  gcc-host:
-    name: gcc-host container
+  discover:
+    name: Discover managed toolchains
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      LOCAL_IMAGE: cicd-toolchain-gcc-host:${{ github.sha }}
-      REGISTRY_IMAGE: ghcr.io/${{ github.repository_owner }}/cicd-toolchain-gcc-host
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      count: ${{ steps.matrix.outputs.count }}
+      relevant: ${{ steps.scope.outputs.relevant }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate toolchain catalog
+        run: python3 scripts/ci/toolchain_catalog.py
+
+      - name: Detect toolchain-supply-chain change
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          relevant=true
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            relevant=false
+            while IFS= read -r path; do
+              case "$path" in
+                ci/toolchains.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|.github/workflows/toolchain-images.yml)
+                  relevant=true
+                  break
+                  ;;
+              esac
+            done < <(git diff --name-only "$PR_BASE_SHA" "$PR_HEAD_SHA" --)
+          fi
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
+          echo "Toolchain verification relevant: $relevant"
+
+      - name: Discover buildable toolchains
+        id: matrix
+        shell: bash
+        env:
+          RELEVANT: ${{ steps.scope.outputs.relevant }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEVANT" == "true" ]]; then
+            python3 scripts/ci/toolchain_catalog.py --matrix
+          else
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo 'count=0' >> "$GITHUB_OUTPUT"
+            echo '{"include":[]}'
+          fi
+
+  verify:
+    name: Verify / ${{ matrix.toolchain }}
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build toolchain image
-        run: >-
-          docker build --pull
-          -f docker/toolchains/gcc-host/Dockerfile
-          -t "$LOCAL_IMAGE"
-          .
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Smoke test toolchain
+      - name: Build candidate locally
+        shell: bash
+        env:
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          CONTEXT: ${{ matrix.context }}
+          PLATFORM: ${{ matrix.platform }}
+          TOOLCHAIN: ${{ matrix.toolchain }}
         run: |
           set -euo pipefail
-          docker run --rm "$LOCAL_IMAGE" bash -euo pipefail -c '
-            gcc --version
-            g++ --version
-            cmake --version
-            ccache --version
-            git --version
-          '
+          docker buildx build \
+            --pull \
+            --load \
+            --platform "$PLATFORM" \
+            --cache-from "type=gha,scope=toolchain-$TOOLCHAIN" \
+            --cache-to "type=gha,mode=max,scope=toolchain-$TOOLCHAIN" \
+            -f "$DOCKERFILE" \
+            -t "ci-toolchain-verify:$GITHUB_SHA" \
+            "$CONTEXT"
 
-      - name: Show local image identity
-        id: local
+      - name: Smoke test candidate
+        shell: bash
+        env:
+          SMOKE_COMMAND: ${{ matrix.smoke_command }}
         run: |
           set -euo pipefail
-          identity="$(docker image inspect "$LOCAL_IMAGE" --format '{{.Id}}')"
-          echo "identity=$identity" >> "$GITHUB_OUTPUT"
-          echo "Local image identity: $identity"
+          docker run --rm "ci-toolchain-verify:$GITHUB_SHA" bash -euo pipefail -c "$SMOKE_COMMAND"
+
+      - name: Verify source identity
+        shell: bash
+        env:
+          DOCKERFILE: ${{ matrix.dockerfile }}
+        run: |
+          set -euo pipefail
+          echo "Dockerfile SHA256: $(sha256sum "$DOCKERFILE" | awk '{print $1}')"
+          docker image inspect "ci-toolchain-verify:$GITHUB_SHA" --format 'Local image ID: {{.Id}}'
+
+  gate:
+    name: Toolchain gate
+    needs: [discover, verify]
+    if: always()
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enforce aggregate verification result
+        shell: bash
+        env:
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          MATRIX_COUNT: ${{ needs.discover.outputs.count }}
+          RELEVANT: ${{ needs.discover.outputs.relevant }}
+        run: |
+          set -euo pipefail
+          if [[ "$DISCOVER_RESULT" != "success" ]]; then
+            echo "Toolchain discovery failed: $DISCOVER_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$MATRIX_COUNT" == "0" ]]; then
+            if [[ "$VERIFY_RESULT" != "skipped" && "$VERIFY_RESULT" != "success" ]]; then
+              echo "Zero-toolchain verification should be skipped/success, got: $VERIFY_RESULT" >&2
+              exit 1
+            fi
+          elif [[ "$VERIFY_RESULT" != "success" ]]; then
+            echo "One or more toolchain verification jobs failed: $VERIFY_RESULT" >&2
+            exit 1
+          fi
+          echo "Toolchain gate passed: relevant=$RELEVANT matrix_count=$MATRIX_COUNT verify_result=$VERIFY_RESULT"
+
+  publish:
+    name: Publish / ${{ matrix.toolchain }}
+    needs: [discover, gate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.discover.outputs.count != '0'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Login GHCR
-        if: github.event_name == 'workflow_dispatch' && inputs.publish
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish immutable image
-        id: publish
-        if: github.event_name == 'workflow_dispatch' && inputs.publish
+      - name: Build and push immutable candidate
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          push: true
+          pull: true
+          tags: |
+            ${{ matrix.image }}:sha-${{ github.sha }}
+          cache-from: type=gha,scope=toolchain-${{ matrix.toolchain }}
+          cache-to: type=gha,mode=max,scope=toolchain-${{ matrix.toolchain }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest published image provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ matrix.image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate promotion record
         shell: bash
+        env:
+          TOOLCHAIN: ${{ matrix.toolchain }}
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
-          tag="sha-${GITHUB_SHA}"
-          docker tag "$LOCAL_IMAGE" "$REGISTRY_IMAGE:$tag"
-          output="$(docker push "$REGISTRY_IMAGE:$tag")"
-          printf '%s\n' "$output"
-          digest="$(printf '%s\n' "$output" | awk '/digest:/ {print $3; exit}')"
-          if [[ -z "$digest" ]]; then
-            echo "Unable to determine pushed image digest" >&2
-            exit 1
-          fi
-          echo "reference=$REGISTRY_IMAGE@$digest" >> "$GITHUB_OUTPUT"
+          dockerfile_sha="$(sha256sum "$DOCKERFILE" | awk '{print $1}')"
+          export DOCKERFILE_SHA="$dockerfile_sha"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
 
-      - name: Summary
+          record = {
+              "schema_version": 1,
+              "toolchain": os.environ["TOOLCHAIN"],
+              "image": os.environ["IMAGE"],
+              "digest": os.environ["DIGEST"],
+              "immutable_reference": f"{os.environ['IMAGE']}@{os.environ['DIGEST']}",
+              "source_commit": os.environ["GITHUB_SHA"],
+              "dockerfile": os.environ["DOCKERFILE"],
+              "dockerfile_sha256": os.environ["DOCKERFILE_SHA"],
+              "platform": os.environ["PLATFORM"],
+              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+          }
+          Path(f"promotion-{os.environ['TOOLCHAIN']}.json").write_text(
+              json.dumps(record, indent=2) + "\n", encoding="utf-8"
+          )
+          PY
+          cat "promotion-$TOOLCHAIN.json"
+
+      - name: Upload promotion record
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-promotion-${{ matrix.toolchain }}-${{ github.sha }}
+          path: promotion-${{ matrix.toolchain }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Promotion summary
         run: |
           {
-            echo "### Toolchain image validation"
-            echo "- Local identity: ${{ steps.local.outputs.identity }}"
-            echo "- Publish requested: ${{ github.event_name == 'workflow_dispatch' && inputs.publish || false }}"
-            if [[ -n "${{ steps.publish.outputs.reference }}" ]]; then
-              echo "- Immutable reference: ${{ steps.publish.outputs.reference }}"
-              echo "- Next step: register this digest in ci/toolchains and project catalog"
-            fi
+            echo "### Toolchain candidate published"
+            echo "- Toolchain: ${{ matrix.toolchain }}"
+            echo "- Immutable reference: ${{ matrix.image }}@${{ steps.push.outputs.digest }}"
+            echo "- SBOM: embedded OCI attestation generated"
+            echo "- Provenance: GitHub build provenance attestation generated"
+            echo "- Promotion: register this digest in ci/toolchains.json before business consumption"
           } >> "$GITHUB_STEP_SUMMARY"

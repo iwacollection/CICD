@@ -1,0 +1,11 @@
+# Default repository owner
+* @iwacollection
+
+# CI platform control plane
+/.github/workflows/ @iwacollection
+/ci/ @iwacollection
+/scripts/ci/ @iwacollection
+/tests/ @iwacollection
+
+# Toolchain supply chain
+/docker/toolchains/ @iwacollection

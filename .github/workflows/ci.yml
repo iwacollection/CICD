@@ -31,8 +31,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate catalog
-        run: python3 scripts/ci/validate_config.py
+      - name: Validate catalogs
+        run: |
+          python3 scripts/ci/toolchain_catalog.py
+          python3 scripts/ci/validate_config.py
 
       - name: Detect changed files
         id: changes
@@ -67,9 +69,7 @@ jobs:
 
           echo "changed_file=$changed_file" >> "$GITHUB_OUTPUT"
           echo "force_full=$force_full" >> "$GITHUB_OUTPUT"
-          echo "Changed files:"
           cat "$changed_file" || true
-          echo "force_full=$force_full"
 
       - name: Analyze change impact
         id: impact
@@ -112,6 +112,10 @@ jobs:
     name: ${{ needs.discover.outputs.lane }} / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
     needs: discover
     if: needs.discover.outputs.count != '0'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
@@ -126,42 +130,32 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.cache_paths }}
-          key: ci-v2-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-${{ hashFiles('docker/**/Dockerfile', '**/CMakeLists.txt', '**/deps.lock', '**/toolchain.lock', '**/package-lock.json', '**/pnpm-lock.yaml', '**/go.sum', '**/poetry.lock', '**/uv.lock', '**/Cargo.lock', '**/requirements*.txt') }}
+          key: ci-v3-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain_identity }}-${{ hashFiles('**/CMakeLists.txt', '**/deps.lock', '**/toolchain.lock', '**/package-lock.json', '**/pnpm-lock.yaml', '**/go.sum', '**/poetry.lock', '**/uv.lock', '**/Cargo.lock', '**/requirements*.txt') }}
           restore-keys: |
-            ci-v2-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-
+            ci-v3-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain_identity }}-
 
-      - name: Set up Buildx cache backend
-        if: matrix.execution_mode == 'container' && matrix.container_dockerfile != ''
-        uses: docker/setup-buildx-action@v3
-
-      - name: Prepare toolchain container
+      - name: Pull and verify immutable toolchain
         id: container
         if: matrix.execution_mode == 'container'
         shell: bash
         env:
           CI_CONTAINER_IMAGE: ${{ matrix.container_image }}
-          CI_CONTAINER_DOCKERFILE: ${{ matrix.container_dockerfile }}
         run: |
           set -euo pipefail
-          if [[ -n "$CI_CONTAINER_DOCKERFILE" ]]; then
-            image="ci-toolchain:${GITHUB_SHA::12}-${{ strategy.job-index }}"
-            docker buildx build \
-              --pull \
-              --load \
-              --cache-from "type=gha,scope=toolchain-${{ matrix.toolchain }}" \
-              --cache-to "type=gha,mode=max,scope=toolchain-${{ matrix.toolchain }}" \
-              -f "$CI_CONTAINER_DOCKERFILE" \
-              -t "$image" \
-              .
-            identity="$(docker image inspect "$image" --format '{{.Id}}')"
-          else
-            image="$CI_CONTAINER_IMAGE"
-            docker pull "$image"
-            identity="$(docker image inspect "$image" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')"
+          if [[ ! "$CI_CONTAINER_IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
+            echo "Container toolchains must be pinned by immutable sha256 digest: $CI_CONTAINER_IMAGE" >&2
+            exit 1
           fi
-          echo "image=$image" >> "$GITHUB_OUTPUT"
-          echo "identity=$identity" >> "$GITHUB_OUTPUT"
-          echo "Using toolchain container: $identity"
+          docker pull "$CI_CONTAINER_IMAGE"
+          expected="${CI_CONTAINER_IMAGE##*@}"
+          repo_digests="$(docker image inspect "$CI_CONTAINER_IMAGE" --format '{{json .RepoDigests}}')"
+          if [[ "$repo_digests" != *"@$expected"* ]]; then
+            echo "Pulled image does not resolve to expected digest $expected" >&2
+            echo "Resolved RepoDigests: $repo_digests" >&2
+            exit 1
+          fi
+          echo "image=$CI_CONTAINER_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "identity=$expected" >> "$GITHUB_OUTPUT"
 
       - name: Build
         shell: bash
@@ -209,6 +203,12 @@ jobs:
         if: github.event_name != 'pull_request'
         run: python3 scripts/ci/verify_artifact.py --directory dist --expected-sha256 "${{ steps.package.outputs.digest }}"
 
+      - name: Attest artifact provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: ${{ steps.package.outputs.bundle }}
+
       - name: Upload immutable artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
@@ -233,13 +233,46 @@ jobs:
             echo "- Project: ${{ matrix.project }}"
             echo "- Target: ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}"
             echo "- Toolchain: ${{ matrix.toolchain }}"
+            echo "- Toolchain identity: ${{ matrix.toolchain_identity }}"
             echo "- Execution: ${{ matrix.execution_mode }}"
             echo "- Container identity: ${{ steps.container.outputs.identity || 'host execution' }}"
-            echo "- Test gate: ${{ matrix.test_command != '' && 'enabled' || 'not configured' }}"
             if [[ "$EVENT_NAME" == "pull_request" ]]; then
-              echo "- Artifact: skipped on PR Fast/Full validation"
+              echo "- Artifact: skipped on PR validation"
             else
               echo "- SHA256: ${{ steps.package.outputs.digest }}"
               echo "- Artifact: ${{ steps.package.outputs.artifact_name }}"
+              echo "- Provenance: GitHub artifact attestation generated"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  gate:
+    name: Build gate
+    needs: [discover, build]
+    if: always()
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enforce aggregate build result
+        shell: bash
+        env:
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          MATRIX_COUNT: ${{ needs.discover.outputs.count }}
+        run: |
+          set -euo pipefail
+          if [[ "$DISCOVER_RESULT" != "success" ]]; then
+            echo "Discover job failed: $DISCOVER_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$MATRIX_COUNT" == "0" ]]; then
+            if [[ "$BUILD_RESULT" != "skipped" && "$BUILD_RESULT" != "success" ]]; then
+              echo "Zero-target build should be skipped/success, got: $BUILD_RESULT" >&2
+              exit 1
+            fi
+          elif [[ "$BUILD_RESULT" != "success" ]]; then
+            echo "One or more matrix builds failed: $BUILD_RESULT" >&2
+            exit 1
+          fi
+          echo "Build gate passed: matrix_count=$MATRIX_COUNT build_result=$BUILD_RESULT"

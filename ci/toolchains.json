@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "registry_policy": {
+    "allowed_image_prefixes": [
+      "ghcr.io/iwacollection/"
+    ],
+    "require_digest_for_active_containers": true
+  },
+  "toolchains": [
+    {
+      "id": "gcc-host-v1",
+      "status": "active",
+      "execution_mode": "host",
+      "description": "Bootstrap GCC toolchain provided by the managed GitHub runner image"
+    },
+    {
+      "id": "gcc-host-container-v1",
+      "status": "candidate",
+      "execution_mode": "container",
+      "description": "Reproducible C/C++ toolchain built and promoted by the toolchain supply-chain workflow",
+      "image": "ghcr.io/iwacollection/cicd-toolchain-gcc-host",
+      "digest": "",
+      "dockerfile": "docker/toolchains/gcc-host/Dockerfile",
+      "context": ".",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "smoke_command": "gcc --version && g++ --version && cmake --version && ccache --version && git --version"
+    },
+    {
+      "id": "rk-sdk-2026.08",
+      "status": "planned",
+      "execution_mode": "container",
+      "description": "Rockchip SDK toolchain placeholder; activate only after an immutable digest is promoted",
+      "image": "",
+      "digest": ""
+    },
+    {
+      "id": "qcom-sdk-2026.08",
+      "status": "planned",
+      "execution_mode": "container",
+      "description": "Qualcomm SDK toolchain placeholder; activate only after an immutable digest is promoted",
+      "image": "",
+      "digest": ""
+    },
+    {
+      "id": "mtk-sdk-2026.08",
+      "status": "planned",
+      "execution_mode": "container",
+      "description": "MediaTek SDK toolchain placeholder; activate only after an immutable digest is promoted",
+      "image": "",
+      "digest": ""
+    }
+  ]
+}
