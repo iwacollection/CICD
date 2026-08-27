@@ -10,6 +10,7 @@ from pathlib import Path
 ALLOWED_SOCS = {"generic", "rk", "qualcomm", "mediatek"}
 ALLOWED_OSES = {"linux", "android"}
 ALLOWED_ARCHES = {"x86_64", "arm64", "armhf"}
+ALLOWED_EXECUTION_MODES = {"host", "container"}
 
 
 def load_catalog(path: Path) -> dict:
@@ -83,8 +84,25 @@ def validate_catalog(data: dict) -> list[str]:
             runner_labels = target.get("runner_labels")
             if not isinstance(runner_labels, list) or not runner_labels or not all(isinstance(x, str) and x for x in runner_labels):
                 errors.append(f"{tprefix}.runner_labels must be a non-empty string list")
+
+            execution_mode = target.get("execution_mode", "host")
+            if execution_mode not in ALLOWED_EXECUTION_MODES:
+                errors.append(f"{tprefix}.execution_mode must be one of {sorted(ALLOWED_EXECUTION_MODES)}")
+            if execution_mode == "container":
+                image = target.get("container_image", "")
+                dockerfile = target.get("container_dockerfile", "")
+                if not isinstance(image, str) or not isinstance(dockerfile, str):
+                    errors.append(f"{tprefix}.container_image/container_dockerfile must be strings")
+                elif not image and not dockerfile:
+                    errors.append(f"{tprefix} container mode requires container_image or container_dockerfile")
+                elif image and dockerfile:
+                    errors.append(f"{tprefix} choose container_image or container_dockerfile, not both")
+
             if not isinstance(target.get("build_command"), str) or not target.get("build_command"):
                 errors.append(f"{tprefix}.build_command must be a non-empty string")
+            test_command = target.get("test_command", "")
+            if not isinstance(test_command, str):
+                errors.append(f"{tprefix}.test_command must be a string")
             artifacts = target.get("artifact_paths")
             if not isinstance(artifacts, list) or not artifacts or not all(isinstance(x, str) and x for x in artifacts):
                 errors.append(f"{tprefix}.artifact_paths must be a non-empty string list")
