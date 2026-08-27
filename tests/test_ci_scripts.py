@@ -35,10 +35,14 @@ class CiPlatformTests(unittest.TestCase):
         self.assertEqual([item["project"] for item in matrix["include"]], ["hello-cpp"])
         target = matrix["include"][0]
         self.assertEqual(json.loads(target["runner_labels"]), ["ubuntu-latest"])
-        self.assertEqual(target["execution_mode"], "host")
-        self.assertEqual(target["container_image"], "")
-        self.assertEqual(target["toolchain"], "gcc-host-v1")
-        self.assertEqual(target["toolchain_identity"], "host:gcc-host-v1")
+        self.assertEqual(target["execution_mode"], "container")
+        self.assertEqual(target["toolchain"], "gcc-host-container-v1")
+        self.assertEqual(target["toolchain_status"], "active")
+        self.assertRegex(target["toolchain_identity"], r"^sha256:[0-9a-f]{64}$")
+        self.assertEqual(
+            target["container_image"],
+            "ghcr.io/iwacollection/cicd-toolchain-gcc-host@" + target["toolchain_identity"],
+        )
         self.assertEqual(target["lane"], "full")
 
     def test_fast_lane_can_select_projects_and_fast_test(self) -> None:
@@ -105,9 +109,10 @@ class CiPlatformTests(unittest.TestCase):
         self.assertTrue(any("toolchain execution and image ownership belong to ci/toolchains.json" in error for error in errors))
 
     def test_enabled_target_requires_active_toolchain(self) -> None:
-        data = deepcopy(self.projects)
-        data["projects"][0]["targets"][0]["toolchain"] = "gcc-host-container-v1"
-        errors = validate_catalog(data, self.toolchains)
+        toolchains = deepcopy(self.toolchains)
+        container = next(item for item in toolchains["toolchains"] if item["id"] == "gcc-host-container-v1")
+        container["status"] = "candidate"
+        errors = validate_catalog(self.projects, toolchains)
         self.assertTrue(any("must be active" in error for error in errors))
 
     def test_enabled_target_rejects_unknown_toolchain(self) -> None:
@@ -137,7 +142,7 @@ class CiPlatformTests(unittest.TestCase):
             "ghcr.io/iwacollection/gcc-container@sha256:" + "a" * 64,
         )
 
-    def test_candidate_toolchain_is_buildable_but_not_consumable(self) -> None:
+    def test_candidate_or_active_toolchain_is_buildable_but_planned_is_not(self) -> None:
         matrix = build_publish_matrix(self.toolchains)
         ids = [item["toolchain"] for item in matrix["include"]]
         self.assertIn("gcc-host-container-v1", ids)
