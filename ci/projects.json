@@ -17,10 +17,10 @@
           "execution_mode": "container",
           "container_dockerfile": "docker/toolchains/gcc-host/Dockerfile",
           "container_image": "",
-          "build_command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel 2",
+          "build_command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && cmake --build build --parallel 2 && ccache --show-stats",
           "test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "artifact_paths": ["build/hello-ci"],
-          "cache_paths": [".cache/ccache"],
+          "cache_paths": ["examples/cpp-app/.cache/ccache"],
           "cache_key_files": ["CMakeLists.txt", "src/main.cpp"]
         }
       ]
@@ -44,7 +44,7 @@
           "build_command": "./ci/build.sh rk linux arm64",
           "test_command": "./ci/test-package.sh out/rk",
           "artifact_paths": ["out/rk/**/*.img", "out/rk/**/*.bin"],
-          "cache_paths": [".cache/ccache", ".cache/vendor"],
+          "cache_paths": ["firmware/product-a/.cache/ccache", "firmware/product-a/.cache/vendor"],
           "cache_key_files": ["deps.lock", "toolchain.lock"]
         },
         {
@@ -60,7 +60,7 @@
           "build_command": "./ci/build.sh qualcomm android arm64",
           "test_command": "./ci/test-package.sh out/qualcomm",
           "artifact_paths": ["out/qualcomm/**/*.img", "out/qualcomm/**/*.zip"],
-          "cache_paths": [".cache/ccache", ".cache/vendor"],
+          "cache_paths": ["firmware/product-a/.cache/ccache", "firmware/product-a/.cache/vendor"],
           "cache_key_files": ["deps.lock", "toolchain.lock"]
         },
         {
@@ -76,7 +76,7 @@
           "build_command": "./ci/build.sh mediatek android arm64",
           "test_command": "./ci/test-package.sh out/mediatek",
           "artifact_paths": ["out/mediatek/**/*.img", "out/mediatek/**/*.zip"],
-          "cache_paths": [".cache/ccache", ".cache/vendor"],
+          "cache_paths": ["firmware/product-a/.cache/ccache", "firmware/product-a/.cache/vendor"],
           "cache_key_files": ["deps.lock", "toolchain.lock"]
         }
       ]
