@@ -22,7 +22,27 @@ class CiPlatformTests(unittest.TestCase):
         data = load_catalog(ROOT / "ci" / "projects.json")
         matrix = build_matrix(data)
         self.assertEqual([item["project"] for item in matrix["include"]], ["hello-cpp"])
-        self.assertEqual(json.loads(matrix["include"][0]["runner_labels"]), ["ubuntu-latest"])
+        target = matrix["include"][0]
+        self.assertEqual(json.loads(target["runner_labels"]), ["ubuntu-latest"])
+        self.assertEqual(target["execution_mode"], "container")
+        self.assertEqual(target["container_dockerfile"], "docker/toolchains/gcc-host/Dockerfile")
+        self.assertEqual(target["container_image"], "")
+
+    def test_container_mode_requires_image_or_dockerfile(self) -> None:
+        data = load_catalog(ROOT / "ci" / "projects.json")
+        target = data["projects"][0]["targets"][0]
+        target["container_image"] = ""
+        target["container_dockerfile"] = ""
+        errors = validate_catalog(data)
+        self.assertTrue(any("container mode requires" in error for error in errors))
+
+    def test_container_mode_rejects_two_image_sources(self) -> None:
+        data = load_catalog(ROOT / "ci" / "projects.json")
+        target = data["projects"][0]["targets"][0]
+        target["container_image"] = "registry.example.com/ci/toolchain@sha256:deadbeef"
+        target["container_dockerfile"] = "docker/toolchains/gcc-host/Dockerfile"
+        errors = validate_catalog(data)
+        self.assertTrue(any("choose container_image or container_dockerfile" in error for error in errors))
 
     def test_dependency_levels_allow_parallel_roots(self) -> None:
         data = {
