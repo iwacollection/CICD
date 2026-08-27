@@ -12,13 +12,13 @@
           "soc": "generic",
           "target_os": "linux",
           "arch": "x86_64",
-          "toolchain": "gcc-host-v1",
+          "toolchain": "gcc-host-container-v1",
           "runner_labels": ["ubuntu-latest"],
-          "build_command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel 2",
+          "build_command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && cmake --build build --parallel 2 && ccache --show-stats",
           "test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "fast_test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "artifact_paths": ["build/hello-ci"],
-          "cache_paths": [],
+          "cache_paths": ["examples/cpp-app/.cache/ccache"],
           "cache_key_files": ["CMakeLists.txt", "src/main.cpp"]
         }
       ]
