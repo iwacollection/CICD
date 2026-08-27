@@ -129,6 +129,8 @@ Artifact Repository
 
 所谓“晋级”不是重新打包，而是让某个环境允许使用这个 digest。
 
+当前 `promote.yml` 只接受由本仓库 `.github/workflows/ci.yml` 在 `main` push 上生成且整体成功的 Run。晋级前会同时验证 Run 元数据、manifest 中的仓库/提交/Run ID、SHA256 与 GitHub Build Provenance，人工填写一个自洽摘要不再足以绕过来源门禁。
+
 ## 7. 生产审批
 
 审批应该基于具体制品，而不是一句“发布 v1.2”。

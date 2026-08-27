@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
+import tempfile
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -9,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
+from cache_fingerprint import fingerprint_files  # noqa: E402
 from dependency_plan import build_levels  # noqa: E402
 from discover_matrix import build_matrix  # noqa: E402
 from impact_analysis import analyze_impact  # noqa: E402
@@ -19,6 +22,11 @@ from toolchain_catalog import (  # noqa: E402
     validate_toolchain_catalog,
 )
 from validate_config import load_catalog, validate_catalog  # noqa: E402
+from validate_promotion_source import (  # noqa: E402
+    validate_dispatch_inputs,
+    validate_run_metadata,
+)
+from verify_artifact import validate_manifest_identity  # noqa: E402
 
 
 class CiPlatformTests(unittest.TestCase):
@@ -44,6 +52,114 @@ class CiPlatformTests(unittest.TestCase):
             "ghcr.io/iwacollection/cicd-toolchain-gcc-host@" + target["toolchain_identity"],
         )
         self.assertEqual(target["lane"], "full")
+        self.assertEqual(json.loads(target["cache_key_files"]), ["CMakeLists.txt", "src/main.cpp"])
+
+    def test_cache_fingerprint_changes_with_declared_input(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "deps.lock").write_text("v1\n", encoding="utf-8")
+            before = fingerprint_files(root, ["deps.lock"])
+            (root / "deps.lock").write_text("v2\n", encoding="utf-8")
+            after = fingerprint_files(root, ["deps.lock"])
+            self.assertNotEqual(before, after)
+
+    def test_cache_fingerprint_fails_closed_on_missing_input(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "matched no files"):
+                fingerprint_files(Path(directory), ["missing.lock"])
+
+    def test_cache_paths_require_declared_key_files(self) -> None:
+        data = deepcopy(self.projects)
+        target = data["projects"][0]["targets"][0]
+        target["cache_key_files"] = []
+        errors = validate_catalog(data, self.toolchains)
+        self.assertTrue(any("cache_key_files is required" in error for error in errors))
+
+    def test_promotion_source_requires_successful_main_push_build(self) -> None:
+        run_id = "12345"
+        repository = "iwacollection/CICD"
+        run = {
+            "id": int(run_id),
+            "status": "completed",
+            "conclusion": "success",
+            "event": "push",
+            "head_branch": "main",
+            "head_sha": "a" * 40,
+            "path": ".github/workflows/ci.yml",
+            "repository": {"full_name": repository},
+        }
+        self.assertEqual(validate_run_metadata(run, repository, run_id), [])
+        run["event"] = "workflow_dispatch"
+        self.assertTrue(any("push event" in error for error in validate_run_metadata(run, repository, run_id)))
+
+    def test_promotion_inputs_reject_shell_payloads(self) -> None:
+        errors = validate_dispatch_inputs(
+            "123", 'artifact"; touch /tmp/pwned; #', "a" * 64
+        )
+        self.assertTrue(any("artifact_name" in error for error in errors))
+
+    def test_manifest_identity_is_bound_to_source_run(self) -> None:
+        manifest = {
+            "source_sha": "a" * 40,
+            "workflow_run_id": "123",
+            "source_repository": "iwacollection/CICD",
+        }
+        self.assertEqual(
+            validate_manifest_identity(
+                manifest,
+                source_sha="a" * 40,
+                run_id="123",
+                repository="iwacollection/CICD",
+            ),
+            [],
+        )
+        self.assertTrue(validate_manifest_identity(manifest, run_id="999"))
+
+    def test_external_actions_are_pinned_to_full_commit(self) -> None:
+        for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+            for line in workflow.read_text(encoding="utf-8").splitlines():
+                match = re.search(r"\buses:\s+([^\s#]+)", line)
+                if not match or match.group(1).startswith("./"):
+                    continue
+                reference = match.group(1).rsplit("@", 1)[-1]
+                self.assertRegex(reference, r"^[0-9a-f]{40}$", msg=f"{workflow}: {line}")
+
+    def test_pr_builds_are_forced_to_hosted_runner(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(matrix.runner_labels)",
+            workflow,
+        )
+        self.assertIn("name: Attest trusted build artifacts", workflow)
+        build_job = workflow.split("\n  build:", 1)[1].split("\n  attest:", 1)[0]
+        self.assertNotIn("id-token: write", build_job)
+        self.assertNotIn("attestations: write", build_job)
+
+        reusable = (
+            ROOT / ".github" / "workflows" / "reusable-build.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("name: Hosted PR validation lane", reusable)
+        self.assertIn('"self-hosted" in labels', reusable)
+        self.assertIn("if: steps.lane.outputs.hardware_pr != 'true'", reusable)
+        self.assertIn("pr_validation_command", reusable)
+
+    def test_promotion_verifies_source_run_and_provenance(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "promote.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("validate_promotion_source.py", workflow)
+        self.assertIn("--expected-source-sha", workflow)
+        self.assertIn("gh attestation verify", workflow)
+
+    def test_toolchain_publish_smokes_exact_digest(self) -> None:
+        workflow = (
+            ROOT / ".github" / "workflows" / "toolchain-images.yml"
+        ).read_text(encoding="utf-8")
+        smoke = workflow.index("name: Smoke test exact published digest")
+        attest = workflow.index("name: Attest published image provenance")
+        self.assertLess(smoke, attest)
+        self.assertIn('immutable_image="${IMAGE}@${DIGEST}"', workflow[smoke:attest])
+        self.assertIn('docker pull "$immutable_image"', workflow[smoke:attest])
 
     def test_fast_lane_can_select_projects_and_fast_test(self) -> None:
         data = {

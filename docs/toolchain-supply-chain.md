@@ -72,6 +72,7 @@ Merge main
         v
 Toolchain Publish
         - GHCR push
+        - pull 并冒烟测试刚发布的精确 image@sha256
         - OCI SBOM
         - GitHub provenance attestation
         - promotion-<toolchain>.json
