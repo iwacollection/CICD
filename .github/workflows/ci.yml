@@ -6,12 +6,14 @@ on:
     paths:
       - "examples/**"
       - "ci/**"
+      - "docker/**"
       - "scripts/ci/**"
       - ".github/workflows/ci.yml"
   pull_request:
     paths:
       - "examples/**"
       - "ci/**"
+      - "docker/**"
       - "scripts/ci/**"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
@@ -60,20 +62,58 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.cache_paths }}
-          key: ci-v1-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-${{ hashFiles('**/CMakeLists.txt', '**/deps.lock', '**/toolchain.lock', '**/package-lock.json', '**/pnpm-lock.yaml', '**/go.sum', '**/poetry.lock', '**/uv.lock', '**/Cargo.lock', '**/requirements*.txt') }}
+          key: ci-v2-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-${{ hashFiles('docker/**/Dockerfile', '**/CMakeLists.txt', '**/deps.lock', '**/toolchain.lock', '**/package-lock.json', '**/pnpm-lock.yaml', '**/go.sum', '**/poetry.lock', '**/uv.lock', '**/Cargo.lock', '**/requirements*.txt') }}
           restore-keys: |
-            ci-v1-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-
+            ci-v2-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-
+
+      - name: Prepare toolchain container
+        id: container
+        if: matrix.execution_mode == 'container'
+        shell: bash
+        env:
+          CI_CONTAINER_IMAGE: ${{ matrix.container_image }}
+          CI_CONTAINER_DOCKERFILE: ${{ matrix.container_dockerfile }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CI_CONTAINER_DOCKERFILE" ]]; then
+            image="ci-toolchain:${GITHUB_SHA::12}-${{ strategy.job-index }}"
+            docker build --pull -f "$CI_CONTAINER_DOCKERFILE" -t "$image" .
+            identity="$(docker image inspect "$image" --format '{{.Id}}')"
+          else
+            image="$CI_CONTAINER_IMAGE"
+            docker pull "$image"
+            identity="$(docker image inspect "$image" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')"
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          echo "Using toolchain container: $identity"
 
       - name: Build
+        shell: bash
         env:
           CI_BUILD_COMMAND: ${{ matrix.build_command }}
-        run: python3 scripts/ci/run_build.py --working-directory "${{ matrix.path }}" --command "$CI_BUILD_COMMAND"
+          CI_CONTAINER_IMAGE: ${{ steps.container.outputs.image }}
+        run: |
+          set -euo pipefail
+          args=(--working-directory "${{ matrix.path }}" --command "$CI_BUILD_COMMAND")
+          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
+            args+=(--container-image "$CI_CONTAINER_IMAGE")
+          fi
+          python3 scripts/ci/run_build.py "${args[@]}"
 
       - name: Test
         if: matrix.test_command != ''
+        shell: bash
         env:
           CI_TEST_COMMAND: ${{ matrix.test_command }}
-        run: python3 scripts/ci/run_build.py --working-directory "${{ matrix.path }}" --command "$CI_TEST_COMMAND"
+          CI_CONTAINER_IMAGE: ${{ steps.container.outputs.image }}
+        run: |
+          set -euo pipefail
+          args=(--working-directory "${{ matrix.path }}" --command "$CI_TEST_COMMAND")
+          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
+            args+=(--container-image "$CI_CONTAINER_IMAGE")
+          fi
+          python3 scripts/ci/run_build.py "${args[@]}"
 
       - name: Package immutable artifact
         id: package
@@ -110,6 +150,8 @@ jobs:
             echo "- Project: ${{ matrix.project }}"
             echo "- Target: ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}"
             echo "- Toolchain: ${{ matrix.toolchain }}"
+            echo "- Execution: ${{ matrix.execution_mode }}"
+            echo "- Container identity: ${{ steps.container.outputs.identity || 'host execution' }}"
             echo "- Test gate: ${{ matrix.test_command != '' && 'enabled' || 'not configured' }}"
             echo "- SHA256: ${{ steps.package.outputs.digest }}"
             echo "- Artifact: ${{ steps.package.outputs.artifact_name }}"
