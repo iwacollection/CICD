@@ -38,6 +38,7 @@ def build_matrix(
             definition = toolchains[target["toolchain"]]
             execution_mode = definition["execution_mode"]
             container_image = immutable_reference(definition) if execution_mode == "container" else ""
+            toolchain_identity = definition.get("digest") or f"host:{definition['id']}"
             test_command = target.get("test_command", "")
             if lane == "fast":
                 test_command = target.get("fast_test_command", test_command)
@@ -49,6 +50,7 @@ def build_matrix(
                     "target_os": target["target_os"],
                     "arch": target["arch"],
                     "toolchain": target["toolchain"],
+                    "toolchain_identity": toolchain_identity,
                     "toolchain_status": definition["status"],
                     "runner_labels": json.dumps(target["runner_labels"], separators=(",", ":")),
                     "execution_mode": execution_mode,
