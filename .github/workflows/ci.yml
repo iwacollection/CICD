@@ -66,6 +66,10 @@ jobs:
           restore-keys: |
             ci-v2-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-
 
+      - name: Set up Buildx cache backend
+        if: matrix.execution_mode == 'container' && matrix.container_dockerfile != ''
+        uses: docker/setup-buildx-action@v3
+
       - name: Prepare toolchain container
         id: container
         if: matrix.execution_mode == 'container'
@@ -77,7 +81,14 @@ jobs:
           set -euo pipefail
           if [[ -n "$CI_CONTAINER_DOCKERFILE" ]]; then
             image="ci-toolchain:${GITHUB_SHA::12}-${{ strategy.job-index }}"
-            docker build --pull -f "$CI_CONTAINER_DOCKERFILE" -t "$image" .
+            docker buildx build \
+              --pull \
+              --load \
+              --cache-from "type=gha,scope=toolchain-${{ matrix.toolchain }}" \
+              --cache-to "type=gha,mode=max,scope=toolchain-${{ matrix.toolchain }}" \
+              -f "$CI_CONTAINER_DOCKERFILE" \
+              -t "$image" \
+              .
             identity="$(docker image inspect "$image" --format '{{.Id}}')"
           else
             image="$CI_CONTAINER_IMAGE"
@@ -142,6 +153,7 @@ jobs:
             ${{ steps.package.outputs.checksum }}
           if-no-files-found: error
           retention-days: 14
+          compression-level: 0
 
       - name: Build summary
         run: |
