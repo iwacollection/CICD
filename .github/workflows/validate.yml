@@ -1,0 +1,46 @@
+name: Platform Validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - "ci/**"
+      - "scripts/ci/**"
+      - "tests/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate CI platform
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show runtime
+        run: python3 --version
+
+      - name: Validate project catalog
+        run: python3 scripts/ci/validate_config.py
+
+      - name: Validate dependency DAG
+        run: python3 scripts/ci/dependency_plan.py
+
+      - name: Render build matrix
+        run: python3 scripts/ci/discover_matrix.py
+
+      - name: Run platform unit tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Compile-check Python
+        run: python3 -m compileall -q scripts/ci tests
