@@ -44,6 +44,16 @@ on:
         description: "Immutable logical toolchain version"
         required: true
         type: string
+      container_image:
+        description: "Optional immutable build image, preferably registry/repo@sha256:digest"
+        required: false
+        default: ""
+        type: string
+      container_registry:
+        description: "Optional private registry hostname for docker login"
+        required: false
+        default: ""
+        type: string
       runner_labels_json:
         description: "JSON runner label array, e.g. [\"ubuntu-latest\"]"
         required: false
@@ -64,9 +74,15 @@ on:
         required: false
         default: "main"
         type: string
+    secrets:
+      container_registry_username:
+        required: false
+      container_registry_password:
+        required: false
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   build:
@@ -86,31 +102,69 @@ jobs:
           ref: ${{ inputs.platform_ref }}
           path: .ci-platform
 
+      - name: Login private toolchain registry
+        if: inputs.container_image != '' && inputs.container_registry != ''
+        shell: bash
+        env:
+          CI_REGISTRY: ${{ inputs.container_registry }}
+          CI_REGISTRY_USERNAME: ${{ secrets.container_registry_username }}
+          CI_REGISTRY_PASSWORD: ${{ secrets.container_registry_password }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CI_REGISTRY_USERNAME:-}" || -z "${CI_REGISTRY_PASSWORD:-}" ]]; then
+            echo "Registry credentials are required for private container registry $CI_REGISTRY" >&2
+            exit 1
+          fi
+          printf '%s' "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USERNAME" --password-stdin
+
+      - name: Pull toolchain container
+        id: container
+        if: inputs.container_image != ''
+        shell: bash
+        env:
+          CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+        run: |
+          set -euo pipefail
+          docker pull "$CI_CONTAINER_IMAGE"
+          identity="$(docker image inspect "$CI_CONTAINER_IMAGE" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')"
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          echo "Using toolchain container: $identity"
+
       - name: Restore build cache
         if: inputs.cache_paths != ''
         uses: actions/cache@v4
         with:
           path: ${{ inputs.cache_paths }}
-          key: reusable-ci-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-${{ hashFiles('source/**/deps.lock', 'source/**/toolchain.lock', 'source/**/package-lock.json', 'source/**/pnpm-lock.yaml', 'source/**/go.sum', 'source/**/poetry.lock', 'source/**/uv.lock', 'source/**/Cargo.lock', 'source/**/CMakeLists.txt') }}
+          key: reusable-ci-v2-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-${{ hashFiles('source/**/deps.lock', 'source/**/toolchain.lock', 'source/**/package-lock.json', 'source/**/pnpm-lock.yaml', 'source/**/go.sum', 'source/**/poetry.lock', 'source/**/uv.lock', 'source/**/Cargo.lock', 'source/**/CMakeLists.txt') }}
           restore-keys: |
-            reusable-ci-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-
+            reusable-ci-v2-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-
 
       - name: Build
+        shell: bash
         env:
           CI_BUILD_COMMAND: ${{ inputs.build_command }}
-        run: >-
-          python3 .ci-platform/scripts/ci/run_build.py
-          --working-directory "source/${{ inputs.working_directory }}"
-          --command "$CI_BUILD_COMMAND"
+          CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+        run: |
+          set -euo pipefail
+          args=(--working-directory "source/${{ inputs.working_directory }}" --command "$CI_BUILD_COMMAND")
+          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
+            args+=(--container-image "$CI_CONTAINER_IMAGE")
+          fi
+          python3 .ci-platform/scripts/ci/run_build.py "${args[@]}"
 
       - name: Test
         if: inputs.test_command != ''
+        shell: bash
         env:
           CI_TEST_COMMAND: ${{ inputs.test_command }}
-        run: >-
-          python3 .ci-platform/scripts/ci/run_build.py
-          --working-directory "source/${{ inputs.working_directory }}"
-          --command "$CI_TEST_COMMAND"
+          CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+        run: |
+          set -euo pipefail
+          args=(--working-directory "source/${{ inputs.working_directory }}" --command "$CI_TEST_COMMAND")
+          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
+            args+=(--container-image "$CI_CONTAINER_IMAGE")
+          fi
+          python3 .ci-platform/scripts/ci/run_build.py "${args[@]}"
 
       - name: Package immutable artifact
         id: package
@@ -150,6 +204,8 @@ jobs:
             echo "- Project: ${{ inputs.project_name }}"
             echo "- Target: ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}"
             echo "- Toolchain: ${{ inputs.toolchain }}"
+            echo "- Execution: ${{ inputs.container_image != '' && 'container' || 'host' }}"
+            echo "- Container identity: ${{ steps.container.outputs.identity || 'host execution' }}"
             echo "- SHA256: ${{ steps.package.outputs.digest }}"
             echo "- Rebuild-on-promotion: NO"
           } >> "$GITHUB_STEP_SUMMARY"
