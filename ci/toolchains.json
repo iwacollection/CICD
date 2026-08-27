@@ -15,11 +15,11 @@
     },
     {
       "id": "gcc-host-container-v1",
-      "status": "candidate",
+      "status": "active",
       "execution_mode": "container",
       "description": "Reproducible C/C++ toolchain built and promoted by the toolchain supply-chain workflow",
       "image": "ghcr.io/iwacollection/cicd-toolchain-gcc-host",
-      "digest": "",
+      "digest": "sha256:3caf311bd69a8faf218417ec729acdcfb0cd6f164a0fe55a6c041ac20e4fe012",
       "dockerfile": "docker/toolchains/gcc-host/Dockerfile",
       "context": ".",
       "platforms": [
