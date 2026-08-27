@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ matrix.cache_paths }}
-          key: ci-v1-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-${{ hashFiles('**/CMakeLists.txt', '**/deps.lock', '**/toolchain.lock', '**/package-lock.json', '**/go.sum', '**/poetry.lock', '**/requirements*.txt') }}
+          key: ci-v1-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-${{ hashFiles('**/CMakeLists.txt', '**/deps.lock', '**/toolchain.lock', '**/package-lock.json', '**/pnpm-lock.yaml', '**/go.sum', '**/poetry.lock', '**/uv.lock', '**/Cargo.lock', '**/requirements*.txt') }}
           restore-keys: |
             ci-v1-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain }}-
 
@@ -68,6 +68,12 @@ jobs:
         env:
           CI_BUILD_COMMAND: ${{ matrix.build_command }}
         run: python3 scripts/ci/run_build.py --working-directory "${{ matrix.path }}" --command "$CI_BUILD_COMMAND"
+
+      - name: Test
+        if: matrix.test_command != ''
+        env:
+          CI_TEST_COMMAND: ${{ matrix.test_command }}
+        run: python3 scripts/ci/run_build.py --working-directory "${{ matrix.path }}" --command "$CI_TEST_COMMAND"
 
       - name: Package immutable artifact
         id: package
@@ -104,6 +110,7 @@ jobs:
             echo "- Project: ${{ matrix.project }}"
             echo "- Target: ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}"
             echo "- Toolchain: ${{ matrix.toolchain }}"
+            echo "- Test gate: ${{ matrix.test_command != '' && 'enabled' || 'not configured' }}"
             echo "- SHA256: ${{ steps.package.outputs.digest }}"
             echo "- Artifact: ${{ steps.package.outputs.artifact_name }}"
           } >> "$GITHUB_STEP_SUMMARY"
