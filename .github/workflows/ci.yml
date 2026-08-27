@@ -3,19 +3,7 @@ name: Build Matrix
 on:
   push:
     branches: [main]
-    paths:
-      - "examples/**"
-      - "ci/**"
-      - "docker/**"
-      - "scripts/ci/**"
-      - ".github/workflows/ci.yml"
   pull_request:
-    paths:
-      - "examples/**"
-      - "ci/**"
-      - "docker/**"
-      - "scripts/ci/**"
-      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:
@@ -27,25 +15,101 @@ concurrency:
 
 jobs:
   discover:
-    name: Discover build matrix
+    name: Discover impacted build matrix
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       count: ${{ steps.matrix.outputs.count }}
+      lane: ${{ steps.impact.outputs.lane }}
+      reason: ${{ steps.impact.outputs.reason }}
+      changed_count: ${{ steps.impact.outputs.changed_count }}
+      impacted_count: ${{ steps.impact.outputs.impacted_count }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Validate catalog
         run: python3 scripts/ci/validate_config.py
 
-      - name: Build matrix
+      - name: Detect changed files
+        id: changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          changed_file="$RUNNER_TEMP/ci-changed-files.txt"
+          : > "$changed_file"
+          force_full=false
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            force_full=true
+          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if [[ -z "${PR_BASE_SHA:-}" || -z "${PR_HEAD_SHA:-}" ]]; then
+              force_full=true
+            else
+              git diff --name-only "$PR_BASE_SHA" "$PR_HEAD_SHA" -- > "$changed_file"
+            fi
+          else
+            if [[ -z "${PUSH_BEFORE_SHA:-}" || "$PUSH_BEFORE_SHA" =~ ^0+$ ]]; then
+              force_full=true
+            else
+              git diff --name-only "$PUSH_BEFORE_SHA" "$CURRENT_SHA" -- > "$changed_file"
+            fi
+          fi
+
+          echo "changed_file=$changed_file" >> "$GITHUB_OUTPUT"
+          echo "force_full=$force_full" >> "$GITHUB_OUTPUT"
+          echo "Changed files:"
+          cat "$changed_file" || true
+          echo "force_full=$force_full"
+
+      - name: Analyze change impact
+        id: impact
+        shell: bash
+        env:
+          CHANGED_FILE: ${{ steps.changes.outputs.changed_file }}
+          FORCE_FULL: ${{ steps.changes.outputs.force_full }}
+        run: |
+          set -euo pipefail
+          args=(--changed-files-file "$CHANGED_FILE")
+          if [[ "$FORCE_FULL" == "true" ]]; then
+            args+=(--force-full)
+          fi
+          python3 scripts/ci/impact_analysis.py "${args[@]}"
+
+      - name: Build impacted matrix
         id: matrix
-        run: python3 scripts/ci/discover_matrix.py
+        shell: bash
+        env:
+          IMPACTED_PROJECTS: ${{ steps.impact.outputs.projects }}
+          CI_LANE: ${{ steps.impact.outputs.lane }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/discover_matrix.py \
+            --projects-json "$IMPACTED_PROJECTS" \
+            --lane "$CI_LANE"
+
+      - name: Impact summary
+        run: |
+          {
+            echo "### Change impact"
+            echo "- Lane: ${{ steps.impact.outputs.lane }}"
+            echo "- Changed files: ${{ steps.impact.outputs.changed_count }}"
+            echo "- Impacted projects: ${{ steps.impact.outputs.impacted_count }}"
+            echo "- Matrix targets: ${{ steps.matrix.outputs.count }}"
+            echo "- Decision: ${{ steps.impact.outputs.reason }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build:
-    name: ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
+    name: ${{ needs.discover.outputs.lane }} / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
     needs: discover
     if: needs.discover.outputs.count != '0'
     strategy:
@@ -112,7 +176,7 @@ jobs:
           fi
           python3 scripts/ci/run_build.py "${args[@]}"
 
-      - name: Test
+      - name: Test (${{ matrix.lane }})
         if: matrix.test_command != ''
         shell: bash
         env:
@@ -128,6 +192,7 @@ jobs:
 
       - name: Package immutable artifact
         id: package
+        if: github.event_name != 'pull_request'
         env:
           CI_ARTIFACT_PATHS: ${{ matrix.artifact_paths }}
         run: >-
@@ -141,9 +206,11 @@ jobs:
           --toolchain "${{ matrix.toolchain }}"
 
       - name: Verify packaged artifact
+        if: github.event_name != 'pull_request'
         run: python3 scripts/ci/verify_artifact.py --directory dist --expected-sha256 "${{ steps.package.outputs.digest }}"
 
       - name: Upload immutable artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package.outputs.artifact_name }}
@@ -156,15 +223,23 @@ jobs:
           compression-level: 0
 
       - name: Build summary
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           {
             echo "### Build complete"
+            echo "- Lane: ${{ matrix.lane }}"
             echo "- Project: ${{ matrix.project }}"
             echo "- Target: ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}"
             echo "- Toolchain: ${{ matrix.toolchain }}"
             echo "- Execution: ${{ matrix.execution_mode }}"
             echo "- Container identity: ${{ steps.container.outputs.identity || 'host execution' }}"
             echo "- Test gate: ${{ matrix.test_command != '' && 'enabled' || 'not configured' }}"
-            echo "- SHA256: ${{ steps.package.outputs.digest }}"
-            echo "- Artifact: ${{ steps.package.outputs.artifact_name }}"
+            if [[ "$EVENT_NAME" == "pull_request" ]]; then
+              echo "- Artifact: skipped on PR Fast/Full validation"
+            else
+              echo "- SHA256: ${{ steps.package.outputs.digest }}"
+              echo "- Artifact: ${{ steps.package.outputs.artifact_name }}"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
