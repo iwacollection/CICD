@@ -15,6 +15,7 @@
           "toolchain": "gcc-host",
           "runner_labels": ["ubuntu-latest"],
           "build_command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel 2",
+          "test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "artifact_paths": ["build/hello-ci"],
           "cache_paths": [".cache/ccache"],
           "cache_key_files": ["CMakeLists.txt", "src/main.cpp"]
@@ -35,6 +36,7 @@
           "toolchain": "rk-sdk-2026.08",
           "runner_labels": ["self-hosted", "linux", "arm64", "soc-rk"],
           "build_command": "./ci/build.sh rk linux arm64",
+          "test_command": "./ci/test-package.sh out/rk",
           "artifact_paths": ["out/rk/**/*.img", "out/rk/**/*.bin"],
           "cache_paths": [".cache/ccache", ".cache/vendor"],
           "cache_key_files": ["deps.lock", "toolchain.lock"]
@@ -47,6 +49,7 @@
           "toolchain": "qcom-sdk-2026.08",
           "runner_labels": ["self-hosted", "linux", "arm64", "soc-qualcomm"],
           "build_command": "./ci/build.sh qualcomm android arm64",
+          "test_command": "./ci/test-package.sh out/qualcomm",
           "artifact_paths": ["out/qualcomm/**/*.img", "out/qualcomm/**/*.zip"],
           "cache_paths": [".cache/ccache", ".cache/vendor"],
           "cache_key_files": ["deps.lock", "toolchain.lock"]
@@ -59,6 +62,7 @@
           "toolchain": "mtk-sdk-2026.08",
           "runner_labels": ["self-hosted", "linux", "arm64", "soc-mediatek"],
           "build_command": "./ci/build.sh mediatek android arm64",
+          "test_command": "./ci/test-package.sh out/mediatek",
           "artifact_paths": ["out/mediatek/**/*.img", "out/mediatek/**/*.zip"],
           "cache_paths": [".cache/ccache", ".cache/vendor"],
           "cache_key_files": ["deps.lock", "toolchain.lock"]
