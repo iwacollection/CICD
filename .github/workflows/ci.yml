@@ -244,3 +244,35 @@ jobs:
               echo "- Provenance: GitHub artifact attestation generated"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  gate:
+    name: Build gate
+    needs: [discover, build]
+    if: always()
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enforce aggregate build result
+        shell: bash
+        env:
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          MATRIX_COUNT: ${{ needs.discover.outputs.count }}
+        run: |
+          set -euo pipefail
+          if [[ "$DISCOVER_RESULT" != "success" ]]; then
+            echo "Discover job failed: $DISCOVER_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$MATRIX_COUNT" == "0" ]]; then
+            if [[ "$BUILD_RESULT" != "skipped" && "$BUILD_RESULT" != "success" ]]; then
+              echo "Zero-target build should be skipped/success, got: $BUILD_RESULT" >&2
+              exit 1
+            fi
+          elif [[ "$BUILD_RESULT" != "success" ]]; then
+            echo "One or more matrix builds failed: $BUILD_RESULT" >&2
+            exit 1
+          fi
+          echo "Build gate passed: matrix_count=$MATRIX_COUNT build_result=$BUILD_RESULT"
