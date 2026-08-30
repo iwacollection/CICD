@@ -63,6 +63,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             ci/capabilities.json
+            .github/workflows
             scripts/ci/capability_policy.py
             scripts/ci/capability_evidence.py
           sparse-checkout-cone-mode: false
