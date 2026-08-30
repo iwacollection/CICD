@@ -59,6 +59,9 @@ def build_matrix(
                     "test_command": test_command,
                     "pr_validation_command": target.get("pr_validation_command", ""),
                     "artifact_paths": json.dumps(target["artifact_paths"], separators=(",", ":")),
+                    "dependency_lock_files": json.dumps(
+                        target.get("dependency_lock_files", []), separators=(",", ":")
+                    ),
                     "cache_paths": "\n".join(target.get("cache_paths", [])),
                     "cache_key_files": json.dumps(
                         target.get("cache_key_files", []), separators=(",", ":")
