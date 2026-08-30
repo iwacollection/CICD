@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -64,6 +65,20 @@ def _load_candidates(directory: Path) -> list[tuple[Path, dict]]:
     return candidates
 
 
+def _fingerprint(records: list[dict]) -> str:
+    canonical = [
+        {
+            "project": item["project"],
+            "artifact_name": item["artifact_name"],
+            "bundle_sha256": item["bundle_sha256"],
+            "target": item["target"],
+        }
+        for item in sorted(records, key=lambda record: record["project"])
+    ]
+    payload = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def resolve(
     directory: Path,
     dependencies: list[str],
@@ -118,8 +133,6 @@ def resolve(
         bundle_name = manifest["bundle"]["file"]
         bundle_matches = list(manifest_path.parent.rglob(bundle_name))
         if len(bundle_matches) != 1:
-            # download-artifact may preserve a dist/ directory next to the
-            # manifest, so retry from the artifact root containing this manifest.
             artifact_root = manifest_path.parent
             while artifact_root != directory and not artifact_root.name.startswith("dag-"):
                 artifact_root = artifact_root.parent
@@ -151,9 +164,11 @@ def resolve(
             }
         )
 
+    fingerprint = _fingerprint(records)
     index = {
         "schema_version": 1,
         "consumer_target": {"soc": soc, "target_os": target_os, "arch": arch},
+        "upstream_fingerprint": fingerprint,
         "dependencies": records,
     }
     index_path = destination / "upstream-index.json"
@@ -162,6 +177,7 @@ def resolve(
         "root": str(destination.resolve()),
         "index": str(index_path.resolve()),
         "count": len(records),
+        "fingerprint": fingerprint,
         "records": records,
     }
 
@@ -203,6 +219,7 @@ def main() -> int:
             handle.write(f"root={result['root']}\n")
             handle.write(f"index={result['index']}\n")
             handle.write(f"count={result['count']}\n")
+            handle.write(f"fingerprint={result['fingerprint']}\n")
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0
 
