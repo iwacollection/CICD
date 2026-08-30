@@ -94,6 +94,53 @@ def _load_build_metadata(path: str) -> dict:
     return metadata
 
 
+def _load_upstream_index(path: str) -> list[dict]:
+    if not path:
+        return []
+    index_path = Path(path).resolve()
+    try:
+        value = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"cannot load upstream index {index_path}: {exc}") from exc
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise SystemExit("upstream index must be schema_version 1 object")
+    dependencies = value.get("dependencies")
+    if not isinstance(dependencies, list):
+        raise SystemExit("upstream index dependencies must be a list")
+    records: list[dict] = []
+    seen: set[str] = set()
+    for item in dependencies:
+        if not isinstance(item, dict):
+            raise SystemExit("upstream dependency record must be an object")
+        project = item.get("project")
+        artifact_name = item.get("artifact_name")
+        digest = item.get("bundle_sha256")
+        source_sha = item.get("source_sha")
+        target = item.get("target")
+        if not isinstance(project, str) or not project or project in seen:
+            raise SystemExit("upstream dependency project must be unique non-empty string")
+        if not isinstance(artifact_name, str) or not artifact_name:
+            raise SystemExit(f"upstream dependency {project} artifact_name is required")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise SystemExit(f"upstream dependency {project} bundle_sha256 is invalid")
+        if not isinstance(source_sha, str) or not source_sha:
+            raise SystemExit(f"upstream dependency {project} source_sha is required")
+        if not isinstance(target, dict):
+            raise SystemExit(f"upstream dependency {project} target is required")
+        seen.add(project)
+        records.append(
+            {
+                "project": project,
+                "artifact_name": artifact_name,
+                "bundle_sha256": digest,
+                "source_sha": source_sha,
+                "source_repository": item.get("source_repository", ""),
+                "target": target,
+            }
+        )
+    return records
+
+
 def _write_reproducible_tar_gz(bundle: Path, files: list[Path], workdir: Path, source_date_epoch: int) -> None:
     with bundle.open("wb") as raw:
         with gzip.GzipFile(filename="", mode="wb", fileobj=raw, compresslevel=9, mtime=source_date_epoch) as gz:
@@ -117,6 +164,7 @@ def build_manifest(
     workdir: Path,
     files: list[Path],
     dependency_locks: list[Path],
+    upstream_artifacts: list[dict],
     bundle: Path,
     bundle_digest: str,
     base: str,
@@ -162,6 +210,7 @@ def build_manifest(
         "compiler_versions": build_metadata.get("tools", {}),
         "dependencies": {
             "locks": [_file_record(path, workdir) for path in dependency_locks],
+            "upstream_artifacts": upstream_artifacts,
         },
         "bundle": {
             "file": bundle.name,
@@ -181,6 +230,7 @@ def main() -> int:
     parser.add_argument("--working-directory", required=True)
     parser.add_argument("--artifacts-json", required=True)
     parser.add_argument("--dependency-locks-json", default="[]")
+    parser.add_argument("--upstream-index", default="")
     parser.add_argument("--soc", required=True)
     parser.add_argument("--target-os", required=True)
     parser.add_argument("--arch", required=True)
@@ -208,6 +258,7 @@ def main() -> int:
         field="dependency_locks_json",
         required=True,
     )
+    upstream_artifacts = _load_upstream_index(args.upstream_index)
 
     git_sha = os.getenv("GITHUB_SHA", "local")
     short_sha = _safe_slug(git_sha[:12])
@@ -249,6 +300,7 @@ def main() -> int:
         workdir=workdir,
         files=files,
         dependency_locks=dependency_locks,
+        upstream_artifacts=upstream_artifacts,
         bundle=bundle,
         bundle_digest=digest,
         base=base,
