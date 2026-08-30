@@ -55,6 +55,12 @@ jobs:
       - name: Validate promotion path policy
         run: python3 scripts/ci/promotion_policy.py --policy ci/promotion-policy.json validate
 
+      - name: Validate repository governance policy
+        run: >-
+          python3 scripts/ci/repository_governance.py
+          --policy ci/repository-governance-policy.json
+          validate
+
       - name: Render build matrix
         run: python3 scripts/ci/discover_matrix.py
 
