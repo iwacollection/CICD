@@ -7,6 +7,7 @@ on:
     paths:
       - "ci/**"
       - "scripts/ci/**"
+      - "scripts/vendor/**"
       - "tests/**"
       - "docker/**"
       - ".github/dependabot.yml"
@@ -33,6 +34,11 @@ jobs:
 
       - name: Show runtime
         run: python3 --version
+
+      - name: Validate toolchain and hardware catalogs
+        run: |
+          python3 scripts/ci/toolchain_catalog.py
+          python3 scripts/ci/hardware_catalog.py
 
       - name: Validate project catalog
         run: python3 scripts/ci/validate_config.py

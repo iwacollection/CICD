@@ -1,0 +1,75 @@
+name: Hardware Runner Readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardware-readiness-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: Discover active hardware profiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      count: ${{ steps.matrix.outputs.count }}
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Hardware readiness may only run from refs/heads/main" >&2
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validate hardware catalog
+        run: |
+          python3 scripts/ci/hardware_catalog.py
+          python3 scripts/ci/toolchain_catalog.py
+          python3 scripts/ci/validate_config.py
+
+      - name: Render active hardware matrix
+        id: matrix
+        run: python3 scripts/ci/hardware_catalog.py --matrix --status active
+
+      - name: Require at least one active profile
+        env:
+          ACTIVE_COUNT: ${{ steps.matrix.outputs.count }}
+        run: |
+          if [[ "$ACTIVE_COUNT" == "0" ]]; then
+            echo "No active hardware profiles. Pin a real SDK identity before running readiness." >&2
+            exit 1
+          fi
+
+  readiness:
+    name: ${{ matrix.profile }} / SDK + broker readiness
+    needs: discover
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    runs-on: ${{ fromJSON(matrix.runner_labels) }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify Runner, SDK identity and resource broker configuration
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: >-
+          python3 scripts/ci/hardware_execute.py
+          --catalog ci/hardware-profiles.json
+          --profile "${{ matrix.profile }}"
+          --runner-labels-json '${{ matrix.runner_labels }}'
+          --working-directory .
+          --check-only
