@@ -1,0 +1,204 @@
+name: Reusable DB Migration
+
+on:
+  workflow_call:
+    inputs:
+      project_name:
+        required: true
+        type: string
+      working_directory:
+        required: false
+        default: "."
+        type: string
+      migration_paths_json:
+        description: "SQL migration globs inspected by the central destructive-SQL policy"
+        required: false
+        default: '["migrations/**/*.sql","db/**/*.sql"]'
+        type: string
+      setup_command:
+        required: false
+        default: ""
+        type: string
+      migration_command:
+        required: true
+        type: string
+      compatibility_command:
+        required: false
+        default: ""
+        type: string
+      rollback_command:
+        description: "Optional downgrade/rollback command executed only against the ephemeral CI database"
+        required: false
+        default: ""
+        type: string
+      platform_ref:
+        description: "Exact 40-character CICD platform commit SHA"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  migration:
+    name: DB Migration / ${{ inputs.project_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres@sha256:bb3e1a57e5407e0a5280b4211980a5e537f4abd234a87014ac979849a78dd825
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-password
+          POSTGRES_DB: ci_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ci_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      CI_DATABASE_URL: postgresql://postgres:ci-password@127.0.0.1:5432/ci_test
+      DATABASE_URL: postgresql://postgres:ci-password@127.0.0.1:5432/ci_test
+      CI_POSTGRES_IMAGE: postgres@sha256:bb3e1a57e5407e0a5280b4211980a5e537f4abd234a87014ac979849a78dd825
+
+    steps:
+      - name: Checkout caller source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Require immutable platform revision
+        shell: bash
+        env:
+          CI_PLATFORM_REF: ${{ inputs.platform_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$CI_PLATFORM_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "platform_ref must be an exact 40-character SHA" >&2; exit 1; }
+
+      - name: Checkout database capability policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: iwacollection/CICD
+          ref: ${{ inputs.platform_ref }}
+          path: .ci-platform
+          persist-credentials: false
+          sparse-checkout: |
+            ci/capabilities.json
+            ci/db-migration-policy.json
+            .github/workflows
+            scripts/ci/capability_policy.py
+            scripts/ci/capability_evidence.py
+            scripts/ci/db_migration_policy.py
+          sparse-checkout-cone-mode: false
+
+      - name: Validate capability ownership
+        run: python3 .ci-platform/scripts/ci/capability_policy.py --policy .ci-platform/ci/capabilities.json --repository-root .ci-platform
+
+      - name: Scan SQL migrations for destructive operations
+        shell: bash
+        env:
+          CI_WORKDIR: ${{ inputs.working_directory }}
+          CI_MIGRATION_PATTERNS: ${{ inputs.migration_paths_json }}
+        run: >-
+          python3 .ci-platform/scripts/ci/db_migration_policy.py
+          --policy .ci-platform/ci/db-migration-policy.json
+          --root "source/$CI_WORKDIR"
+          --patterns-json "$CI_MIGRATION_PATTERNS"
+
+      - name: Prepare database evidence
+        run: mkdir -p .ci-evidence/db-migration
+
+      - name: Setup migration tool dependencies
+        if: inputs.setup_command != ''
+        shell: bash
+        env:
+          CI_COMMAND: ${{ inputs.setup_command }}
+          CI_WORKDIR: ${{ inputs.working_directory }}
+          CI_EVIDENCE_DIR: ${{ github.workspace }}/.ci-evidence/db-migration
+        run: |
+          set -euo pipefail
+          cd "source/$CI_WORKDIR"
+          bash -euo pipefail -c "$CI_COMMAND"
+
+      - name: Apply migrations to ephemeral PostgreSQL
+        shell: bash
+        env:
+          CI_COMMAND: ${{ inputs.migration_command }}
+          CI_WORKDIR: ${{ inputs.working_directory }}
+          CI_EVIDENCE_DIR: ${{ github.workspace }}/.ci-evidence/db-migration
+        run: |
+          set -euo pipefail
+          [[ -n "$CI_COMMAND" ]] || { echo "migration_command must not be empty" >&2; exit 1; }
+          cd "source/$CI_WORKDIR"
+          bash -euo pipefail -c "$CI_COMMAND"
+
+      - name: Capture migrated schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network host \
+            -e PGPASSWORD=ci-password \
+            "$CI_POSTGRES_IMAGE" \
+            pg_dump --schema-only --no-owner --no-privileges \
+            -h 127.0.0.1 -U postgres -d ci_test \
+            > .ci-evidence/db-migration/schema-after-migration.sql
+
+      - name: Application/database compatibility test
+        if: inputs.compatibility_command != ''
+        shell: bash
+        env:
+          CI_COMMAND: ${{ inputs.compatibility_command }}
+          CI_WORKDIR: ${{ inputs.working_directory }}
+          CI_EVIDENCE_DIR: ${{ github.workspace }}/.ci-evidence/db-migration
+        run: |
+          set -euo pipefail
+          cd "source/$CI_WORKDIR"
+          bash -euo pipefail -c "$CI_COMMAND"
+
+      - name: Roll back migration on ephemeral database
+        if: inputs.rollback_command != ''
+        shell: bash
+        env:
+          CI_COMMAND: ${{ inputs.rollback_command }}
+          CI_WORKDIR: ${{ inputs.working_directory }}
+          CI_EVIDENCE_DIR: ${{ github.workspace }}/.ci-evidence/db-migration
+        run: |
+          set -euo pipefail
+          cd "source/$CI_WORKDIR"
+          bash -euo pipefail -c "$CI_COMMAND"
+
+      - name: Capture schema after migration rollback
+        if: inputs.rollback_command != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network host \
+            -e PGPASSWORD=ci-password \
+            "$CI_POSTGRES_IMAGE" \
+            pg_dump --schema-only --no-owner --no-privileges \
+            -h 127.0.0.1 -U postgres -d ci_test \
+            > .ci-evidence/db-migration/schema-after-rollback.sql
+
+      - name: Write database capability evidence metadata
+        if: always()
+        env:
+          CI_JOB_STATUS: ${{ job.status }}
+        run: >-
+          python3 .ci-platform/scripts/ci/capability_evidence.py
+          --capability db_migration
+          --project '${{ inputs.project_name }}'
+          --status "$CI_JOB_STATUS"
+          --output .ci-evidence/db-migration/capability.json
+
+      - name: Upload database migration evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: db-migration-${{ inputs.project_name }}-${{ github.run_id }}
+          path: .ci-evidence/db-migration
+          if-no-files-found: error
+          retention-days: 30
