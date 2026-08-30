@@ -47,14 +47,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RESTORE_DEPLOYMENT_ID: ${{ inputs.restore_deployment_id }}
-          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
         run: |
           set -euo pipefail
           python3 scripts/ci/deployment_pointer.py inspect \
             --repository "$GITHUB_REPOSITORY" \
             --deployment-id "$RESTORE_DEPLOYMENT_ID"
-          if [[ "${{ steps.restore.outputs.environment }}" != "$TARGET_ENVIRONMENT" ]]; then
-            echo "Rollback deployment belongs to a different environment." >&2
+
+      - name: Require same-environment rollback source
+        shell: bash
+        env:
+          RESTORE_ENVIRONMENT: ${{ steps.restore.outputs.environment }}
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+        run: |
+          set -euo pipefail
+          if [[ "$RESTORE_ENVIRONMENT" != "$TARGET_ENVIRONMENT" ]]; then
+            echo "Rollback deployment belongs to $RESTORE_ENVIRONMENT, not $TARGET_ENVIRONMENT." >&2
             exit 1
           fi
 
@@ -86,7 +93,15 @@ jobs:
             --repository "$GITHUB_REPOSITORY" \
             --artifact-name "$ARTIFACT_NAME" \
             --expected-sha256 "$EXPECTED_SHA256"
-          if [[ "${{ steps.archive.outputs.release_tag }}" != "${{ steps.restore.outputs.release_tag }}" ]]; then
+
+      - name: Require deployment/archive identity match
+        shell: bash
+        env:
+          ARCHIVE_RELEASE_TAG: ${{ steps.archive.outputs.release_tag }}
+          POINTER_RELEASE_TAG: ${{ steps.restore.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$ARCHIVE_RELEASE_TAG" != "$POINTER_RELEASE_TAG" ]]; then
             echo "Deployment pointer release tag does not match long-term archive." >&2
             exit 1
           fi
