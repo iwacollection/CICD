@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "ruleset_name": "main-production-governance",
+  "target": "branch",
+  "enforcement": "active",
+  "include_refs": [
+    "~DEFAULT_BRANCH"
+  ],
+  "required_rule_types": [
+    "deletion",
+    "non_fast_forward",
+    "pull_request",
+    "required_status_checks"
+  ],
+  "pull_request": {
+    "required_approving_review_count_min": 1,
+    "dismiss_stale_reviews_on_push": true,
+    "require_code_owner_review": true,
+    "required_review_thread_resolution": true,
+    "require_extra_approval_for_unattributed_changes": true
+  },
+  "required_status_checks": {
+    "strict_required_status_checks_policy": true,
+    "contexts": [
+      "Validate CI platform",
+      "Build gate",
+      "Toolchain gate"
+    ]
+  },
+  "allow_bypass_actors": false
+}
