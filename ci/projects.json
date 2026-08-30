@@ -2,10 +2,33 @@
   "schema_version": 1,
   "projects": [
     {
+      "name": "hello-lib",
+      "enabled": true,
+      "path": "examples/cpp-lib",
+      "depends_on": [],
+      "targets": [
+        {
+          "enabled": true,
+          "soc": "generic",
+          "target_os": "linux",
+          "arch": "x86_64",
+          "toolchain": "gcc-host-container-v1",
+          "runner_labels": ["ubuntu-latest"],
+          "build_command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && cmake --build build --parallel 2 && ccache --show-stats",
+          "test_command": "test -s build/libhello-lib.a && test -f include/hello_lib.h",
+          "fast_test_command": "test -s build/libhello-lib.a && test -f include/hello_lib.h",
+          "artifact_paths": ["build/libhello-lib.a", "include/hello_lib.h"],
+          "dependency_lock_files": [],
+          "cache_paths": ["examples/cpp-lib/.cache/ccache"],
+          "cache_key_files": ["CMakeLists.txt", "include/hello_lib.h", "src/hello_lib.cpp"]
+        }
+      ]
+    },
+    {
       "name": "hello-cpp",
       "enabled": true,
       "path": "examples/cpp-app",
-      "depends_on": [],
+      "depends_on": ["hello-lib"],
       "targets": [
         {
           "enabled": true,
@@ -18,6 +41,7 @@
           "test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "fast_test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "artifact_paths": ["build/hello-ci"],
+          "dependency_lock_files": [],
           "cache_paths": ["examples/cpp-app/.cache/ccache"],
           "cache_key_files": ["CMakeLists.txt", "src/main.cpp"]
         }
@@ -25,25 +49,27 @@
     },
     {
       "name": "embedded-firmware-template",
-      "enabled": false,
+      "enabled": true,
       "path": "firmware/product-a",
       "depends_on": [],
       "targets": [
         {
-          "enabled": true,
+          "enabled": false,
           "soc": "rk",
           "target_os": "linux",
           "arch": "arm64",
           "toolchain": "rk-sdk-2026.08",
-          "runner_labels": ["self-hosted", "linux", "arm64", "soc-rk"],
+          "runner_labels": ["self-hosted", "linux", "x64", "soc-rk"],
           "build_command": "./ci/build.sh rk linux arm64",
           "test_command": "./ci/test-package.sh out/rk",
+          "pr_validation_command": "./ci/pr-validate.sh rk linux arm64",
           "artifact_paths": ["out/rk/**/*.img", "out/rk/**/*.bin"],
+          "dependency_lock_files": ["deps.lock", "toolchain.lock"],
           "cache_paths": ["firmware/product-a/.cache/ccache", "firmware/product-a/.cache/vendor"],
           "cache_key_files": ["deps.lock", "toolchain.lock"]
         },
         {
-          "enabled": true,
+          "enabled": false,
           "soc": "qualcomm",
           "target_os": "android",
           "arch": "arm64",
@@ -51,12 +77,14 @@
           "runner_labels": ["self-hosted", "linux", "arm64", "soc-qualcomm"],
           "build_command": "./ci/build.sh qualcomm android arm64",
           "test_command": "./ci/test-package.sh out/qualcomm",
+          "pr_validation_command": "./ci/pr-validate.sh qualcomm android arm64",
           "artifact_paths": ["out/qualcomm/**/*.img", "out/qualcomm/**/*.zip"],
+          "dependency_lock_files": ["deps.lock", "toolchain.lock"],
           "cache_paths": ["firmware/product-a/.cache/ccache", "firmware/product-a/.cache/vendor"],
           "cache_key_files": ["deps.lock", "toolchain.lock"]
         },
         {
-          "enabled": true,
+          "enabled": false,
           "soc": "mediatek",
           "target_os": "android",
           "arch": "arm64",
@@ -64,7 +92,9 @@
           "runner_labels": ["self-hosted", "linux", "arm64", "soc-mediatek"],
           "build_command": "./ci/build.sh mediatek android arm64",
           "test_command": "./ci/test-package.sh out/mediatek",
+          "pr_validation_command": "./ci/pr-validate.sh mediatek android arm64",
           "artifact_paths": ["out/mediatek/**/*.img", "out/mediatek/**/*.zip"],
+          "dependency_lock_files": ["deps.lock", "toolchain.lock"],
           "cache_paths": ["firmware/product-a/.cache/ccache", "firmware/product-a/.cache/vendor"],
           "cache_key_files": ["deps.lock", "toolchain.lock"]
         }

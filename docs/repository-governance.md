@@ -1,45 +1,270 @@
-# 仓库治理基线
+# 仓库治理基线与漂移审计
 
-当前代码层已经采用 PR + CI 的企业工作流，但仓库设置也必须阻止绕过。主分支应启用 GitHub Ruleset 或 Branch Protection。
+CI 代码正确并不代表 GitHub Repository Settings 一定正确。Required Check、PR 规则、force-push 和 deletion 都属于生产控制面，所以需要：
 
-## main 必须满足
+```text
+Versioned Policy
+      +
+Live Ruleset Audit
+```
 
-- 禁止直接 push main，所有变更通过 Pull Request。
-- 至少 1 名审批人；工具链、CI 平台、安全目录建议 2 名审批人。
-- 新提交后旧审批失效，防止审批后偷偷追加提交。
-- 合并前必须解决所有 Review Thread。
-- 必须通过稳定的最终状态检查：`Platform Validate / Validate CI platform`、`Build Matrix / Build gate`、`Toolchain Supply Chain / Toolchain gate`。不要把 `Discover` 或动态 Matrix Job 配成 Required Check；它们成功不代表后续构建成功，名称也会随目标变化。
-- 禁止强制推送与删除 main。
-- 管理员也应遵守规则，紧急绕过必须留下审计记录。
-- 建议启用签名提交或 GitHub vigilant mode；发布 tag 使用受保护规则。
+## 1. 当前仓库采用单维护者治理模式
 
-## CODEOWNERS
+当前仓库只有一个长期维护者，因此不使用“作者必须找另一位 Code Owner 审批自己 PR”的多人治理规则。
 
-`.github/CODEOWNERS` 负责声明关键目录责任人。真正强制 CODEOWNERS 审批需要配合 Ruleset 的“Require review from Code Owners”。
+目标 Ruleset：
 
-## 权限模型
+```text
+main-production-governance
+```
 
-业务 CI 默认只有 `contents: read`。只有确实需要写入的 Job 单独提升权限：
+单维护者模式要求：
 
-- Toolchain Publish：`packages: write`、`id-token: write`、`attestations: write`。
-- 业务制品来源证明：独立 Attestation Job 才拥有 `id-token: write`、`attestations: write`。
-- PR 验证任务不得拥有 packages 写权限。
-- PR 构建固定使用 GitHub Hosted Runner；目录中声明的 Self-hosted Runner 只允许受信任的 main/手工构建使用。
+```text
+main 必须通过 PR                 = true
+required approving reviews      = 0
+require Code Owner review       = false
+resolve review threads          = true
+dismiss stale reviews on push   = true
+extra approval for unattributed = true
+branch deletion                 = forbidden
+non-fast-forward / force-push   = forbidden
+bypass actors                   = none
+```
 
-不要在仓库 Secrets 中保存云平台长期 Access Key；后续云发布统一使用 OIDC/Federated Identity 短期身份。
+Required Checks 继续强制：
 
-## 紧急变更
+```text
+Validate CI platform
+Build gate
+Toolchain gate
+```
 
-紧急事故允许走专用 Break-glass 流程，但不能通过关闭分支保护完成。推荐做法是：
+所以取消人工 Approval 并不等于允许直接修改 `main`。正常路径仍然是：
+
+```text
+feature branch
+      ↓
+Pull Request
+      ↓
+Validate CI platform
+      ↓
+Build gate
+      ↓
+Toolchain gate
+      ↓
+Review threads resolved
+      ↓
+Merge
+```
+
+## 2. 为什么不是 approvals=1 + CODEOWNERS=true
+
+当前 `.github/CODEOWNERS` 的 owner 是仓库维护者本人。如果：
+
+```text
+PR 作者 = 唯一 Code Owner
+```
+
+同时 Ruleset 又要求：
+
+```text
+approval >= 1
+require Code Owner review = true
+```
+
+GitHub 不允许 PR 作者批准自己的 PR，于是会形成结构性死锁：CI 全绿也无法合并。
+
+因此当前阶段采用单维护者策略。未来如果仓库变成多人维护，可以再通过单独治理 PR 升级为：
+
+```text
+approvals >= 1
+require Code Owner review = true
+```
+
+但必须先确保存在至少两个真实维护身份。
+
+## 3. 期望状态代码化
+
+仓库治理策略保存在：
+
+```text
+ci/repository-governance-policy.json
+```
+
+当前 schema v2 对 Pull Request 关键参数采用**显式期望值**，不是简单的“越严格越好”。原因是审批数量和 Code Owner Review 在单维护者仓库里过度收紧会让仓库不可操作。
+
+当前 Pull Request 期望：
+
+```json
+{
+  "required_approving_review_count": 0,
+  "dismiss_stale_reviews_on_push": true,
+  "require_code_owner_review": false,
+  "required_review_thread_resolution": true,
+  "require_extra_approval_for_unattributed_changes": true
+}
+```
+
+Required Status Checks 仍按最小集合验证：以后可以新增 `Security gate`，但以下三个不能删除：
+
+```text
+Validate CI platform
+Build gate
+Toolchain gate
+```
+
+## 4. 自动漂移审计
+
+实现：
+
+```text
+.github/workflows/repository-governance.yml
+        ↓
+scripts/ci/repository_governance.py
+        ↓
+GitHub Rulesets API
+        ↓
+compare live state vs versioned policy
+```
+
+`Repository Governance` 定时运行，也支持手工触发。
+
+它会生成：
+
+```text
+repository-governance.json
+repository-governance.md
+```
+
+并保留审计证据。
+
+## 5. 当前哪些漂移会失败
+
+包括：
+
+```text
+Ruleset 缺失或 inactive
+~DEFAULT_BRANCH selector 被移除
+branch deletion 保护被删除
+non-fast-forward 保护被删除
+approval count != 0
+require_code_owner_review != false
+review thread resolution 被关闭
+stale review invalidation 被关闭
+extra approval for unattributed changes 被关闭
+strict required status checks 被关闭
+Validate CI platform 被删除
+Build gate 被删除
+Toolchain gate 被删除
+可见的 bypass actor 被增加
+```
+
+这里需要特别理解：
+
+```text
+approval 从 0 改成 1
+```
+
+在团队仓库可能叫“加强”，但在当前单维护者仓库会重新制造合并死锁，所以被视为 governance drift。
+
+## 6. CODEOWNERS 仍然保留
+
+`.github/CODEOWNERS` 仍用于声明关键目录的责任人，例如：
+
+```text
+/.github/workflows/
+/ci/
+/scripts/ci/
+/tests/
+/docker/toolchains/
+```
+
+只是当前 Ruleset 不要求 Code Owner 必须执行 Approval。
+
+这样保留了：
+
+```text
+ownership metadata
+```
+
+但不会产生单人 Self-Approval 死锁。
+
+未来多人维护时可以重新启用强制 Code Owner Review。
+
+## 7. bypass actor 的可见性边界
+
+GitHub Rulesets API 并不保证普通只读审计身份一定能看到 `bypass_actors`。
+
+日常治理 Workflow 保持只读：
+
+```text
+contents: read
+```
+
+不会为了审计 Ruleset 而给自己管理写权限。
+
+如果 API 能返回 bypass actors：
+
+```text
+[]      -> 通过
+非空    -> drift
+```
+
+如果字段因为权限不可见：
+
+```text
+healthy-with-limited-visibility
+```
+
+报告会明确提示可见性不足，不会假装已经证明 bypass 为空。
+
+## 8. 最小权限仍保持
+
+单维护者模式只取消“无意义的人工自审批”，不会放宽流水线执行权限。
+
+仍要求：
+
+- PR 任务不拥有 package write；
+- 不可信 PR 不进入 Self-hosted SoC Runner；
+- Attestation 使用独立最小权限 Job；
+- Toolchain Publish 才拥有必要的 packages/id-token/attestations write；
+- 云发布使用 OIDC / Federated Identity，不保存长期 Access Key；
+- 无 Ruleset bypass actor；
+- 禁止 force-push 和 main deletion。
+
+## 9. 紧急变更
+
+紧急事故也不通过关闭 Ruleset 或 force-push 处理。
+
+推荐：
 
 ```text
 Incident
-  -> Emergency PR
-  -> 最小变更
-  -> Required CI
-  -> 指定审批人
-  -> Merge
-  -> 事后 Review / RCA
+  ↓
+Emergency PR
+  ↓
+最小变更
+  ↓
+Required CI
+  ↓
+Merge
+  ↓
+事后 Review / RCA
 ```
 
-任何紧急绕过都必须记录事故编号、操作者、原因、开始/结束时间和后续修复项。
+如果未来建立多人团队和 Break-glass 身份，需要独立授权、时间边界、事故编号和自动审计。
+
+## 10. 与 Platform Health 的区别
+
+```text
+Platform Health
+    -> CI 运行得稳不稳
+    -> Success / Queue / Duration / Rerun
+
+Repository Governance
+    -> 生产控制面有没有被改坏
+    -> Ruleset / PR / Required Check / force-push / deletion
+```
+
+两个能力共同构成 CI 平台的生产运维面。

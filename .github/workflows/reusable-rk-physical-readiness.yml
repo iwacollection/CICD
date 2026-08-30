@@ -1,0 +1,58 @@
+name: Reusable RK Physical Readiness
+
+on:
+  workflow_call:
+    inputs:
+      platform_ref:
+        description: "Exact 40-character CICD platform commit SHA"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    name: Physical RK Runner + SDK + HIL readiness
+    runs-on: [self-hosted, linux, x64, soc-rk]
+    timeout-minutes: 15
+    steps:
+      - name: Require trusted main caller
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]] || { echo "Physical RK readiness requires the caller main branch" >&2; exit 1; }
+          [[ "${{ inputs.platform_ref }}" =~ ^[0-9a-f]{40}$ ]] || { echo "platform_ref must be an exact 40-character commit SHA" >&2; exit 1; }
+
+      - name: Checkout immutable central platform
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: iwacollection/CICD
+          ref: ${{ inputs.platform_ref }}
+          path: .ci-platform
+          persist-credentials: false
+
+      - name: Execute physical preflight and lease a real board
+        shell: bash
+        run: >-
+          python3 .ci-platform/ops/rk-runner/physical-preflight.py
+          --repo-root .ci-platform
+          --profile rk-linux-arm64-lab
+          --report rk-physical-preflight.json
+
+      - name: Readiness summary
+        shell: bash
+        run: |
+          {
+            echo "### RK physical readiness"
+            echo "- Caller repository: ${GITHUB_REPOSITORY}"
+            echo "- Runner: ${RUNNER_NAME}"
+            echo "- Required labels: self-hosted, linux, x64, soc-rk"
+            echo "- Target: linux/arm64"
+            echo "- SDK: verified"
+            echo "- HIL lease: acquired and released"
+            echo ""
+            echo '```json'
+            cat rk-physical-preflight.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

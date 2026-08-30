@@ -36,7 +36,28 @@ def _toolchain_index(toolchain_data: dict | None) -> dict[str, dict]:
     }
 
 
-def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str]:
+def _hardware_index(hardware_data: dict | None) -> dict[str, dict]:
+    if not hardware_data:
+        return {}
+    items = hardware_data.get("profiles", [])
+    if not isinstance(items, list):
+        return {}
+    return {
+        item["id"]: item
+        for item in items
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("id")
+    }
+
+
+def _string_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) and item for item in value)
+
+
+def validate_catalog(
+    data: dict,
+    toolchain_data: dict | None = None,
+    hardware_data: dict | None = None,
+) -> list[str]:
     errors: list[str] = []
     if data.get("schema_version") != 1:
         errors.append("schema_version must be 1")
@@ -46,6 +67,7 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
         return errors + ["projects must be a non-empty list"]
 
     toolchains = _toolchain_index(toolchain_data)
+    hardware_profiles = _hardware_index(hardware_data)
     names: set[str] = set()
     for pidx, project in enumerate(projects):
         prefix = f"projects[{pidx}]"
@@ -64,9 +86,7 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
             errors.append(f"{prefix}.path must be a non-empty string")
 
         impact_paths = project.get("impact_paths", [])
-        if not isinstance(impact_paths, list) or not all(
-            isinstance(item, str) and item for item in impact_paths
-        ):
+        if not _string_list(impact_paths):
             errors.append(f"{prefix}.impact_paths must be a string list")
 
         depends_on = project.get("depends_on", [])
@@ -108,9 +128,19 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
                 )
 
             runner_labels = target.get("runner_labels")
-            if not isinstance(runner_labels, list) or not runner_labels or not all(isinstance(x, str) and x for x in runner_labels):
+            if not _string_list(runner_labels) or not runner_labels:
                 errors.append(f"{tprefix}.runner_labels must be a non-empty string list")
+                runner_labels = []
 
+            pr_validation_command = target.get("pr_validation_command", "")
+            if not isinstance(pr_validation_command, str):
+                errors.append(f"{tprefix}.pr_validation_command must be a string")
+            elif "self-hosted" in runner_labels and not pr_validation_command.strip():
+                errors.append(
+                    f"{tprefix}.pr_validation_command is required for self-hosted targets so PR validation fails closed"
+                )
+
+            definition: dict | None = None
             if toolchains and isinstance(toolchain, str):
                 definition = toolchains.get(toolchain)
                 if not definition:
@@ -121,6 +151,34 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
                             f"{tprefix}.toolchain {toolchain} must be active before an enabled target can consume it"
                         )
 
+            if definition:
+                hardware_profile_id = definition.get("hardware_profile", "")
+                if "self-hosted" in runner_labels and not hardware_profile_id:
+                    errors.append(f"{tprefix} self-hosted target must use a toolchain bound to a hardware_profile")
+                if hardware_profile_id:
+                    if definition.get("execution_mode") != "host":
+                        errors.append(f"{tprefix} hardware_profile toolchain must use host execution mode")
+                    if hardware_data is not None:
+                        profile = hardware_profiles.get(hardware_profile_id)
+                        if not profile:
+                            errors.append(f"{tprefix}.toolchain references unknown hardware profile {hardware_profile_id}")
+                        else:
+                            target_tuple = (soc, target_os, arch)
+                            profile_tuple = (profile.get("soc"), profile.get("target_os"), profile.get("arch"))
+                            if target_tuple != profile_tuple:
+                                errors.append(
+                                    f"{tprefix} target {target_tuple} does not match hardware profile {hardware_profile_id} {profile_tuple}"
+                                )
+                            if set(runner_labels) != set(profile.get("runner_labels", [])):
+                                errors.append(
+                                    f"{tprefix}.runner_labels must exactly match hardware profile {hardware_profile_id}"
+                                )
+                            if project.get("enabled", True) and target.get("enabled", True):
+                                if profile.get("status") != "active":
+                                    errors.append(
+                                        f"{tprefix}.hardware profile {hardware_profile_id} must be active before the target can run"
+                                    )
+
             if not isinstance(target.get("build_command"), str) or not target.get("build_command"):
                 errors.append(f"{tprefix}.build_command must be a non-empty string")
             test_command = target.get("test_command", "")
@@ -130,19 +188,19 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
             if not isinstance(fast_test_command, str):
                 errors.append(f"{tprefix}.fast_test_command must be a string")
             artifacts = target.get("artifact_paths")
-            if not isinstance(artifacts, list) or not artifacts or not all(isinstance(x, str) and x for x in artifacts):
+            if not _string_list(artifacts) or not artifacts:
                 errors.append(f"{tprefix}.artifact_paths must be a non-empty string list")
 
+            dependency_lock_files = target.get("dependency_lock_files", [])
+            if not _string_list(dependency_lock_files):
+                errors.append(f"{tprefix}.dependency_lock_files must be a string list")
+
             cache_paths = target.get("cache_paths", [])
-            if not isinstance(cache_paths, list) or not all(
-                isinstance(item, str) and item for item in cache_paths
-            ):
+            if not _string_list(cache_paths):
                 errors.append(f"{tprefix}.cache_paths must be a string list")
                 cache_paths = []
             cache_key_files = target.get("cache_key_files", [])
-            if not isinstance(cache_key_files, list) or not all(
-                isinstance(item, str) and item for item in cache_key_files
-            ):
+            if not _string_list(cache_key_files):
                 errors.append(f"{tprefix}.cache_key_files must be a string list")
                 cache_key_files = []
             if cache_paths and not cache_key_files:
@@ -160,11 +218,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("catalog", nargs="?", default="ci/projects.json")
     parser.add_argument("--toolchains", default="ci/toolchains.json")
+    parser.add_argument("--hardware-profiles", default="ci/hardware-profiles.json")
     args = parser.parse_args()
     try:
         data = load_catalog(Path(args.catalog))
         toolchain_data = load_catalog(Path(args.toolchains))
-        errors = validate_catalog(data, toolchain_data)
+        hardware_data = load_catalog(Path(args.hardware_profiles))
+        errors = validate_catalog(data, toolchain_data, hardware_data)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -172,7 +232,7 @@ def main() -> int:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    print(f"OK: {len(data['projects'])} project definitions validated against central toolchains")
+    print(f"OK: {len(data['projects'])} project definitions validated against central toolchains and hardware profiles")
     return 0
 
 

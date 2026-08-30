@@ -41,6 +41,8 @@ jobs:
 
 ## 3. RK 项目示例
 
+Self-hosted 目标在 PR 阶段必须声明 `pr_validation_command`。这条命令必须能够在 GitHub Hosted Runner 上执行，不能依赖 RK SDK、许可证服务器、板卡或企业内网专用资源。
+
 ```yaml
 jobs:
   rk-build:
@@ -51,6 +53,7 @@ jobs:
       working_directory: .
       build_command: ./ci/build.sh rk linux arm64
       test_command: ./ci/test-package.sh out/rk
+      pr_validation_command: ./ci/pr-validate.sh rk linux arm64
       artifact_paths_json: '["out/rk/**/*.img","out/rk/**/*.bin"]'
       soc: rk
       target_os: linux
@@ -63,24 +66,39 @@ jobs:
         source/.cache/vendor
 ```
 
+推荐 `pr_validation_command` 做这些不依赖硬件的检查：
+
+```text
+脚本语法检查
+配置/清单校验
+格式检查
+静态分析
+可在 Hosted Runner 执行的单元测试
+依赖锁文件完整性检查
+```
+
+如果 Self-hosted 目标没有配置 `pr_validation_command`，PR 会直接失败，不再允许“只跳过硬件构建也算绿色”。
+
 ## 4. 高通与 MTK
 
-只改 target 与 Runner 能力，不复制平台逻辑：
+只改 target 与 Runner 能力，不复制平台逻辑；同样必须为 PR 提供 Hosted-safe 的 `pr_validation_command`：
 
 ```text
 Qualcomm
-soc             = qualcomm
-target_os       = android
-arch            = arm64
-toolchain       = qcom-sdk-2026.08
-runner labels   = self-hosted, linux, arm64, soc-qualcomm
+soc                   = qualcomm
+target_os             = android
+arch                  = arm64
+toolchain             = qcom-sdk-2026.08
+runner labels         = self-hosted, linux, arm64, soc-qualcomm
+pr_validation_command = 不依赖 Qcom SDK/许可证/板卡的 PR 校验命令
 
 MediaTek
-soc             = mediatek
-target_os       = android
-arch            = arm64
-toolchain       = mtk-sdk-2026.08
-runner labels   = self-hosted, linux, arm64, soc-mediatek
+soc                   = mediatek
+target_os             = android
+arch                  = arm64
+toolchain             = mtk-sdk-2026.08
+runner labels         = self-hosted, linux, arm64, soc-mediatek
+pr_validation_command = 不依赖 MTK SDK/许可证/板卡的 PR 校验命令
 ```
 
 ## 5. 业务仓库负责什么
@@ -89,6 +107,7 @@ runner labels   = self-hosted, linux, arm64, soc-mediatek
 
 - 自己的源码
 - 自己的 build/test 脚本
+- Self-hosted 目标的 Hosted-safe PR 校验脚本
 - 自己的依赖 lock 文件
 - 声明最终制品路径
 - 声明需要什么工具链/Runner
@@ -151,11 +170,11 @@ CICD main
 
 不要修改 `main` 后让所有生产仓库在下一秒同时自动吃到新逻辑。
 
-无论业务仓库声明什么 Runner，`pull_request` 事件都会固定落到 GitHub Hosted Runner；Self-hosted SoC Runner 只处理合并后的受信代码。
+无论业务仓库声明什么 Runner，Self-hosted 目标的非 main 执行都不会进入特权 Runner；PR 会固定落到 GitHub Hosted Runner，完整 Self-hosted SoC 构建只处理受信 main 代码。
 
-如果目标的 `runner_labels_json` 包含 `self-hosted`，PR 不会在普通 x64 Hosted Runner 上误跑依赖 SDK、许可证或板卡能力的硬件构建：
+如果目标的 `runner_labels_json` 包含 `self-hosted`，PR 不会在普通 x64 Hosted Runner 上误跑依赖 SDK、许可证或板卡能力的硬件构建，而是只执行明确配置的 `pr_validation_command`。
 
-- 配置了 `pr_validation_command`：在 Hosted Runner 执行这条与硬件无关的源码检查，例如配置、格式、静态分析或单元测试。
-- 未配置 `pr_validation_command`：只校验平台版本、Runner 标签和不可变镜像输入，硬件构建与制品上传延后到合并后的受信 main 构建。
+- 配置了 `pr_validation_command`：在 Hosted Runner 执行这条与硬件无关的源码检查。
+- 未配置 `pr_validation_command`：PR 直接失败，提示业务仓库补充 Hosted-safe 校验命令。
 
-因此，生产业务仓库应尽量提供一条不依赖厂商 SDK/许可证的 `pr_validation_command`，而不是把完整 RK/高通/MTK 编译命令硬塞到 Hosted Runner。
+这条规则是故意 fail-closed（失败关闭）：平台不能把“没有真正验证”伪装成绿色检查。完整 RK/高通/MTK 编译、测试和制品上传只在受信 main 阶段执行。

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "pools": {
+    "rk-linux-arm64": [
+      {
+        "id": "rk-board-01",
+        "device_path": "/dev/serial/by-id/REPLACE_WITH_REAL_RK_SERIAL_DEVICE",
+        "env": {
+          "RK_HIL_BOARD": "rk-board-01",
+          "RK_HIL_SERIAL_BAUD": "1500000"
+        }
+      }
+    ]
+  }
+}

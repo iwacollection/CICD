@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "scanner": {
+    "name": "trivy",
+    "version": "v0.70.0",
+    "ignore_unfixed_vulnerabilities": true
+  },
+  "vulnerability": {
+    "deny_severities": ["HIGH", "CRITICAL"]
+  },
+  "license": {
+    "deny_licenses": [
+      "AGPL-3.0-only",
+      "AGPL-3.0-or-later",
+      "BUSL-1.1",
+      "Commons-Clause",
+      "SSPL-1.0"
+    ]
+  },
+  "secret": {
+    "deny_any_finding": true
+  },
+  "misconfiguration": {
+    "deny_severities": ["HIGH", "CRITICAL"]
+  },
+  "container": {
+    "require_base_image_digest": true,
+    "require_apt_snapshot": true,
+    "forbid_latest_tag": true
+  },
+  "artifact": {
+    "require_sbom": true,
+    "require_scan_report": true,
+    "require_cosign_bundle_for_archive": true
+  }
+}

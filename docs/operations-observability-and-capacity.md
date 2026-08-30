@@ -2,6 +2,32 @@
 
 CI 自己也是生产系统。业务发布依赖它，因此不能只关心“流水线能不能写出来”。
 
+## 0. 当前仓库已经真正实现什么
+
+本仓库现在已经把最基础的平台健康指标落成可执行能力，而不再只是本文档里的建议：
+
+```text
+.github/workflows/platform-health.yml
+        |
+        v
+scripts/ci/platform_health.py
+        |
+        +-- Success Rate
+        +-- Queue P95
+        +-- Duration P95
+        +-- Rerun Rate
+        |
+        v
+ci/platform-slo.json
+        |
+        v
+platform-health.json / platform-health.md
+```
+
+`Platform Health` 每 6 小时读取 `main` 分支的 GitHub Actions 历史，计算平台级 SLO；报告会写入 Job Summary，并作为 Artifact 保留 30 天。策略和完整说明见 [platform-health-slo.md](platform-health-slo.md)。
+
+当前没有真实 RK / Qualcomm / MTK 主机，因此不会伪造 Runner CPU、磁盘、HIL 等指标。真实 Runner Pool 上线后再继续扩展对应容量指标。
+
 ## 1. CI 平台要监控什么
 
 ### 控制面
@@ -55,6 +81,8 @@ Success Rate
 ```
 
 Queue Time 很高但 Build Duration 正常，通常是 Runner 容量问题；Build Duration 自己上涨，则继续拆编译、依赖、IO、缓存。
+
+当前 `Platform Health` 已经直接实现 Queue P95、Duration P95 和 Success Rate，并额外增加 Rerun Rate 用于发现“第一次失败、重跑才绿”的 Flaky CI。
 
 ## 3. Runner 容量怎么算
 
@@ -153,6 +181,8 @@ GitHub Actions 托管控制面省掉了 Controller 运维，但 Self-hosted Runn
 - 制品仓库不可用：高优先级。
 - 生产晋级失败：发布/SRE。
 - digest 校验失败：安全级高优先级，停止发布。
+
+当前 `Platform Health` 在样本达到最低数量以后会对 SLO breach 失败，使它可以作为平台级告警信号；新 Workflow 样本不足时只标记 `insufficient-data`，不会误报。
 
 ## 10. 故障演练
 

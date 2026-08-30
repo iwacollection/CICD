@@ -30,26 +30,26 @@
     {
       "id": "rk-sdk-2026.08",
       "status": "planned",
-      "execution_mode": "container",
-      "description": "Rockchip SDK toolchain placeholder; activate only after an immutable digest is promoted",
-      "image": "",
-      "digest": ""
+      "execution_mode": "host",
+      "description": "Rockchip SDK installed on a dedicated self-hosted Runner; activation requires a pinned SDK identity",
+      "hardware_profile": "rk-linux-arm64-lab",
+      "host_identity": ""
     },
     {
       "id": "qcom-sdk-2026.08",
       "status": "planned",
-      "execution_mode": "container",
-      "description": "Qualcomm SDK toolchain placeholder; activate only after an immutable digest is promoted",
-      "image": "",
-      "digest": ""
+      "execution_mode": "host",
+      "description": "Qualcomm Android SDK installed on a dedicated self-hosted Runner; activation requires a pinned SDK identity and license pool",
+      "hardware_profile": "qcom-android-arm64-lab",
+      "host_identity": ""
     },
     {
       "id": "mtk-sdk-2026.08",
       "status": "planned",
-      "execution_mode": "container",
-      "description": "MediaTek SDK toolchain placeholder; activate only after an immutable digest is promoted",
-      "image": "",
-      "digest": ""
+      "execution_mode": "host",
+      "description": "MediaTek Android SDK installed on a dedicated self-hosted Runner; activation requires a pinned SDK identity and license pool",
+      "hardware_profile": "mtk-android-arm64-lab",
+      "host_identity": ""
     }
   ]
 }

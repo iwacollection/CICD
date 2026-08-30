@@ -3,7 +3,7 @@
 
 The command can run directly on the Runner host or inside a Docker image.
 Container mode bind-mounts the working directory to /workspace so build outputs
-remain available to later CI packaging steps.
+and verified DAG upstream artifacts remain available to build commands.
 """
 from __future__ import annotations
 
@@ -18,6 +18,67 @@ from pathlib import Path
 
 def host_command(command: str) -> list[str]:
     return ["bash", "-euo", "pipefail", "-c", command]
+
+
+def _ensure_source_date_epoch(workdir: Path) -> str:
+    """Use the checked-out source commit timestamp as the deterministic build clock."""
+    existing = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
+    if existing:
+        if not existing.isdigit():
+            raise RuntimeError("SOURCE_DATE_EPOCH must be an integer Unix timestamp")
+        return existing
+
+    proc = subprocess.run(
+        ["git", "-C", str(workdir), "show", "-s", "--format=%ct", "HEAD"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "cannot derive SOURCE_DATE_EPOCH from checked-out source commit: "
+            + proc.stderr.strip()
+        )
+    value = proc.stdout.strip()
+    if not value.isdigit():
+        raise RuntimeError("checked-out source commit timestamp is not numeric")
+    os.environ["SOURCE_DATE_EPOCH"] = value
+    return value
+
+
+def _container_env_args(workdir: Path) -> list[str]:
+    args: list[str] = []
+    upstream_root = os.environ.get("CI_UPSTREAM_ROOT", "")
+    upstream_index = os.environ.get("CI_UPSTREAM_INDEX", "")
+    if upstream_root:
+        root = Path(upstream_root).resolve()
+        try:
+            relative_root = root.relative_to(workdir)
+        except ValueError as exc:
+            raise RuntimeError(
+                "CI_UPSTREAM_ROOT must be inside the mounted working directory for container builds"
+            ) from exc
+        container_root = "/workspace/" + relative_root.as_posix()
+        args.extend(["-e", f"CI_UPSTREAM_ROOT={container_root}"])
+    if upstream_index:
+        index = Path(upstream_index).resolve()
+        try:
+            relative_index = index.relative_to(workdir)
+        except ValueError as exc:
+            raise RuntimeError(
+                "CI_UPSTREAM_INDEX must be inside the mounted working directory for container builds"
+            ) from exc
+        container_index = "/workspace/" + relative_index.as_posix()
+        args.extend(["-e", f"CI_UPSTREAM_INDEX={container_index}"])
+
+    # Reproducibility controls are intentionally allow-listed rather than
+    # forwarding the Runner's complete environment into the toolchain image.
+    for key in ("SOURCE_DATE_EPOCH", "CCACHE_DISABLE"):
+        value = os.environ.get(key, "")
+        if value:
+            args.extend(["-e", f"{key}={value}"])
+    return args
 
 
 def container_command(workdir: Path, command: str, image: str) -> list[str]:
@@ -37,6 +98,7 @@ def container_command(workdir: Path, command: str, image: str) -> list[str]:
         "-w",
         "/workspace",
     ]
+    args.extend(_container_env_args(workdir))
 
     # On Linux, keep generated files owned by the Runner user instead of root.
     if hasattr(os, "getuid") and hasattr(os, "getgid"):
@@ -62,12 +124,21 @@ def main() -> int:
         print(f"ERROR: working directory does not exist: {workdir}", file=sys.stderr)
         return 2
 
+    try:
+        source_date_epoch = _ensure_source_date_epoch(workdir)
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
     execution = "container" if args.container_image else "host"
     print("=" * 72)
     print(f"CI build directory : {workdir}")
     print(f"CI execution mode  : {execution}")
     if args.container_image:
         print(f"CI container image : {args.container_image}")
+    if os.environ.get("CI_UPSTREAM_ROOT"):
+        print(f"CI upstream root   : {os.environ['CI_UPSTREAM_ROOT']}")
+    print(f"SOURCE_DATE_EPOCH  : {source_date_epoch}")
     print(f"CI build command   : {args.command}")
     print("=" * 72)
 

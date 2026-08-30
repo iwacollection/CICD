@@ -1,0 +1,154 @@
+name: Reusable RK Build
+
+on:
+  workflow_call:
+    inputs:
+      project_name:
+        description: "Logical RK product name"
+        required: true
+        type: string
+      working_directory:
+        description: "Project directory inside the caller repository"
+        required: false
+        default: "."
+        type: string
+      pr_validation_command:
+        description: "Hosted-safe validation command used for pull requests"
+        required: true
+        type: string
+      artifact_paths_json:
+        description: "JSON array of RK firmware artifact globs relative to working_directory"
+        required: true
+        type: string
+      dependency_lock_files_json:
+        description: "JSON array of dependency/toolchain lock files"
+        required: false
+        default: "[]"
+        type: string
+      cache_paths:
+        description: "Optional multiline cache paths relative to caller workspace"
+        required: false
+        default: ""
+        type: string
+      cache_key_files_json:
+        description: "JSON cache inputs relative to working_directory"
+        required: false
+        default: "[]"
+        type: string
+      platform_ref:
+        description: "Exact 40-character CICD platform commit SHA; pin the workflow call to the same SHA"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve central RK execution contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runner_labels: ${{ steps.contract.outputs.runner_labels }}
+      toolchain_identity: ${{ steps.contract.outputs.toolchain_identity }}
+    steps:
+      - name: Require immutable platform revision
+        shell: bash
+        env:
+          CI_PLATFORM_REF: ${{ inputs.platform_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$CI_PLATFORM_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "platform_ref must be an exact 40-character SHA" >&2; exit 1; }
+
+      - name: Checkout pinned CI platform contract
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: iwacollection/CICD
+          ref: ${{ inputs.platform_ref }}
+          path: platform
+          persist-credentials: false
+          sparse-checkout: |
+            ci
+            scripts/ci
+          sparse-checkout-cone-mode: true
+
+      - name: Validate RK-first rollout contract
+        working-directory: platform
+        run: |
+          python3 scripts/ci/hardware_catalog.py
+          python3 scripts/ci/toolchain_catalog.py
+          python3 scripts/ci/validate_config.py
+
+      - name: Resolve RK profile and toolchain
+        id: contract
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          root = Path("platform")
+          hardware = json.loads((root / "ci/hardware-profiles.json").read_text(encoding="utf-8"))
+          rollout = json.loads((root / "ci/hardware-rollout.json").read_text(encoding="utf-8"))
+          toolchains = json.loads((root / "ci/toolchains.json").read_text(encoding="utf-8"))
+
+          if rollout.get("phase") != "rk-first" or rollout.get("allowed_active_socs") != ["rk"]:
+              raise SystemExit("central rollout policy is not RK-first")
+
+          profile = next((item for item in hardware["profiles"] if item.get("id") == "rk-linux-arm64-lab"), None)
+          toolchain = next((item for item in toolchains["toolchains"] if item.get("id") == "rk-sdk-2026.08"), None)
+          if not profile or not toolchain:
+              raise SystemExit("central RK profile/toolchain is missing")
+          if toolchain.get("hardware_profile") != profile["id"]:
+              raise SystemExit("RK toolchain is not bound to the central RK hardware profile")
+
+          trusted_main = os.environ.get("EVENT_NAME") in {"push", "workflow_dispatch"} and os.environ.get("REF_NAME") == "refs/heads/main"
+          identity = toolchain.get("host_identity", "")
+          expected = profile.get("sdk", {}).get("expected_sha256", "")
+          if trusted_main:
+              if profile.get("status") != "active" or toolchain.get("status") != "active":
+                  raise SystemExit("trusted RK build requires active RK profile and toolchain")
+              if not re.fullmatch(r"sha256:[0-9a-f]{64}", identity) or identity != expected:
+                  raise SystemExit("trusted RK build requires matching immutable SDK/toolchain identity")
+          else:
+              identity = identity or "planned:rk-sdk-2026.08"
+
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a", encoding="utf-8") as handle:
+              handle.write("runner_labels=" + json.dumps(profile["runner_labels"], separators=(",", ":")) + "\n")
+              handle.write(f"toolchain_identity={identity}\n")
+          PY
+
+  rk:
+    name: RK / ${{ inputs.project_name }}
+    needs: resolve
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-node.yml
+    with:
+      project: ${{ inputs.project_name }}
+      path: ${{ inputs.working_directory }}
+      depends_on_json: "[]"
+      soc: rk
+      target_os: linux
+      arch: arm64
+      toolchain: rk-sdk-2026.08
+      toolchain_identity: ${{ needs.resolve.outputs.toolchain_identity }}
+      runner_labels_json: ${{ needs.resolve.outputs.runner_labels }}
+      execution_mode: host
+      container_image: ""
+      build_command: "rk-platform-adapter"
+      test_command: "rk-hil"
+      pr_validation_command: ${{ inputs.pr_validation_command }}
+      artifact_paths_json: ${{ inputs.artifact_paths_json }}
+      dependency_lock_files_json: ${{ inputs.dependency_lock_files_json }}
+      cache_paths: ${{ inputs.cache_paths }}
+      cache_key_files_json: ${{ inputs.cache_key_files_json }}
+      lane: full
+      platform_ref: ${{ inputs.platform_ref }}

@@ -22,13 +22,18 @@ on:
         default: ""
         type: string
       pr_validation_command:
-        description: "Optional hosted-safe validation command for self-hosted targets on pull requests"
+        description: "Hosted-safe validation command required when a self-hosted target is invoked by a pull request"
         required: false
         default: ""
         type: string
       artifact_paths_json:
         description: "JSON array of artifact globs relative to working_directory"
         required: true
+        type: string
+      dependency_lock_files_json:
+        description: "JSON array of dependency/toolchain lock file globs recorded in Artifact Contract v2"
+        required: false
+        default: "[]"
         type: string
       soc:
         description: "generic/rk/qualcomm/mediatek"
@@ -95,7 +100,7 @@ permissions:
 jobs:
   build:
     name: ${{ inputs.project_name }} / ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(inputs.runner_labels_json) }}
+    runs-on: ${{ contains(fromJSON(inputs.runner_labels_json), 'self-hosted') && github.ref != 'refs/heads/main' && 'ubuntu-latest' || fromJSON(inputs.runner_labels_json) }}
     timeout-minutes: 120
     steps:
       - name: Checkout caller source
@@ -115,7 +120,7 @@ jobs:
             exit 1
           fi
 
-      - name: Checkout CI platform scripts only
+      - name: Checkout immutable CI platform policy and scripts
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: iwacollection/CICD
@@ -125,7 +130,11 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/ci
+            ci
           sparse-checkout-cone-mode: true
+
+      - name: Validate central supply-chain policy
+        run: python3 .ci-platform/scripts/ci/supply_chain_policy.py --policy .ci-platform/ci/supply-chain-policy.json --skip-dockerfiles
 
       - name: Require immutable toolchain image
         if: inputs.container_image != ''
@@ -144,6 +153,7 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_VALUE: ${{ github.ref }}
           RUNNER_LABELS_JSON: ${{ inputs.runner_labels_json }}
         run: |
           set -euo pipefail
@@ -156,11 +166,14 @@ jobs:
               isinstance(label, str) and label for label in labels
           ):
               raise SystemExit("runner_labels_json must be a non-empty JSON string array")
-          hardware_pr = (
-              os.environ["EVENT_NAME"] == "pull_request" and "self-hosted" in labels
-          )
+          self_hosted = "self-hosted" in labels
+          event_name = os.environ["EVENT_NAME"]
+          ref = os.environ["GITHUB_REF_VALUE"]
+          hardware_pr = event_name == "pull_request" and self_hosted
+          untrusted_hardware = self_hosted and ref != "refs/heads/main" and not hardware_pr
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"hardware_pr={str(hardware_pr).lower()}\n")
+              output.write(f"untrusted_hardware={str(untrusted_hardware).lower()}\n")
           PY
 
       - name: Hosted PR validation lane
@@ -172,13 +185,21 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "$CI_PR_VALIDATION_COMMAND" ]]; then
-            echo "Self-hosted hardware build skipped for untrusted pull-request code."
-            echo "Configure pr_validation_command to run a hosted-safe source validation."
-            exit 0
+            echo "Self-hosted hardware PR validation requires pr_validation_command." >&2
+            echo "The job is intentionally failing instead of reporting metadata-only success." >&2
+            exit 1
           fi
           python3 .ci-platform/scripts/ci/run_build.py \
             --working-directory "source/$CI_WORKING_DIRECTORY" \
             --command "$CI_PR_VALIDATION_COMMAND"
+
+      - name: Reject untrusted self-hosted event
+        if: steps.lane.outputs.untrusted_hardware == 'true'
+        shell: bash
+        run: |
+          echo "Self-hosted targets may only execute privileged builds from refs/heads/main." >&2
+          echo "Non-main manual dispatches, branch pushes, tags, and other refs are blocked." >&2
+          exit 1
 
       - name: Login private toolchain registry
         if: steps.lane.outputs.hardware_pr != 'true' && inputs.container_image != '' && inputs.container_registry != ''
@@ -204,9 +225,14 @@ jobs:
         run: |
           set -euo pipefail
           docker pull "$CI_CONTAINER_IMAGE"
-          identity="$(docker image inspect "$CI_CONTAINER_IMAGE" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')"
-          echo "identity=$identity" >> "$GITHUB_OUTPUT"
-          echo "Using toolchain container: $identity"
+          expected="${CI_CONTAINER_IMAGE##*@}"
+          repo_digests="$(docker image inspect "$CI_CONTAINER_IMAGE" --format '{{json .RepoDigests}}')"
+          if [[ "$repo_digests" != *"@$expected"* ]]; then
+            echo "Pulled image does not resolve to expected digest $expected" >&2
+            exit 1
+          fi
+          echo "identity=$expected" >> "$GITHUB_OUTPUT"
+          echo "Using toolchain container: $CI_CONTAINER_IMAGE"
 
       - name: Compute declared cache fingerprint
         if: steps.lane.outputs.hardware_pr != 'true' && inputs.cache_paths != ''
@@ -225,9 +251,9 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ inputs.cache_paths }}
-          key: reusable-ci-v3-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-${{ steps.cache.outputs.fingerprint }}
+          key: reusable-ci-v4-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-${{ steps.cache.outputs.fingerprint }}
           restore-keys: |
-            reusable-ci-v3-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-
+            reusable-ci-v4-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-
 
       - name: Build
         if: steps.lane.outputs.hardware_pr != 'true'
@@ -259,26 +285,84 @@ jobs:
           fi
           python3 .ci-platform/scripts/ci/run_build.py "${args[@]}"
 
-      - name: Package immutable artifact
+      - name: Prepare reusable supply-chain evidence
+        run: rm -rf reusable-security-evidence && mkdir -p reusable-security-evidence
+
+      - name: Scan caller vulnerabilities, licenses, secrets and misconfigurations
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: fs
+          scan-ref: source/${{ inputs.working_directory }}
+          scanners: vuln,license,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: reusable-security-evidence/security-scan.json
+          exit-code: "0"
+          version: v0.70.0
+
+      - name: Generate caller CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: fs
+          scan-ref: source/${{ inputs.working_directory }}
+          format: cyclonedx
+          output: reusable-security-evidence/security-sbom.cdx.json
+          version: v0.70.0
+
+      - name: Enforce caller supply-chain policy
+        run: >-
+          python3 .ci-platform/scripts/ci/supply_chain_policy.py
+          --policy .ci-platform/ci/supply-chain-policy.json
+          --skip-dockerfiles
+          --report reusable-security-evidence/security-scan.json
+          --sbom reusable-security-evidence/security-sbom.cdx.json
+
+      - name: Collect build environment metadata
+        if: steps.lane.outputs.hardware_pr != 'true'
+        shell: bash
+        env:
+          CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+          CI_WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        run: |
+          set -euo pipefail
+          args=(--working-directory "source/$CI_WORKING_DIRECTORY" --output build-environment.json)
+          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
+            args+=(--container-image "$CI_CONTAINER_IMAGE")
+          fi
+          python3 .ci-platform/scripts/ci/collect_build_metadata.py "${args[@]}"
+
+      - name: Package immutable artifact v2
         id: package
         if: steps.lane.outputs.hardware_pr != 'true'
+        shell: bash
         env:
           CI_ARTIFACT_PATHS: ${{ inputs.artifact_paths_json }}
+          CI_DEPENDENCY_LOCKS: ${{ inputs.dependency_lock_files_json }}
           CI_PROJECT_NAME: ${{ inputs.project_name }}
           CI_WORKING_DIRECTORY: ${{ inputs.working_directory }}
           CI_SOC: ${{ inputs.soc }}
           CI_TARGET_OS: ${{ inputs.target_os }}
           CI_ARCH: ${{ inputs.arch }}
           CI_TOOLCHAIN: ${{ inputs.toolchain }}
-        run: >-
-          python3 .ci-platform/scripts/ci/package_artifact.py
-          --project "$CI_PROJECT_NAME"
-          --working-directory "source/$CI_WORKING_DIRECTORY"
-          --artifacts-json "$CI_ARTIFACT_PATHS"
-          --soc "$CI_SOC"
-          --target-os "$CI_TARGET_OS"
-          --arch "$CI_ARCH"
-          --toolchain "$CI_TOOLCHAIN"
+          CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+          CI_RUNNER_LABELS: ${{ inputs.runner_labels_json }}
+          CI_EXECUTION_MODE: ${{ inputs.container_image != '' && 'container' || 'host' }}
+        run: |
+          set -euo pipefail
+          python3 .ci-platform/scripts/ci/package_artifact.py \
+            --project "$CI_PROJECT_NAME" \
+            --working-directory "source/$CI_WORKING_DIRECTORY" \
+            --artifacts-json "$CI_ARTIFACT_PATHS" \
+            --dependency-locks-json "$CI_DEPENDENCY_LOCKS" \
+            --soc "$CI_SOC" \
+            --target-os "$CI_TARGET_OS" \
+            --arch "$CI_ARCH" \
+            --toolchain "$CI_TOOLCHAIN" \
+            --execution-mode "$CI_EXECUTION_MODE" \
+            --container-image "$CI_CONTAINER_IMAGE" \
+            --runner-labels-json "$CI_RUNNER_LABELS" \
+            --build-metadata-file build-environment.json
 
       - name: Verify artifact
         if: steps.lane.outputs.hardware_pr != 'true'
@@ -287,7 +371,7 @@ jobs:
           --directory dist
           --expected-sha256 "${{ steps.package.outputs.digest }}"
 
-      - name: Upload artifact
+      - name: Upload artifact and security evidence
         if: steps.lane.outputs.hardware_pr != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -296,6 +380,8 @@ jobs:
             ${{ steps.package.outputs.bundle }}
             ${{ steps.package.outputs.manifest }}
             ${{ steps.package.outputs.checksum }}
+            reusable-security-evidence/security-scan.json
+            reusable-security-evidence/security-sbom.cdx.json
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
@@ -303,7 +389,6 @@ jobs:
       - name: Summary
         env:
           HARDWARE_PR: ${{ steps.lane.outputs.hardware_pr }}
-          PR_VALIDATION_COMMAND: ${{ inputs.pr_validation_command }}
           PROJECT_NAME: ${{ inputs.project_name }}
           SOC: ${{ inputs.soc }}
           TARGET_OS: ${{ inputs.target_os }}
@@ -318,17 +403,17 @@ jobs:
             echo "- Project: $PROJECT_NAME"
             echo "- Target: $SOC / $TARGET_OS / $ARCH"
             echo "- Toolchain: $TOOLCHAIN"
+            echo "- Supply-chain policy: PASSED"
+            echo "- SBOM: CycloneDX / Trivy v0.70.0"
             if [[ "$HARDWARE_PR" == "true" ]]; then
               echo "- Execution: hosted pull-request validation lane"
-              if [[ -n "$PR_VALIDATION_COMMAND" ]]; then
-                echo "- Validation: hosted-safe command completed"
-              else
-                echo "- Validation: metadata only; hardware build deferred until trusted main"
-              fi
+              echo "- Validation: hosted-safe command completed"
               echo "- Artifact: skipped for pull-request hardware lane"
             else
               echo "- Execution: $EXECUTION_MODE"
               echo "- Container identity: $CONTAINER_IDENTITY"
+              echo "- Artifact contract: v2"
+              echo "- Reproducible bundle: YES"
               echo "- SHA256: $ARTIFACT_SHA256"
               echo "- Rebuild-on-promotion: NO"
             fi

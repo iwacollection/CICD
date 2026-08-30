@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
 from cache_fingerprint import fingerprint_files  # noqa: E402
+from dag_plan import render_dag  # noqa: E402
 from dependency_plan import build_levels  # noqa: E402
 from discover_matrix import build_matrix  # noqa: E402
 from impact_analysis import analyze_impact  # noqa: E402
@@ -40,8 +41,12 @@ class CiPlatformTests(unittest.TestCase):
 
     def test_disabled_soc_template_not_in_matrix(self) -> None:
         matrix = build_matrix(self.projects, self.toolchains)
-        self.assertEqual([item["project"] for item in matrix["include"]], ["hello-cpp"])
-        target = matrix["include"][0]
+        self.assertEqual(
+            [item["project"] for item in matrix["include"]],
+            ["hello-lib", "hello-cpp"],
+        )
+        targets = {item["project"]: item for item in matrix["include"]}
+        target = targets["hello-cpp"]
         self.assertEqual(json.loads(target["runner_labels"]), ["ubuntu-latest"])
         self.assertEqual(target["execution_mode"], "container")
         self.assertEqual(target["toolchain"], "gcc-host-container-v1")
@@ -53,6 +58,7 @@ class CiPlatformTests(unittest.TestCase):
         )
         self.assertEqual(target["lane"], "full")
         self.assertEqual(json.loads(target["cache_key_files"]), ["CMakeLists.txt", "src/main.cpp"])
+        self.assertEqual(json.loads(target["depends_on"]), ["hello-lib"])
 
     def test_cache_fingerprint_changes_with_declared_input(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -125,15 +131,17 @@ class CiPlatformTests(unittest.TestCase):
                 self.assertRegex(reference, r"^[0-9a-f]{40}$", msg=f"{workflow}: {line}")
 
     def test_pr_builds_are_forced_to_hosted_runner(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        central = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        node = (ROOT / ".github" / "workflows" / "dag-node.yml").read_text(encoding="utf-8")
+        self.assertIn("dag-node.yml", central)
+        self.assertIn("name: Attest trusted DAG artifacts", central)
         self.assertIn(
-            "github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(matrix.runner_labels)",
-            workflow,
+            "github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(inputs.runner_labels_json)",
+            node,
         )
-        self.assertIn("name: Attest trusted build artifacts", workflow)
-        build_job = workflow.split("\n  build:", 1)[1].split("\n  attest:", 1)[0]
-        self.assertNotIn("id-token: write", build_job)
-        self.assertNotIn("attestations: write", build_job)
+        self.assertIn("name: Hosted hardware PR validation", node)
+        self.assertNotIn("id-token: write", node)
+        self.assertNotIn("attestations: write", node)
 
         reusable = (
             ROOT / ".github" / "workflows" / "reusable-build.yml"
@@ -169,6 +177,7 @@ class CiPlatformTests(unittest.TestCase):
                     "name": "a",
                     "enabled": True,
                     "path": "services/a",
+                    "depends_on": [],
                     "targets": [
                         {
                             "enabled": True,
@@ -188,6 +197,7 @@ class CiPlatformTests(unittest.TestCase):
                     "name": "b",
                     "enabled": True,
                     "path": "services/b",
+                    "depends_on": [],
                     "targets": [
                         {
                             "enabled": True,
@@ -214,6 +224,7 @@ class CiPlatformTests(unittest.TestCase):
         self.assertEqual(matrix["include"][0]["project"], "a")
         self.assertEqual(matrix["include"][0]["test_command"], "make smoke-test")
         self.assertEqual(matrix["include"][0]["lane"], "fast")
+        self.assertEqual(matrix["include"][0]["depends_on"], "[]")
 
     def test_project_cannot_own_container_image_or_dockerfile(self) -> None:
         data = deepcopy(self.projects)
@@ -306,6 +317,33 @@ class CiPlatformTests(unittest.TestCase):
         result = analyze_impact(data, ["libs/core/include/core.h"])
         self.assertEqual(result["lane"], "fast")
         self.assertEqual(result["projects"], ["lib", "service", "ui"])
+
+    def test_downstream_change_includes_transitive_prerequisites(self) -> None:
+        data = {
+            "projects": [
+                {"name": "lib", "enabled": True, "path": "libs/core", "depends_on": [], "targets": []},
+                {"name": "service", "enabled": True, "path": "services/api", "depends_on": ["lib"], "targets": []},
+                {"name": "ui", "enabled": True, "path": "apps/ui", "depends_on": ["service"], "targets": []},
+            ]
+        }
+        result = analyze_impact(data, ["apps/ui/src/app.ts"])
+        self.assertEqual(result["lane"], "fast")
+        self.assertEqual(result["projects"], ["lib", "service", "ui"])
+
+    def test_real_catalog_renders_two_executable_dag_levels(self) -> None:
+        rendered = render_dag(
+            self.projects,
+            self.toolchains,
+            {"hello-lib", "hello-cpp"},
+            "full",
+        )
+        self.assertEqual(rendered["level_count"], 2)
+        self.assertEqual(rendered["levels"][0]["projects"], ["hello-lib"])
+        self.assertEqual(rendered["levels"][1]["projects"], ["hello-cpp"])
+        self.assertEqual(rendered["levels"][0]["count"], 1)
+        self.assertEqual(rendered["levels"][1]["count"], 1)
+        app = rendered["levels"][1]["matrix"]["include"][0]
+        self.assertEqual(json.loads(app["depends_on"]), ["hello-lib"])
 
     def test_impact_paths_can_claim_shared_files(self) -> None:
         data = {
