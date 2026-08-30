@@ -42,9 +42,13 @@ ssh ...
 
 如果必须 PR 阶段使用 Self-hosted Runner，应配合审批、只读凭据、网络隔离和短生命周期 Runner。
 
-本仓库当前执行边界是：PR 的 Build Matrix 与 Reusable Build 均强制使用 GitHub Hosted Runner，并且 PR Build Job 不拥有 OIDC/Attestation 写权限；目录中的 Self-hosted 标签只在受信任的 main/手工执行中生效。仓库或组织侧仍应保持“公共仓库不可访问 Self-hosted Runner Group”的默认限制。
+本仓库当前执行边界是：PR 的 Build Matrix 与 Reusable Build 均强制使用 GitHub Hosted Runner，并且 PR Build Job 不拥有 OIDC/Attestation 写权限；目录中的 Self-hosted 标签只在受信任的 main 执行中生效。中央 `workflow_dispatch` 也只允许从 `refs/heads/main` 进入可能包含 Self-hosted 目标的完整构建。
 
-Reusable Build 遇到声明了 `self-hosted` 的目标时，会在 PR 上切换为 Hosted Validation Lane：执行可选的 `pr_validation_command`，或仅做输入校验；不会尝试在普通 x64 Runner 上执行依赖 SoC SDK、许可证或板卡的硬件命令。完整硬件构建只在受信代码阶段执行。
+Reusable Build 遇到声明了 `self-hosted` 的目标时，会在 PR 上切换为 Hosted Validation Lane，并且**必须**执行显式配置的 `pr_validation_command`。如果没有配置，PR 会失败关闭（fail-closed），不会再以“仅做 metadata 检查”的方式返回绿色。Hosted Validation Lane 不会尝试执行依赖 SoC SDK、许可证、板卡或内网资源的完整硬件命令；完整硬件构建只在受信 main 阶段执行。
+
+`pr_validation_command` 应只包含 Hosted Runner 能独立完成的检查，例如：脚本语法、配置校验、静态分析、格式检查、依赖锁完整性检查和不依赖厂商 SDK 的单元测试。
+
+仓库或组织侧仍应保持“公共仓库不可访问 Self-hosted Runner Group”的默认限制；workflow 内的分支判断是第二道防线，不应替代 Runner Group 自身的访问控制。
 
 ## 3. Runner 最好是短生命周期
 
