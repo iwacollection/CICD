@@ -9,7 +9,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
-from reproducibility_check import compare_iterations  # noqa: E402
+from reproducibility_check import _find_project_target, compare_iterations, render_markdown  # noqa: E402
 from run_build import _container_env_args  # noqa: E402
 
 
@@ -52,6 +52,53 @@ class ReproducibilityGateTests(unittest.TestCase):
         mismatches = compare_iterations(first, second)
         self.assertTrue(any(item["kind"] == "artifact-set" for item in mismatches))
 
+    def test_target_selection_defaults_enabled_to_true_and_pins_toolchain(self) -> None:
+        projects = {
+            "projects": [
+                {
+                    "name": "demo",
+                    "path": "examples/demo",
+                    "targets": [
+                        {
+                            "soc": "generic",
+                            "target_os": "linux",
+                            "arch": "x86_64",
+                            "toolchain": "other-toolchain",
+                        },
+                        {
+                            "soc": "generic",
+                            "target_os": "linux",
+                            "arch": "x86_64",
+                            "toolchain": "gcc-host-container-v1",
+                        },
+                    ],
+                }
+            ]
+        }
+        project, target = _find_project_target(
+            projects,
+            project_name="demo",
+            soc="generic",
+            target_os="linux",
+            arch="x86_64",
+            expected_toolchain="gcc-host-container-v1",
+        )
+        self.assertEqual(project["name"], "demo")
+        self.assertEqual(target["toolchain"], "gcc-host-container-v1")
+
+    def test_error_report_is_renderable_for_operational_failures(self) -> None:
+        markdown = render_markdown(
+            {
+                "status": "error",
+                "project": "hello-lib",
+                "target": "generic/linux/x86_64",
+                "toolchain": "gcc-host-container-v1",
+                "error": "container pull failed",
+            }
+        )
+        self.assertIn("Status: **error**", markdown)
+        self.assertIn("container pull failed", markdown)
+
     @patch.dict(
         os.environ,
         {
@@ -77,6 +124,7 @@ class ReproducibilityGateTests(unittest.TestCase):
         self.assertIn("--soc generic", workflow)
         self.assertIn("--target-os linux", workflow)
         self.assertIn("--arch x86_64", workflow)
+        self.assertIn("--toolchain gcc-host-container-v1", workflow)
         self.assertIn("- name: Enforce reproducibility result", workflow)
         self.assertIn('REPRO_OUTCOME: ${{ steps.reproducibility.outcome }}', workflow)
         self.assertIn("reproducibility.json", workflow)
@@ -91,6 +139,16 @@ class ReproducibilityGateTests(unittest.TestCase):
         self.assertIn("CCACHE_DISABLE=1", checker)
         self.assertIn("SOURCE_DATE_EPOCH", checker)
         self.assertIn("TemporaryDirectory", checker)
+        self.assertIn('parser.add_argument("--toolchain", default="gcc-host-container-v1")', checker)
+        self.assertIn('"status": "error"', checker)
+        self.assertIn("_write_outputs(args, report)", checker)
+
+    def test_production_build_entry_derives_commit_based_source_date_epoch(self) -> None:
+        runner = (ROOT / "scripts" / "ci" / "run_build.py").read_text(encoding="utf-8")
+        self.assertIn("def _ensure_source_date_epoch", runner)
+        self.assertIn('"git", "-C", str(workdir), "show", "-s", "--format=%ct", "HEAD"', runner)
+        self.assertIn('os.environ["SOURCE_DATE_EPOCH"] = value', runner)
+        self.assertIn("_ensure_source_date_epoch(workdir)", runner)
 
 
 if __name__ == "__main__":
