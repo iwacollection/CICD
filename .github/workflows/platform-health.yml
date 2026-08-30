@@ -1,0 +1,76 @@
+name: Platform Health
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: platform-health-main
+  cancel-in-progress: true
+
+jobs:
+  health:
+    name: Evaluate CI platform SLO
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validate SLO policy
+        run: python3 scripts/ci/platform_health.py --policy ci/platform-slo.json --validate-policy
+
+      - name: Collect main CI health and evaluate SLO
+        id: health
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          python3 scripts/ci/platform_health.py
+          --policy ci/platform-slo.json
+          --json-out platform-health.json
+          --markdown-out platform-health.md
+          --github-output "$GITHUB_OUTPUT"
+          --fail-on-breach
+
+      - name: Publish health summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f platform-health.md ]]; then
+            cat platform-health.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "# CI Platform Health" >> "$GITHUB_STEP_SUMMARY"
+            echo "Health report was not generated; inspect the collection step." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload platform health evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: platform-health-${{ github.run_id }}
+          path: |
+            platform-health.json
+            platform-health.md
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce platform health gate
+        if: always()
+        env:
+          HEALTH_OUTCOME: ${{ steps.health.outcome }}
+          HEALTH_STATUS: ${{ steps.health.outputs.status }}
+          BREACH_COUNT: ${{ steps.health.outputs.breach_count }}
+        run: |
+          if [[ "$HEALTH_OUTCOME" != "success" ]]; then
+            echo "CI platform health collection or SLO evaluation failed; status=${HEALTH_STATUS:-unknown}, breaches=${BREACH_COUNT:-unknown}" >&2
+            exit 1
+          fi
+          echo "CI platform health status: ${HEALTH_STATUS:-unknown}; breaches=${BREACH_COUNT:-0}"
