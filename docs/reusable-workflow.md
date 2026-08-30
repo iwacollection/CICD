@@ -1,10 +1,24 @@
 # 业务仓库如何调用中央 CI
 
-对于独立业务仓库，推荐使用 `.github/workflows/reusable-build.yml`，不用把业务源码搬到 CICD 仓库。
+独立业务仓库不需要把源码搬到 CICD 仓库，也不应该复制一整套中央 Workflow。
 
-## 1. 业务仓库最小调用示例
+推荐模型：
 
-在业务仓库创建：
+```text
+Business Repository
+        ↓ workflow_call
+Central CICD Platform
+        ↓
+shared build / security / artifact policy
+```
+
+业务仓库负责自己的 build/test recipe；中央平台负责 Runner 信任边界、供应链、Artifact Contract 和通用执行规则。
+
+---
+
+## 1. 通用业务仓库最小示例
+
+在业务仓库创建一个很薄的 Workflow：
 
 ```yaml
 name: CI
@@ -24,157 +38,416 @@ jobs:
       build_command: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel 4
       test_command: ./build/my-cpp-service --self-test
       artifact_paths_json: '["build/my-cpp-service"]'
+      dependency_lock_files_json: '[]'
       soc: generic
       target_os: linux
       arch: x86_64
-      toolchain: gcc-14
+      toolchain: gcc-host-container-v1
       runner_labels_json: '["ubuntu-latest"]'
 ```
 
-## 2. 调用版本必须固定完整 Commit SHA
+实际项目如果使用中央登记的 container toolchain，应同时提供对应 immutable container image digest。
+
+不要在文档或业务仓库里自创一个中央 Registry 不存在的 toolchain 名称。
+
+---
+
+## 2. 为什么必须同时固定两个 SHA
+
+调用时有两个位置：
 
 ```text
-@<full commit sha>
+uses: ...reusable-build.yml@<CICD_FULL_COMMIT_SHA>
+
+platform_ref: <CICD_FULL_COMMIT_SHA>
 ```
 
-`uses` 后的 SHA 与 `platform_ref` 必须填写同一个经过审核的 40 位提交。前者固定 Reusable Workflow，后者固定它检出的中央脚本；不再允许脚本悄悄跟随 `main` 漂移。
+二者必须使用同一个审核过的 40 位 commit SHA。
 
-## 3. RK 项目示例
+含义：
 
-Self-hosted 目标在 PR 阶段必须声明 `pr_validation_command`。这条命令必须能够在 GitHub Hosted Runner 上执行，不能依赖 RK SDK、许可证服务器、板卡或企业内网专用资源。
+```text
+uses ref
+  -> 固定 Workflow 本身
+
+platform_ref
+  -> 固定 Workflow checkout 的中央 policy/scripts
+```
+
+不能出现：
+
+```text
+Workflow 固定到旧版本
+中央 scripts 却运行时 checkout main
+```
+
+否则消费者以为自己固定了平台版本，实际规则仍会漂移。
+
+Tag / Release 可以作为人类可读版本，但生产执行推荐继续固定 exact commit SHA。
+
+---
+
+## 3. 通用 Reusable Workflow 的职责
+
+`.github/workflows/reusable-build.yml` 当前统一处理：
+
+```text
+caller source checkout
+        ↓
+platform_ref 校验
+        ↓
+central policy checkout
+        ↓
+Self-hosted trust lane 判断
+        ↓
+immutable toolchain image
+        ↓
+cache fingerprint
+        ↓
+build / test
+        ↓
+Trivy scan
+        ↓
+CycloneDX SBOM
+        ↓
+Supply-chain Policy
+        ↓
+build metadata
+        ↓
+Artifact Contract v2
+        ↓
+verify
+        ↓
+Actions Artifact upload
+```
+
+因此业务仓库不应该再次复制：
+
+- Trivy Gate；
+- SBOM 规则；
+- Artifact manifest；
+- SHA256 打包；
+- Self-hosted PR 隔离逻辑。
+
+否则中央规则升级后会形成两套标准。
+
+---
+
+## 4. 业务仓库负责什么
+
+业务仓库负责：
+
+```text
+源码
+build command / build script
+test command
+Hosted-safe PR validation（硬件目标）
+依赖 lock 文件
+最终 artifact path
+业务特有配置
+```
+
+中央平台负责：
+
+```text
+执行阶段
+Runner 信任边界
+cache identity
+Supply-chain Policy
+SBOM
+Artifact Contract
+统一校验
+平台版本治理
+```
+
+最重要的边界：
+
+> 中央 CI 定义“阶段和契约”，业务项目定义“自己到底怎么构建”。
+
+---
+
+## 5. 为什么 build command 仍属于业务仓库
+
+平台不应该知道所有项目内部细节。
+
+例如：
+
+```text
+C++     -> CMake
+Java    -> Gradle / Maven
+Go      -> go build
+Android -> Gradle / vendor build system
+Firmware -> BSP/vendor scripts
+```
+
+如果中央 Workflow 开始出现：
+
+```text
+if project == A
+if project == B
+if soc == xxx
+```
+
+几百行以后，中央平台会变成所有业务逻辑的耦合点。
+
+推荐业务仓库提供稳定入口：
+
+```bash
+./ci/build.sh
+./ci/test.sh
+```
+
+或者厂商项目：
+
+```bash
+./ci/vendor-rk-build.sh
+./ci/vendor-rk-hil-test.sh
+```
+
+---
+
+## 6. Self-hosted 目标的 PR 信任边界
+
+如果：
+
+```json
+"runner_labels_json": "[\"self-hosted\", ...]"
+```
+
+Pull Request 不会直接进入真实 Self-hosted Runner。
+
+执行模型：
+
+```text
+pull_request
+      ↓
+ubuntu-latest
+      ↓
+pr_validation_command
+```
+
+`pr_validation_command` 必须能够在 Hosted Runner 上执行，不能依赖：
+
+- 厂商 SDK；
+- USB/串口；
+- HIL 板卡；
+- License server；
+- 企业私网中的高权限资源。
+
+适合执行：
+
+```text
+脚本语法检查
+配置 / manifest 校验
+格式检查
+静态分析
+Hosted-safe 单元测试
+lock 文件完整性
+```
+
+如果 Self-hosted target 没有 `pr_validation_command`：
+
+```text
+PR = FAIL
+```
+
+不会采用：
+
+```text
+硬件构建跳过
+只输出 metadata
+PR 绿色
+```
+
+这种“假绿色”模式。
+
+---
+
+## 7. RK 项目推荐使用专用入口
+
+真实 RK 项目优先使用：
+
+```text
+.github/workflows/reusable-rk-build.yml
+```
+
+而不是让业务仓库自由传入 RK Runner / SDK 绑定。
+
+原因：RK 平台希望中央控制：
+
+```text
+soc
+hardware profile
+SDK identity
+Runner labels
+HIL lease
+vendor adapter contract
+```
+
+真实 RK 架构是：
+
+```text
+Private RK Product Repository
+        ↓ pinned reusable-rk-build
+Linux x86_64 Self-hosted Build Host
+        ↓ cross compile
+RK Linux arm64 Target
+        ↓
+HIL Board
+```
+
+所以 RK build host labels 是：
+
+```text
+self-hosted
+linux
+x64
+soc-rk
+```
+
+目标制品仍然是：
+
+```text
+rk / linux / arm64
+```
+
+**build host 架构和 target 架构不能混为一谈。**
+
+当前没有真实 RK Runner / SDK / 板卡，所以 RK physical execution 仍保持 planned。
+
+---
+
+## 8. Qualcomm / MediaTek 当前状态
+
+中央平台保留 profile / adapter 设计，但当前 rollout 明确是 RK-first。
+
+因此 Qualcomm / MediaTek：
+
+```text
+不主动激活
+不使用模板绿色冒充真实 build
+等 RK 真实链路和实际业务资源存在后再恢复
+```
+
+如果未来恢复，需要各自准备：
+
+```text
+真实 build host
+SDK identity
+License pool
+vendor build recipe
+HIL/flash/test
+```
+
+而不是仅修改 `soc` 字符串。
+
+---
+
+## 9. Cache
+
+业务仓库可以声明 cache，但 cache 永远只是加速层。
+
+例如：
 
 ```yaml
-jobs:
-  rk-build:
-    uses: iwacollection/CICD/.github/workflows/reusable-build.yml@<CICD_FULL_COMMIT_SHA>
-    with:
-      platform_ref: <CICD_FULL_COMMIT_SHA>
-      project_name: camera-firmware
-      working_directory: .
-      build_command: ./ci/build.sh rk linux arm64
-      test_command: ./ci/test-package.sh out/rk
-      pr_validation_command: ./ci/pr-validate.sh rk linux arm64
-      artifact_paths_json: '["out/rk/**/*.img","out/rk/**/*.bin"]'
-      soc: rk
-      target_os: linux
-      arch: arm64
-      toolchain: rk-sdk-2026.08
-      runner_labels_json: '["self-hosted","linux","arm64","soc-rk"]'
       cache_key_files_json: '["deps.lock","toolchain.lock"]'
       cache_paths: |
         source/.cache/ccache
         source/.cache/vendor
 ```
 
-推荐 `pr_validation_command` 做这些不依赖硬件的检查：
+要求：
 
 ```text
-脚本语法检查
-配置/清单校验
-格式检查
-静态分析
-可在 Hosted Runner 执行的单元测试
-依赖锁文件完整性检查
+删除 cache 后仍能正确构建
 ```
 
-如果 Self-hosted 目标没有配置 `pr_validation_command`，PR 会直接失败，不再允许“只跳过硬件构建也算绿色”。
+不要缓存：
 
-## 4. 高通与 MTK
+- 最终 artifact；
+- 私钥；
+- 整个 workspace；
+- 生产配置。
 
-只改 target 与 Runner 能力，不复制平台逻辑；同样必须为 PR 提供 Hosted-safe 的 `pr_validation_command`：
+---
+
+## 10. Secrets
+
+不要把生产凭据做成通用 reusable build 参数。
+
+普通 CI：
 
 ```text
-Qualcomm
-soc                   = qualcomm
-target_os             = android
-arch                  = arm64
-toolchain             = qcom-sdk-2026.08
-runner labels         = self-hosted, linux, arm64, soc-qualcomm
-pr_validation_command = 不依赖 Qcom SDK/许可证/板卡的 PR 校验命令
-
-MediaTek
-soc                   = mediatek
-target_os             = android
-arch                  = arm64
-toolchain             = mtk-sdk-2026.08
-runner labels         = self-hosted, linux, arm64, soc-mediatek
-pr_validation_command = 不依赖 MTK SDK/许可证/板卡的 PR 校验命令
+尽量无 Secret
+或只使用只读 dependency registry credential
 ```
 
-## 5. 业务仓库负责什么
-
-业务仓库负责：
-
-- 自己的源码
-- 自己的 build/test 脚本
-- Self-hosted 目标的 Hosted-safe PR 校验脚本
-- 自己的依赖 lock 文件
-- 声明最终制品路径
-- 声明需要什么工具链/Runner
-
-中央平台负责：
-
-- Runner 选择
-- 缓存命名规范
-- 统一执行
-- 制品打包
-- manifest
-- SHA256
-- Artifact 上传
-- 晋级规范
-- 安全基线
-
-## 6. 为什么 build command 还放在业务仓库
-
-中央平台不应该知道每个项目内部到底执行 Maven、CMake、Gradle 还是某家厂商脚本。
-
-更合理的边界是：
+生产签名 / 云发布：
 
 ```text
-平台规定阶段和输入输出
-项目实现自己的构建细节
+独立 Workflow
+GitHub Environment
+OIDC / Federated Identity
+KMS / HSM
 ```
 
-例如固件项目统一提供：
+不要把长期 Access Key 放进 build job。
 
-```bash
-./ci/build.sh <soc> <os> <arch>
-```
+---
 
-中央 CI 不进入厂商脚本内部继续写几百行 if/else。
+## 11. 中央平台怎么升级
 
-## 7. 私有业务仓库
-
-Reusable Workflow 运行在调用方上下文，第一次 `checkout` 会检出调用它的业务仓库。
-
-中央 CICD 仓库如果改为私有仓库，需要在 GitHub Actions 共享策略中允许其他目标仓库调用它。
-
-## 8. Secrets
-
-不要把生产密钥作为通用构建参数传来传去。
-
-普通编译阶段尽量只用只读依赖凭据；签名、生产发布使用单独 workflow / Environment / KMS/HSM。
-
-## 9. 如何升级中央流水线
-
-推荐：
+正确方式：
 
 ```text
-CICD main
- -> 平台测试
- -> 发布 v1.1
- -> 选一个非核心业务升级
- -> 验证
- -> 批量 PR 升级其他业务引用
+CICD platform change
+      ↓
+Required Gates
+      ↓
+main verification
+      ↓
+必要时 lifecycle drill
+      ↓
+发布稳定版本 / 确认固定 SHA
+      ↓
+选择一个非核心 consumer 升级
+      ↓
+验证
+      ↓
+再批量升级其他 caller
 ```
 
-不要修改 `main` 后让所有生产仓库在下一秒同时自动吃到新逻辑。
+不要让所有消费者：
 
-无论业务仓库声明什么 Runner，Self-hosted 目标的非 main 执行都不会进入特权 Runner；PR 会固定落到 GitHub Hosted Runner，完整 Self-hosted SoC 构建只处理受信 main 代码。
+```text
+@main
+```
 
-如果目标的 `runner_labels_json` 包含 `self-hosted`，PR 不会在普通 x64 Hosted Runner 上误跑依赖 SDK、许可证或板卡能力的硬件构建，而是只执行明确配置的 `pr_validation_command`。
+因为中央 `main` 一变化，所有业务仓库会同时吃到新行为。
 
-- 配置了 `pr_validation_command`：在 Hosted Runner 执行这条与硬件无关的源码检查。
-- 未配置 `pr_validation_command`：PR 直接失败，提示业务仓库补充 Hosted-safe 校验命令。
+详细维护规则见：[平台维护手册](platform-maintenance.md)。
 
-这条规则是故意 fail-closed（失败关闭）：平台不能把“没有真正验证”伪装成绿色检查。完整 RK/高通/MTK 编译、测试和制品上传只在受信 main 阶段执行。
+---
+
+## 12. Consumer 接入验收
+
+一个独立业务仓库真正接入中央 CI，至少要证明：
+
+```text
+PR 能调用 pinned reusable workflow
+main 能真实 build/test
+Artifact Contract v2 正确
+Supply-chain Gate 正确
+平台 SHA 不会漂移
+如果使用 Self-hosted，PR 不会进入高权限 Runner
+```
+
+如果该业务还使用中央发布链，再额外验证：
+
+```text
+Archive
+Promotion
+Rollback
+```
+
+中央平台自身的参考验收记录见：[生产生命周期真实验收记录](production-verification.md)。
