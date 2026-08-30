@@ -116,15 +116,19 @@ class HardwareIntegrationTests(unittest.TestCase):
         self.assertTrue(profiles["mediatek"]["license"]["required"])
         self.assertFalse(profiles["rk"]["license"]["required"])
 
-    def test_rk_readiness_and_enrollment_are_rk_only(self) -> None:
-        readiness = (ROOT / ".github" / "workflows" / "hardware-readiness.yml").read_text(encoding="utf-8")
-        enrollment = (ROOT / ".github" / "workflows" / "rk-sdk-enrollment.yml").read_text(encoding="utf-8")
-        self.assertIn("--status active --soc rk", readiness)
-        self.assertIn("Require exactly one active RK profile", readiness)
-        self.assertIn("--status planned --soc rk", enrollment)
-        self.assertIn("Require exactly one planned RK profile", enrollment)
+    def test_rk_readiness_and_enrollment_are_private_caller_only(self) -> None:
+        readiness = (ROOT / ".github" / "workflows" / "reusable-rk-physical-readiness.yml").read_text(encoding="utf-8")
+        enrollment = (ROOT / ".github" / "workflows" / "reusable-rk-enrollment.yml").read_text(encoding="utf-8")
+        self.assertIn("workflow_call:", readiness)
+        self.assertIn("workflow_call:", enrollment)
+        self.assertIn("runs-on: [self-hosted, linux, x64, soc-rk]", readiness)
+        self.assertIn("runs-on: [self-hosted, linux, x64, soc-rk]", enrollment)
+        self.assertIn("refs/heads/main", readiness + enrollment)
+        self.assertIn("platform_ref", readiness + enrollment)
         self.assertNotIn("soc-qualcomm", readiness + enrollment)
         self.assertNotIn("soc-mediatek", readiness + enrollment)
+        self.assertFalse((ROOT / ".github" / "workflows" / "hardware-readiness.yml").exists())
+        self.assertFalse((ROOT / ".github" / "workflows" / "rk-sdk-enrollment.yml").exists())
 
     def test_reusable_rk_workflow_keeps_runner_and_toolchain_central(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "reusable-rk-build.yml").read_text(encoding="utf-8")
