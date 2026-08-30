@@ -1,0 +1,71 @@
+name: Capability Smoke
+
+on:
+  pull_request:
+    paths:
+      - "ci/capabilities.json"
+      - "ci/db-migration-policy.json"
+      - "scripts/ci/capability_*.py"
+      - "scripts/ci/db_migration_policy.py"
+      - ".github/workflows/reusable-quality.yml"
+      - ".github/workflows/reusable-test.yml"
+      - ".github/workflows/reusable-container.yml"
+      - ".github/workflows/reusable-db-migration.yml"
+      - ".github/workflows/capability-smoke.yml"
+      - "examples/capability-service/**"
+      - "tests/test_business_ci_capabilities.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    uses: ./.github/workflows/reusable-quality.yml
+    with:
+      project_name: capability-smoke
+      working_directory: examples/cpp-lib
+      format_command: "test -f CMakeLists.txt"
+      lint_command: "grep -q 'project(hello_lib' CMakeLists.txt"
+      static_analysis_command: "test -f src/hello_lib.cpp"
+      coverage_command: "printf 'coverage-smoke=1\n' > \"$CI_EVIDENCE_DIR/coverage.txt\""
+      platform_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+  test:
+    uses: ./.github/workflows/reusable-test.yml
+    with:
+      project_name: capability-smoke
+      working_directory: examples/cpp-lib
+      unit_command: "cmake -S . -B build && cmake --build build && test -f build/libhello-lib.a"
+      integration_command: "printf 'integration-smoke=1\n' > \"$CI_EVIDENCE_DIR/integration.txt\""
+      platform_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+  container:
+    uses: ./.github/workflows/reusable-container.yml
+    with:
+      project_name: capability-smoke
+      working_directory: examples/capability-service
+      dockerfile: Dockerfile
+      context: .
+      smoke_command: "docker run --rm \"$CI_IMAGE_TAG\" | grep -q capability-container-smoke"
+      platform_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+  db-migration:
+    uses: ./.github/workflows/reusable-db-migration.yml
+    with:
+      project_name: capability-smoke
+      working_directory: examples/capability-service
+      migration_paths_json: '["migrations/**/*.sql"]'
+      migration_command: >-
+        cat migrations/001_init.sql |
+        docker run --rm -i --network host -e PGPASSWORD=ci-password "$CI_POSTGRES_IMAGE"
+        psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d ci_test
+      compatibility_command: >-
+        printf 'SELECT count(*) FROM widgets;\n' |
+        docker run --rm -i --network host -e PGPASSWORD=ci-password "$CI_POSTGRES_IMAGE"
+        psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d ci_test
+      rollback_command: >-
+        printf 'DROP TABLE widgets;\n' |
+        docker run --rm -i --network host -e PGPASSWORD=ci-password "$CI_POSTGRES_IMAGE"
+        psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d ci_test
+      platform_ref: ${{ github.event.pull_request.head.sha || github.sha }}
