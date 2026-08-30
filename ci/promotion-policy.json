@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "environments": [
+    "dev",
+    "staging",
+    "production"
+  ],
+  "prerequisites": {
+    "dev": null,
+    "staging": "dev",
+    "production": "staging"
+  },
+  "require_exact_artifact_identity": true
+}
