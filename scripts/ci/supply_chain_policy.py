@@ -10,6 +10,7 @@ from pathlib import Path
 
 DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}(?:\s|$)")
 SNAPSHOT_RE = re.compile(r"(?:APT::Snapshot|--snapshot)[=\s\"']+([0-9]{8}T[0-9]{6}Z)")
+VALID_SEVERITIES = {"UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
 
 
 def load_json(path: Path) -> dict:
@@ -22,6 +23,18 @@ def load_json(path: Path) -> dict:
     return value
 
 
+def _validate_severity_section(policy: dict, section: str, errors: list[str]) -> None:
+    item = policy.get(section)
+    if not isinstance(item, dict):
+        errors.append(f"policy.{section} must be an object")
+        return
+    severities = item.get("deny_severities")
+    if not isinstance(severities, list) or not all(
+        isinstance(value, str) and value in VALID_SEVERITIES for value in severities
+    ):
+        errors.append(f"policy.{section}.deny_severities is invalid")
+
+
 def validate_policy(policy: dict) -> list[str]:
     errors: list[str] = []
     if policy.get("schema_version") != 1:
@@ -31,17 +44,22 @@ def validate_policy(policy: dict) -> list[str]:
         errors.append("policy scanner.name must be trivy")
     elif not isinstance(scanner.get("version"), str) or not scanner.get("version"):
         errors.append("policy scanner.version must be pinned")
-    for section in ("vulnerability", "license", "misconfiguration"):
-        item = policy.get(section)
-        if not isinstance(item, dict):
-            errors.append(f"policy.{section} must be an object")
-            continue
-        severities = item.get("deny_severities")
-        if not isinstance(severities, list) or not all(
-            isinstance(value, str) and value in {"UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
-            for value in severities
+
+    _validate_severity_section(policy, "vulnerability", errors)
+    _validate_severity_section(policy, "misconfiguration", errors)
+
+    license_policy = policy.get("license")
+    if not isinstance(license_policy, dict):
+        errors.append("policy.license must be an object")
+    else:
+        denied = license_policy.get("deny_licenses")
+        if not isinstance(denied, list) or not all(
+            isinstance(value, str) and value.strip() for value in denied
         ):
-            errors.append(f"policy.{section}.deny_severities is invalid")
+            errors.append("policy.license.deny_licenses must be a string list")
+        elif len(denied) != len(set(denied)):
+            errors.append("policy.license.deny_licenses must not contain duplicates")
+
     artifact = policy.get("artifact")
     if not isinstance(artifact, dict):
         errors.append("policy.artifact must be an object")
@@ -82,11 +100,12 @@ def validate_trivy_report(report: dict, policy: dict) -> tuple[list[str], dict]:
     summary = {
         "vulnerabilities": 0,
         "licenses": 0,
+        "denied_licenses": 0,
         "secrets": 0,
         "misconfigurations": 0,
     }
     vuln_denied = set(policy.get("vulnerability", {}).get("deny_severities", []))
-    license_denied = set(policy.get("license", {}).get("deny_severities", []))
+    denied_licenses = set(policy.get("license", {}).get("deny_licenses", []))
     misconfig_denied = set(policy.get("misconfiguration", {}).get("deny_severities", []))
     deny_secrets = bool(policy.get("secret", {}).get("deny_any_finding", True))
 
@@ -110,10 +129,11 @@ def validate_trivy_report(report: dict, policy: dict) -> tuple[list[str], dict]:
             if not isinstance(finding, dict):
                 continue
             summary["licenses"] += 1
-            if _severity(finding) in license_denied:
+            name = str(finding.get("Name", finding.get("Category", "unknown")))
+            if name in denied_licenses:
+                summary["denied_licenses"] += 1
                 errors.append(
-                    f"license blocked: {finding.get('Name', finding.get('Category', 'unknown'))} "
-                    f"severity={_severity(finding)} target={target}"
+                    f"license blocked: {name} severity={_severity(finding)} target={target}"
                 )
         for finding in result.get("Secrets") or []:
             if not isinstance(finding, dict):
