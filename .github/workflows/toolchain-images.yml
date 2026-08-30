@@ -6,8 +6,10 @@ on:
     branches: [main]
     paths:
       - "ci/toolchains.json"
+      - "ci/supply-chain-policy.json"
       - "docker/toolchains/**"
       - "scripts/ci/toolchain_catalog.py"
+      - "scripts/ci/supply_chain_policy.py"
       - ".github/workflows/toolchain-images.yml"
   workflow_dispatch:
 
@@ -37,6 +39,9 @@ jobs:
       - name: Validate toolchain catalog
         run: python3 scripts/ci/toolchain_catalog.py
 
+      - name: Validate immutable supply-chain policy
+        run: python3 scripts/ci/supply_chain_policy.py
+
       - name: Detect toolchain-supply-chain change
         id: scope
         shell: bash
@@ -51,7 +56,7 @@ jobs:
             relevant=false
             while IFS= read -r path; do
               case "$path" in
-                ci/toolchains.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|.github/workflows/toolchain-images.yml)
+                ci/toolchains.json|ci/supply-chain-policy.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|scripts/ci/supply_chain_policy.py|.github/workflows/toolchain-images.yml)
                   relevant=true
                   break
                   ;;
@@ -122,6 +127,34 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm "ci-toolchain-verify:$GITHUB_SHA" bash -euo pipefail -c "$SMOKE_COMMAND"
+
+      - name: Scan candidate vulnerabilities and licenses
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: image
+          image-ref: ci-toolchain-verify:${{ github.sha }}
+          scanners: vuln,license
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: toolchain-security.json
+          exit-code: "0"
+          version: v0.70.0
+
+      - name: Enforce candidate supply-chain policy
+        run: >-
+          python3 scripts/ci/supply_chain_policy.py
+          --skip-dockerfiles
+          --report toolchain-security.json
+
+      - name: Generate candidate SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: image
+          image-ref: ci-toolchain-verify:${{ github.sha }}
+          format: cyclonedx
+          output: toolchain-sbom.cdx.json
+          version: v0.70.0
 
       - name: Verify source identity
         shell: bash
@@ -223,6 +256,41 @@ jobs:
           docker pull "$immutable_image"
           docker run --rm "$immutable_image" bash -euo pipefail -c "$SMOKE_COMMAND"
 
+      - name: Scan exact published digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: image
+          image-ref: ${{ matrix.image }}@${{ steps.push.outputs.digest }}
+          scanners: vuln,license
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: published-security.json
+          exit-code: "0"
+          version: v0.70.0
+
+      - name: Enforce published image policy
+        run: >-
+          python3 scripts/ci/supply_chain_policy.py
+          --skip-dockerfiles
+          --report published-security.json
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2 / Cosign v3.0.6
+
+      - name: Cosign exact published digest
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          immutable_image="${IMAGE}@${DIGEST}"
+          cosign sign --yes "$immutable_image"
+          cosign verify "$immutable_image" \
+            --certificate-identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/toolchain-images.yml@refs/heads/main" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+
       - name: Attest published image provenance
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
@@ -248,7 +316,7 @@ jobs:
           from pathlib import Path
 
           record = {
-              "schema_version": 1,
+              "schema_version": 2,
               "toolchain": os.environ["TOOLCHAIN"],
               "image": os.environ["IMAGE"],
               "digest": os.environ["DIGEST"],
@@ -258,6 +326,10 @@ jobs:
               "dockerfile_sha256": os.environ["DOCKERFILE_SHA"],
               "platform": os.environ["PLATFORM"],
               "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "supply_chain_policy": "ci/supply-chain-policy.json",
+              "cosign_verified": True,
+              "buildkit_sbom": True,
+              "github_provenance": True,
           }
           Path(f"promotion-{os.environ['TOOLCHAIN']}.json").write_text(
               json.dumps(record, indent=2) + "\n", encoding="utf-8"
@@ -279,7 +351,9 @@ jobs:
             echo "### Toolchain candidate published"
             echo "- Toolchain: ${{ matrix.toolchain }}"
             echo "- Immutable reference: ${{ matrix.image }}@${{ steps.push.outputs.digest }}"
-            echo "- SBOM: embedded OCI attestation generated"
+            echo "- Vulnerability/license policy: PASSED"
+            echo "- SBOM: BuildKit OCI attestation generated"
+            echo "- Cosign: keyless signature verified"
             echo "- Provenance: GitHub build provenance attestation generated"
             echo "- Promotion: register this digest in ci/toolchains.json before business consumption"
           } >> "$GITHUB_STEP_SUMMARY"
