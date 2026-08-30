@@ -27,5 +27,8 @@
       "Toolchain gate"
     ]
   },
-  "allow_bypass_actors": false
+  "bypass_actors": {
+    "allow_when_visible": false,
+    "visibility_required": false
+  }
 }
