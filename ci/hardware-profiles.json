@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "rk-linux-arm64-lab",
+      "status": "planned",
+      "soc": "rk",
+      "target_os": "linux",
+      "arch": "arm64",
+      "runner_labels": ["self-hosted", "linux", "arm64", "soc-rk"],
+      "required_tools": ["bash", "python3", "git", "ccache"],
+      "sdk": {
+        "root_env": "RK_SDK_ROOT",
+        "identity_file": ".ci/sdk-identity.json",
+        "expected_sha256": ""
+      },
+      "license": {
+        "required": false,
+        "pool": "",
+        "broker_url_env": "CI_RESOURCE_BROKER_URL",
+        "token_env": "CI_RESOURCE_BROKER_TOKEN",
+        "ttl_seconds": 7200
+      },
+      "hil": {
+        "required": true,
+        "pool": "rk-linux-arm64",
+        "broker_url_env": "CI_RESOURCE_BROKER_URL",
+        "token_env": "CI_RESOURCE_BROKER_TOKEN",
+        "ttl_seconds": 1800
+      },
+      "build_adapter": "scripts/vendor/rk/build.sh",
+      "test_adapter": "scripts/vendor/rk/hil-test.sh"
+    },
+    {
+      "id": "qcom-android-arm64-lab",
+      "status": "planned",
+      "soc": "qualcomm",
+      "target_os": "android",
+      "arch": "arm64",
+      "runner_labels": ["self-hosted", "linux", "arm64", "soc-qualcomm"],
+      "required_tools": ["bash", "python3", "git", "ccache", "adb", "fastboot"],
+      "sdk": {
+        "root_env": "QCOM_SDK_ROOT",
+        "identity_file": ".ci/sdk-identity.json",
+        "expected_sha256": ""
+      },
+      "license": {
+        "required": true,
+        "pool": "qcom-build",
+        "broker_url_env": "CI_RESOURCE_BROKER_URL",
+        "token_env": "CI_RESOURCE_BROKER_TOKEN",
+        "ttl_seconds": 10800
+      },
+      "hil": {
+        "required": true,
+        "pool": "qcom-android-arm64",
+        "broker_url_env": "CI_RESOURCE_BROKER_URL",
+        "token_env": "CI_RESOURCE_BROKER_TOKEN",
+        "ttl_seconds": 1800
+      },
+      "build_adapter": "scripts/vendor/qcom/build.sh",
+      "test_adapter": "scripts/vendor/qcom/hil-test.sh"
+    },
+    {
+      "id": "mtk-android-arm64-lab",
+      "status": "planned",
+      "soc": "mediatek",
+      "target_os": "android",
+      "arch": "arm64",
+      "runner_labels": ["self-hosted", "linux", "arm64", "soc-mediatek"],
+      "required_tools": ["bash", "python3", "git", "ccache", "adb", "fastboot"],
+      "sdk": {
+        "root_env": "MTK_SDK_ROOT",
+        "identity_file": ".ci/sdk-identity.json",
+        "expected_sha256": ""
+      },
+      "license": {
+        "required": true,
+        "pool": "mtk-build",
+        "broker_url_env": "CI_RESOURCE_BROKER_URL",
+        "token_env": "CI_RESOURCE_BROKER_TOKEN",
+        "ttl_seconds": 10800
+      },
+      "hil": {
+        "required": true,
+        "pool": "mtk-android-arm64",
+        "broker_url_env": "CI_RESOURCE_BROKER_URL",
+        "token_env": "CI_RESOURCE_BROKER_TOKEN",
+        "ttl_seconds": 1800
+      },
+      "build_adapter": "scripts/vendor/mtk/build.sh",
+      "test_adapter": "scripts/vendor/mtk/hil-test.sh"
+    }
+  ]
+}
