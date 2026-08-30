@@ -7,8 +7,9 @@
       "soc": "rk",
       "target_os": "linux",
       "arch": "arm64",
-      "runner_labels": ["self-hosted", "linux", "arm64", "soc-rk"],
-      "required_tools": ["bash", "python3", "git", "ccache"],
+      "runner_arch": "x64",
+      "runner_labels": ["self-hosted", "linux", "x64", "soc-rk"],
+      "required_tools": ["bash", "python3", "git", "ccache", "lsusb"],
       "sdk": {
         "root_env": "RK_SDK_ROOT",
         "identity_file": ".ci/sdk-identity.json",
