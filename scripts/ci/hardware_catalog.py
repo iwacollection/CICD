@@ -132,6 +132,57 @@ def validate_hardware_catalog(data: dict) -> list[str]:
     return errors
 
 
+def validate_rollout_policy(data: dict, rollout: dict) -> list[str]:
+    errors: list[str] = []
+    if rollout.get("schema_version") != 1:
+        errors.append("hardware rollout schema_version must be 1")
+
+    phase = rollout.get("phase")
+    if not isinstance(phase, str) or not phase:
+        errors.append("hardware rollout phase must be a non-empty string")
+
+    allowed = rollout.get("allowed_active_socs")
+    if not _string_list(allowed) or not allowed:
+        errors.append("hardware rollout allowed_active_socs must be a non-empty string list")
+        allowed = []
+    else:
+        unknown = sorted(set(allowed).difference(ALLOWED_SOCS))
+        if unknown:
+            errors.append("hardware rollout has unknown allowed SoCs: " + ", ".join(unknown))
+
+    max_active = rollout.get("max_active_profiles")
+    if not isinstance(max_active, int) or max_active < 1:
+        errors.append("hardware rollout max_active_profiles must be >= 1")
+        max_active = 0
+
+    readiness_soc = rollout.get("readiness_soc")
+    if readiness_soc not in ALLOWED_SOCS:
+        errors.append(f"hardware rollout readiness_soc must be one of {sorted(ALLOWED_SOCS)}")
+    elif allowed and readiness_soc not in allowed:
+        errors.append("hardware rollout readiness_soc must be included in allowed_active_socs")
+
+    active = [
+        item
+        for item in data.get("profiles", [])
+        if isinstance(item, dict) and item.get("status") == "active"
+    ]
+    if max_active and len(active) > max_active:
+        errors.append(
+            f"hardware rollout allows at most {max_active} active profile(s), found {len(active)}"
+        )
+    disallowed = sorted(
+        f"{item.get('id')}({item.get('soc')})"
+        for item in active
+        if item.get("soc") not in set(allowed)
+    )
+    if disallowed:
+        errors.append(
+            "hardware rollout blocks active profiles outside allowed_active_socs: "
+            + ", ".join(disallowed)
+        )
+    return errors
+
+
 def index_hardware_profiles(data: dict) -> dict[str, dict]:
     return {
         item["id"]: item
@@ -140,10 +191,12 @@ def index_hardware_profiles(data: dict) -> dict[str, dict]:
     }
 
 
-def build_matrix(data: dict, status: str = "active") -> dict:
+def build_matrix(data: dict, status: str = "active", soc: str | None = None) -> dict:
     include: list[dict] = []
     for item in data.get("profiles", []):
         if not isinstance(item, dict) or item.get("status") != status:
+            continue
+        if soc is not None and item.get("soc") != soc:
             continue
         include.append(
             {
@@ -160,13 +213,17 @@ def build_matrix(data: dict, status: str = "active") -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", default="ci/hardware-profiles.json")
+    parser.add_argument("--rollout", default="ci/hardware-rollout.json")
     parser.add_argument("--matrix", action="store_true")
     parser.add_argument("--status", choices=sorted(ALLOWED_STATUSES), default="active")
+    parser.add_argument("--soc", choices=sorted(ALLOWED_SOCS))
     args = parser.parse_args()
 
     try:
         data = load_catalog(Path(args.catalog))
+        rollout = load_catalog(Path(args.rollout))
         errors = validate_hardware_catalog(data)
+        errors.extend(validate_rollout_policy(data, rollout))
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -177,10 +234,12 @@ def main() -> int:
         return 1
 
     if not args.matrix:
-        print(f"OK: {len(data['profiles'])} hardware profiles validated")
+        print(
+            f"OK: {len(data['profiles'])} hardware profiles validated; rollout={rollout['phase']}"
+        )
         return 0
 
-    matrix = build_matrix(data, args.status)
+    matrix = build_matrix(data, args.status, args.soc)
     encoded = json.dumps(matrix, separators=(",", ":"))
     print(encoded)
     output = os.environ.get("GITHUB_OUTPUT")
