@@ -84,6 +84,29 @@ jobs:
             --artifact-name "$ARTIFACT_NAME" \
             --expected-sha256 "$EXPECTED_SHA256"
 
+      - name: Enforce ordered promotion path
+        id: promotion_path
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          RELEASE_TAG: ${{ steps.archive.outputs.release_tag }}
+        run: >-
+          python3 scripts/ci/promotion_policy.py
+          --policy ci/promotion-policy.json
+          verify
+          --repository "$GITHUB_REPOSITORY"
+          --target-environment "$TARGET_ENVIRONMENT"
+          --artifact-name "$ARTIFACT_NAME"
+          --bundle-sha256 "$EXPECTED_SHA256"
+          --source-sha "$SOURCE_SHA"
+          --source-run-id "$SOURCE_RUN_ID"
+          --release-tag "$RELEASE_TAG"
+
       - name: Verify archived bytes and manifest identity
         shell: bash
         env:
@@ -156,6 +179,7 @@ jobs:
           SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           RELEASE_TAG: ${{ steps.archive.outputs.release_tag }}
+          PREREQUISITE_DEPLOYMENT_ID: ${{ steps.promotion_path.outputs.prerequisite_deployment_id }}
         run: |
           set -euo pipefail
           python3 scripts/ci/deployment_pointer.py create \
@@ -166,7 +190,8 @@ jobs:
             --source-sha "$SOURCE_SHA" \
             --source-run-id "$SOURCE_RUN_ID" \
             --release-tag "$RELEASE_TAG" \
-            --reason promotion
+            --reason promotion \
+            --promoted-from-deployment-id "$PREREQUISITE_DEPLOYMENT_ID"
 
       - name: Promotion summary
         env:
@@ -176,6 +201,8 @@ jobs:
           EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
           RELEASE_TAG: ${{ steps.archive.outputs.release_tag }}
           DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+          PREREQUISITE_ENVIRONMENT: ${{ steps.promotion_path.outputs.prerequisite_environment }}
+          PREREQUISITE_DEPLOYMENT_ID: ${{ steps.promotion_path.outputs.prerequisite_deployment_id }}
         run: |
           {
             echo "### Artifact promotion"
@@ -183,6 +210,12 @@ jobs:
             echo "- Artifact: $ARTIFACT_NAME"
             echo "- Long-term release: $RELEASE_TAG"
             echo "- Target: $TARGET_ENVIRONMENT"
+            if [[ -n "${PREREQUISITE_ENVIRONMENT:-}" ]]; then
+              echo "- Required previous environment: $PREREQUISITE_ENVIRONMENT"
+              echo "- Verified prerequisite deployment: $PREREQUISITE_DEPLOYMENT_ID"
+            else
+              echo "- Required previous environment: none (promotion root)"
+            fi
             echo "- Deployment pointer: $DEPLOYMENT_ID"
             echo "- Verified SHA256: $EXPECTED_SHA256"
             echo "- Supply-chain policy: PASSED"
