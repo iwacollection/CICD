@@ -7,10 +7,12 @@ import json
 import os
 from pathlib import Path
 
+from hardware_catalog import validate_hardware_catalog
 from toolchain_catalog import (
     immutable_reference,
     index_toolchains,
     load_toolchain_catalog,
+    toolchain_identity,
     validate_toolchain_catalog,
 )
 from validate_config import load_catalog, validate_catalog
@@ -39,7 +41,6 @@ def build_matrix(
             definition = toolchains[target["toolchain"]]
             execution_mode = definition["execution_mode"]
             container_image = immutable_reference(definition) if execution_mode == "container" else ""
-            toolchain_identity = definition.get("digest") or f"host:{definition['id']}"
             test_command = target.get("test_command", "")
             if lane == "fast":
                 test_command = target.get("fast_test_command", test_command)
@@ -52,8 +53,9 @@ def build_matrix(
                     "target_os": target["target_os"],
                     "arch": target["arch"],
                     "toolchain": target["toolchain"],
-                    "toolchain_identity": toolchain_identity,
+                    "toolchain_identity": toolchain_identity(definition),
                     "toolchain_status": definition["status"],
+                    "hardware_profile": definition.get("hardware_profile", ""),
                     "runner_labels": json.dumps(target["runner_labels"], separators=(",", ":")),
                     "execution_mode": execution_mode,
                     "container_image": container_image,
@@ -78,6 +80,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", default="ci/projects.json")
     parser.add_argument("--toolchains", default="ci/toolchains.json")
+    parser.add_argument("--hardware-profiles", default="ci/hardware-profiles.json")
     parser.add_argument("--project")
     parser.add_argument("--projects-json")
     parser.add_argument("--lane", choices=("fast", "full", "none"), default="full")
@@ -85,8 +88,10 @@ def main() -> int:
 
     data = load_catalog(Path(args.catalog))
     toolchain_data = load_toolchain_catalog(Path(args.toolchains))
+    hardware_data = load_catalog(Path(args.hardware_profiles))
     errors = validate_toolchain_catalog(toolchain_data)
-    errors.extend(validate_catalog(data, toolchain_data))
+    errors.extend(validate_hardware_catalog(hardware_data))
+    errors.extend(validate_catalog(data, toolchain_data, hardware_data))
     if errors:
         raise SystemExit("invalid CI catalogs:\n" + "\n".join(errors))
 

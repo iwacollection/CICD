@@ -108,6 +108,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/ci
+            scripts/vendor
             ci
           sparse-checkout-cone-mode: true
 
@@ -131,6 +132,13 @@ jobs:
               handle.write(f"hardware_pr={str(hardware_pr).lower()}\n")
           PY
 
+      - name: Resolve central hardware binding
+        id: hardware
+        shell: bash
+        run: >-
+          python3 .ci-platform/scripts/ci/hardware_binding.py
+          --toolchain "${{ inputs.toolchain }}"
+
       - name: Hosted hardware PR validation
         if: steps.trust.outputs.hardware_pr == 'true'
         shell: bash
@@ -146,6 +154,19 @@ jobs:
           python3 .ci-platform/scripts/ci/run_build.py \
             --working-directory "source/$CI_WORKING_DIRECTORY" \
             --command "$CI_PR_VALIDATION_COMMAND"
+
+      - name: Hardware Runner and SDK preflight
+        if: steps.hardware.outputs.is_hardware == 'true' && steps.trust.outputs.hardware_pr != 'true'
+        shell: bash
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CI_WORKING_DIRECTORY: ${{ inputs.path }}
+        run: >-
+          python3 .ci-platform/scripts/ci/hardware_execute.py
+          --profile "${{ steps.hardware.outputs.profile }}"
+          --runner-labels-json '${{ inputs.runner_labels_json }}'
+          --working-directory "source/$CI_WORKING_DIRECTORY"
+          --check-only
 
       - name: Download previous DAG level artifacts
         if: inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
@@ -217,7 +238,7 @@ jobs:
           echo "image=$CI_CONTAINER_IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: Build
-        if: steps.trust.outputs.hardware_pr != 'true'
+        if: steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware != 'true'
         shell: bash
         env:
           CI_BUILD_COMMAND: ${{ inputs.build_command }}
@@ -233,8 +254,23 @@ jobs:
           fi
           python3 .ci-platform/scripts/ci/run_build.py "${args[@]}"
 
+      - name: Vendor build with license lease
+        if: steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware == 'true'
+        shell: bash
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CI_UPSTREAM_ROOT: ${{ steps.upstream.outputs.root }}
+          CI_UPSTREAM_INDEX: ${{ steps.upstream.outputs.index }}
+          CI_WORKING_DIRECTORY: ${{ inputs.path }}
+        run: >-
+          python3 .ci-platform/scripts/ci/hardware_execute.py
+          --profile "${{ steps.hardware.outputs.profile }}"
+          --runner-labels-json '${{ inputs.runner_labels_json }}'
+          --working-directory "source/$CI_WORKING_DIRECTORY"
+          --phase build
+
       - name: Test
-        if: inputs.test_command != '' && steps.trust.outputs.hardware_pr != 'true'
+        if: inputs.test_command != '' && steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware != 'true'
         shell: bash
         env:
           CI_TEST_COMMAND: ${{ inputs.test_command }}
@@ -249,6 +285,21 @@ jobs:
             args+=(--container-image "$CI_CONTAINER_IMAGE")
           fi
           python3 .ci-platform/scripts/ci/run_build.py "${args[@]}"
+
+      - name: HIL test with device lease
+        if: inputs.test_command != '' && steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware == 'true'
+        shell: bash
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CI_UPSTREAM_ROOT: ${{ steps.upstream.outputs.root }}
+          CI_UPSTREAM_INDEX: ${{ steps.upstream.outputs.index }}
+          CI_WORKING_DIRECTORY: ${{ inputs.path }}
+        run: >-
+          python3 .ci-platform/scripts/ci/hardware_execute.py
+          --profile "${{ steps.hardware.outputs.profile }}"
+          --runner-labels-json '${{ inputs.runner_labels_json }}'
+          --working-directory "source/$CI_WORKING_DIRECTORY"
+          --phase test
 
       - name: Prepare supply-chain evidence
         run: rm -rf security-evidence && mkdir -p security-evidence
@@ -360,6 +411,7 @@ jobs:
             echo "- Project: ${{ inputs.project }}"
             echo "- Target: ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}"
             echo "- Depends on: ${{ inputs.depends_on_json }}"
+            echo "- Hardware profile: ${{ steps.hardware.outputs.profile || 'none' }}"
             echo "- Upstream fingerprint: ${{ steps.upstream.outputs.fingerprint || 'root-node' }}"
             if [[ "${{ steps.trust.outputs.hardware_pr }}" == "true" ]]; then
               echo "- Execution: hosted-safe PR validation only"

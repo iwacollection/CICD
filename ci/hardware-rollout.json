@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "phase": "rk-first",
+  "allowed_active_socs": ["rk"],
+  "max_active_profiles": 1,
+  "readiness_soc": "rk"
+}

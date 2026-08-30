@@ -36,11 +36,28 @@ def _toolchain_index(toolchain_data: dict | None) -> dict[str, dict]:
     }
 
 
+def _hardware_index(hardware_data: dict | None) -> dict[str, dict]:
+    if not hardware_data:
+        return {}
+    items = hardware_data.get("profiles", [])
+    if not isinstance(items, list):
+        return {}
+    return {
+        item["id"]: item
+        for item in items
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("id")
+    }
+
+
 def _string_list(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) and item for item in value)
 
 
-def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str]:
+def validate_catalog(
+    data: dict,
+    toolchain_data: dict | None = None,
+    hardware_data: dict | None = None,
+) -> list[str]:
     errors: list[str] = []
     if data.get("schema_version") != 1:
         errors.append("schema_version must be 1")
@@ -50,6 +67,7 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
         return errors + ["projects must be a non-empty list"]
 
     toolchains = _toolchain_index(toolchain_data)
+    hardware_profiles = _hardware_index(hardware_data)
     names: set[str] = set()
     for pidx, project in enumerate(projects):
         prefix = f"projects[{pidx}]"
@@ -122,6 +140,7 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
                     f"{tprefix}.pr_validation_command is required for self-hosted targets so PR validation fails closed"
                 )
 
+            definition: dict | None = None
             if toolchains and isinstance(toolchain, str):
                 definition = toolchains.get(toolchain)
                 if not definition:
@@ -131,6 +150,34 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
                         errors.append(
                             f"{tprefix}.toolchain {toolchain} must be active before an enabled target can consume it"
                         )
+
+            if definition:
+                hardware_profile_id = definition.get("hardware_profile", "")
+                if "self-hosted" in runner_labels and not hardware_profile_id:
+                    errors.append(f"{tprefix} self-hosted target must use a toolchain bound to a hardware_profile")
+                if hardware_profile_id:
+                    if definition.get("execution_mode") != "host":
+                        errors.append(f"{tprefix} hardware_profile toolchain must use host execution mode")
+                    if hardware_data is not None:
+                        profile = hardware_profiles.get(hardware_profile_id)
+                        if not profile:
+                            errors.append(f"{tprefix}.toolchain references unknown hardware profile {hardware_profile_id}")
+                        else:
+                            target_tuple = (soc, target_os, arch)
+                            profile_tuple = (profile.get("soc"), profile.get("target_os"), profile.get("arch"))
+                            if target_tuple != profile_tuple:
+                                errors.append(
+                                    f"{tprefix} target {target_tuple} does not match hardware profile {hardware_profile_id} {profile_tuple}"
+                                )
+                            if set(runner_labels) != set(profile.get("runner_labels", [])):
+                                errors.append(
+                                    f"{tprefix}.runner_labels must exactly match hardware profile {hardware_profile_id}"
+                                )
+                            if project.get("enabled", True) and target.get("enabled", True):
+                                if profile.get("status") != "active":
+                                    errors.append(
+                                        f"{tprefix}.hardware profile {hardware_profile_id} must be active before the target can run"
+                                    )
 
             if not isinstance(target.get("build_command"), str) or not target.get("build_command"):
                 errors.append(f"{tprefix}.build_command must be a non-empty string")
@@ -171,11 +218,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("catalog", nargs="?", default="ci/projects.json")
     parser.add_argument("--toolchains", default="ci/toolchains.json")
+    parser.add_argument("--hardware-profiles", default="ci/hardware-profiles.json")
     args = parser.parse_args()
     try:
         data = load_catalog(Path(args.catalog))
         toolchain_data = load_catalog(Path(args.toolchains))
-        errors = validate_catalog(data, toolchain_data)
+        hardware_data = load_catalog(Path(args.hardware_profiles))
+        errors = validate_catalog(data, toolchain_data, hardware_data)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -183,7 +232,7 @@ def main() -> int:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    print(f"OK: {len(data['projects'])} project definitions validated against central toolchains")
+    print(f"OK: {len(data['projects'])} project definitions validated against central toolchains and hardware profiles")
     return 0
 
 
