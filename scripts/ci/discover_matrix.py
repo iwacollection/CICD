@@ -32,6 +32,7 @@ def build_matrix(
             continue
         if project_names is not None and project["name"] not in project_names:
             continue
+        depends_on = project.get("depends_on", [])
         for target in project["targets"]:
             if not target.get("enabled", True):
                 continue
@@ -46,6 +47,7 @@ def build_matrix(
                 {
                     "project": project["name"],
                     "path": project["path"],
+                    "depends_on": json.dumps(depends_on, separators=(",", ":")),
                     "soc": target["soc"],
                     "target_os": target["target_os"],
                     "arch": target["arch"],
