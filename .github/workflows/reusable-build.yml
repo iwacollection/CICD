@@ -30,6 +30,11 @@ on:
         description: "JSON array of artifact globs relative to working_directory"
         required: true
         type: string
+      dependency_lock_files_json:
+        description: "JSON array of dependency/toolchain lock file globs recorded in Artifact Contract v2"
+        required: false
+        default: "[]"
+        type: string
       soc:
         description: "generic/rk/qualcomm/mediatek"
         required: false
@@ -95,8 +100,6 @@ permissions:
 jobs:
   build:
     name: ${{ inputs.project_name }} / ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}
-    # A self-hosted target is eligible for privileged scheduling only from main.
-    # PRs and any other non-main refs are forced onto an ephemeral hosted runner.
     runs-on: ${{ contains(fromJSON(inputs.runner_labels_json), 'self-hosted') && github.ref != 'refs/heads/main' && 'ubuntu-latest' || fromJSON(inputs.runner_labels_json) }}
     timeout-minutes: 120
     steps:
@@ -218,9 +221,14 @@ jobs:
         run: |
           set -euo pipefail
           docker pull "$CI_CONTAINER_IMAGE"
-          identity="$(docker image inspect "$CI_CONTAINER_IMAGE" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}')"
-          echo "identity=$identity" >> "$GITHUB_OUTPUT"
-          echo "Using toolchain container: $identity"
+          expected="${CI_CONTAINER_IMAGE##*@}"
+          repo_digests="$(docker image inspect "$CI_CONTAINER_IMAGE" --format '{{json .RepoDigests}}')"
+          if [[ "$repo_digests" != *"@$expected"* ]]; then
+            echo "Pulled image does not resolve to expected digest $expected" >&2
+            exit 1
+          fi
+          echo "identity=$expected" >> "$GITHUB_OUTPUT"
+          echo "Using toolchain container: $CI_CONTAINER_IMAGE"
 
       - name: Compute declared cache fingerprint
         if: steps.lane.outputs.hardware_pr != 'true' && inputs.cache_paths != ''
@@ -239,9 +247,9 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ inputs.cache_paths }}
-          key: reusable-ci-v3-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-${{ steps.cache.outputs.fingerprint }}
+          key: reusable-ci-v4-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-${{ steps.cache.outputs.fingerprint }}
           restore-keys: |
-            reusable-ci-v3-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-
+            reusable-ci-v4-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-
 
       - name: Build
         if: steps.lane.outputs.hardware_pr != 'true'
@@ -273,26 +281,51 @@ jobs:
           fi
           python3 .ci-platform/scripts/ci/run_build.py "${args[@]}"
 
-      - name: Package immutable artifact
+      - name: Collect build environment metadata
+        if: steps.lane.outputs.hardware_pr != 'true'
+        shell: bash
+        env:
+          CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+          CI_WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        run: |
+          set -euo pipefail
+          args=(--working-directory "source/$CI_WORKING_DIRECTORY" --output build-environment.json)
+          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
+            args+=(--container-image "$CI_CONTAINER_IMAGE")
+          fi
+          python3 .ci-platform/scripts/ci/collect_build_metadata.py "${args[@]}"
+
+      - name: Package immutable artifact v2
         id: package
         if: steps.lane.outputs.hardware_pr != 'true'
+        shell: bash
         env:
           CI_ARTIFACT_PATHS: ${{ inputs.artifact_paths_json }}
+          CI_DEPENDENCY_LOCKS: ${{ inputs.dependency_lock_files_json }}
           CI_PROJECT_NAME: ${{ inputs.project_name }}
           CI_WORKING_DIRECTORY: ${{ inputs.working_directory }}
           CI_SOC: ${{ inputs.soc }}
           CI_TARGET_OS: ${{ inputs.target_os }}
           CI_ARCH: ${{ inputs.arch }}
           CI_TOOLCHAIN: ${{ inputs.toolchain }}
-        run: >-
-          python3 .ci-platform/scripts/ci/package_artifact.py
-          --project "$CI_PROJECT_NAME"
-          --working-directory "source/$CI_WORKING_DIRECTORY"
-          --artifacts-json "$CI_ARTIFACT_PATHS"
-          --soc "$CI_SOC"
-          --target-os "$CI_TARGET_OS"
-          --arch "$CI_ARCH"
-          --toolchain "$CI_TOOLCHAIN"
+          CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+          CI_RUNNER_LABELS: ${{ inputs.runner_labels_json }}
+          CI_EXECUTION_MODE: ${{ inputs.container_image != '' && 'container' || 'host' }}
+        run: |
+          set -euo pipefail
+          python3 .ci-platform/scripts/ci/package_artifact.py \
+            --project "$CI_PROJECT_NAME" \
+            --working-directory "source/$CI_WORKING_DIRECTORY" \
+            --artifacts-json "$CI_ARTIFACT_PATHS" \
+            --dependency-locks-json "$CI_DEPENDENCY_LOCKS" \
+            --soc "$CI_SOC" \
+            --target-os "$CI_TARGET_OS" \
+            --arch "$CI_ARCH" \
+            --toolchain "$CI_TOOLCHAIN" \
+            --execution-mode "$CI_EXECUTION_MODE" \
+            --container-image "$CI_CONTAINER_IMAGE" \
+            --runner-labels-json "$CI_RUNNER_LABELS" \
+            --build-metadata-file build-environment.json
 
       - name: Verify artifact
         if: steps.lane.outputs.hardware_pr != 'true'
@@ -317,7 +350,6 @@ jobs:
       - name: Summary
         env:
           HARDWARE_PR: ${{ steps.lane.outputs.hardware_pr }}
-          PR_VALIDATION_COMMAND: ${{ inputs.pr_validation_command }}
           PROJECT_NAME: ${{ inputs.project_name }}
           SOC: ${{ inputs.soc }}
           TARGET_OS: ${{ inputs.target_os }}
@@ -339,6 +371,8 @@ jobs:
             else
               echo "- Execution: $EXECUTION_MODE"
               echo "- Container identity: $CONTAINER_IDENTITY"
+              echo "- Artifact contract: v2"
+              echo "- Reproducible bundle: YES"
               echo "- SHA256: $ARTIFACT_SHA256"
               echo "- Rebuild-on-promotion: NO"
             fi

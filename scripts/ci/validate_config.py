@@ -36,6 +36,10 @@ def _toolchain_index(toolchain_data: dict | None) -> dict[str, dict]:
     }
 
 
+def _string_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) and item for item in value)
+
+
 def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str]:
     errors: list[str] = []
     if data.get("schema_version") != 1:
@@ -64,9 +68,7 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
             errors.append(f"{prefix}.path must be a non-empty string")
 
         impact_paths = project.get("impact_paths", [])
-        if not isinstance(impact_paths, list) or not all(
-            isinstance(item, str) and item for item in impact_paths
-        ):
+        if not _string_list(impact_paths):
             errors.append(f"{prefix}.impact_paths must be a string list")
 
         depends_on = project.get("depends_on", [])
@@ -108,8 +110,17 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
                 )
 
             runner_labels = target.get("runner_labels")
-            if not isinstance(runner_labels, list) or not runner_labels or not all(isinstance(x, str) and x for x in runner_labels):
+            if not _string_list(runner_labels) or not runner_labels:
                 errors.append(f"{tprefix}.runner_labels must be a non-empty string list")
+                runner_labels = []
+
+            pr_validation_command = target.get("pr_validation_command", "")
+            if not isinstance(pr_validation_command, str):
+                errors.append(f"{tprefix}.pr_validation_command must be a string")
+            elif "self-hosted" in runner_labels and not pr_validation_command.strip():
+                errors.append(
+                    f"{tprefix}.pr_validation_command is required for self-hosted targets so PR validation fails closed"
+                )
 
             if toolchains and isinstance(toolchain, str):
                 definition = toolchains.get(toolchain)
@@ -130,19 +141,19 @@ def validate_catalog(data: dict, toolchain_data: dict | None = None) -> list[str
             if not isinstance(fast_test_command, str):
                 errors.append(f"{tprefix}.fast_test_command must be a string")
             artifacts = target.get("artifact_paths")
-            if not isinstance(artifacts, list) or not artifacts or not all(isinstance(x, str) and x for x in artifacts):
+            if not _string_list(artifacts) or not artifacts:
                 errors.append(f"{tprefix}.artifact_paths must be a non-empty string list")
 
+            dependency_lock_files = target.get("dependency_lock_files", [])
+            if not _string_list(dependency_lock_files):
+                errors.append(f"{tprefix}.dependency_lock_files must be a string list")
+
             cache_paths = target.get("cache_paths", [])
-            if not isinstance(cache_paths, list) or not all(
-                isinstance(item, str) and item for item in cache_paths
-            ):
+            if not _string_list(cache_paths):
                 errors.append(f"{tprefix}.cache_paths must be a string list")
                 cache_paths = []
             cache_key_files = target.get("cache_key_files", [])
-            if not isinstance(cache_key_files, list) or not all(
-                isinstance(item, str) and item for item in cache_key_files
-            ):
+            if not _string_list(cache_key_files):
                 errors.append(f"{tprefix}.cache_key_files must be a string list")
                 cache_key_files = []
             if cache_paths and not cache_key_files:
