@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Archive and retrieve Artifact Contract v2 objects from GitHub Releases."""
+"""Archive and retrieve Artifact Contract v2 objects plus immutable security evidence."""
 from __future__ import annotations
 
 import argparse
@@ -18,13 +18,24 @@ from verify_artifact import (
     verify_bundle_contents,
 )
 
+SECURITY_SCAN_NAME = "security-scan.json"
+SECURITY_SBOM_NAME = "security-sbom.cdx.json"
+
 
 def release_tag(artifact_name: str) -> str:
     digest = hashlib.sha256(artifact_name.encode("utf-8")).hexdigest()
     return f"artifact-v2-{digest}"
 
 
-def _request(url: str, token: str, *, method: str = "GET", payload: dict | None = None, data: bytes | None = None, content_type: str = "application/vnd.github+json") -> dict | bytes:
+def _request(
+    url: str,
+    token: str,
+    *,
+    method: str = "GET",
+    payload: dict | None = None,
+    data: bytes | None = None,
+    content_type: str = "application/vnd.github+json",
+) -> dict | bytes:
     body = data
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
@@ -66,17 +77,53 @@ def _load_one_manifest(directory: Path) -> tuple[Path, dict]:
     return path, json.loads(path.read_text(encoding="utf-8"))
 
 
-def _local_files(directory: Path, manifest: dict) -> tuple[Path, Path, Path]:
+def _exactly_one(directory: Path, pattern: str, description: str) -> Path:
+    matches = list(directory.rglob(pattern))
+    if len(matches) != 1:
+        raise ValueError(f"expected exactly one {description}, found {len(matches)}")
+    return matches[0]
+
+
+def _local_files(directory: Path, manifest: dict) -> list[Path]:
     bundle_name = manifest["bundle"]["file"]
-    bundles = list(directory.rglob(bundle_name))
-    manifests = list(directory.rglob("*.manifest.json"))
-    checksums = list(directory.rglob(f"{bundle_name}.sha256"))
-    if len(bundles) != 1 or len(manifests) != 1 or len(checksums) != 1:
-        raise ValueError("archive requires exactly one bundle, manifest and checksum sidecar")
-    return bundles[0], manifests[0], checksums[0]
+    bundle = _exactly_one(directory, bundle_name, "bundle")
+    manifest_path = _exactly_one(directory, "*.manifest.json", "manifest")
+    checksum = _exactly_one(directory, f"{bundle_name}.sha256", "checksum sidecar")
+    scan = _exactly_one(directory, SECURITY_SCAN_NAME, "security scan report")
+    sbom = _exactly_one(directory, SECURITY_SBOM_NAME, "CycloneDX SBOM")
+    bundle_signature = _exactly_one(
+        directory,
+        f"{bundle.name}.sigstore.json",
+        "bundle Sigstore/Cosign signature bundle",
+    )
+    manifest_signature = _exactly_one(
+        directory,
+        f"{manifest_path.name}.sigstore.json",
+        "manifest Sigstore/Cosign signature bundle",
+    )
+    files = [
+        bundle,
+        manifest_path,
+        checksum,
+        scan,
+        sbom,
+        bundle_signature,
+        manifest_signature,
+    ]
+    names = [path.name for path in files]
+    if len(names) != len(set(names)):
+        raise ValueError("archive asset basenames must be unique")
+    return files
 
 
-def _validate_local(directory: Path, manifest: dict, *, repository: str, source_sha: str, run_id: str) -> tuple[Path, Path, Path]:
+def _validate_local(
+    directory: Path,
+    manifest: dict,
+    *,
+    repository: str,
+    source_sha: str,
+    run_id: str,
+) -> list[Path]:
     errors = validate_manifest_contract(manifest)
     errors.extend(
         validate_manifest_identity(
@@ -90,7 +137,10 @@ def _validate_local(directory: Path, manifest: dict, *, repository: str, source_
         errors.append("long-term archive only accepts Artifact Contract v2")
     if errors:
         raise ValueError("; ".join(errors))
-    bundle, manifest_path, checksum = _local_files(directory, manifest)
+
+    files = _local_files(directory, manifest)
+    bundle = next(path for path in files if path.name == manifest["bundle"]["file"])
+    checksum = next(path for path in files if path.name == f"{bundle.name}.sha256")
     actual = sha256(bundle)
     if actual != manifest["bundle"]["sha256"]:
         raise ValueError("bundle digest does not match manifest")
@@ -100,12 +150,16 @@ def _validate_local(directory: Path, manifest: dict, *, repository: str, source_
     sidecar_digest = checksum.read_text(encoding="utf-8").strip().split()[0]
     if sidecar_digest != actual:
         raise ValueError("checksum sidecar does not match bundle")
-    return bundle, manifest_path, checksum
+    return files
 
 
-def _release_record(manifest: dict) -> dict:
+def _asset_hashes(files: list[Path]) -> dict[str, str]:
+    return {path.name: sha256(path) for path in sorted(files, key=lambda item: item.name)}
+
+
+def _release_record(manifest: dict, files: list[Path]) -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "artifact_contract": 2,
         "artifact_name": manifest["artifact_name"],
         "bundle_sha256": manifest["bundle"]["sha256"],
@@ -113,12 +167,26 @@ def _release_record(manifest: dict) -> dict:
         "source_sha": manifest["source_sha"],
         "workflow_run_id": str(manifest["workflow_run_id"]),
         "toolchain_identity": manifest["toolchain"]["identity"],
+        "security_evidence": {
+            "scan": SECURITY_SCAN_NAME,
+            "sbom": SECURITY_SBOM_NAME,
+            "bundle_signature": f"{manifest['bundle']['file']}.sigstore.json",
+        },
+        "assets_sha256": _asset_hashes(files),
     }
 
 
-def archive(directory: Path, *, repository: str, source_sha: str, run_id: str, api_url: str, token: str) -> dict:
+def archive(
+    directory: Path,
+    *,
+    repository: str,
+    source_sha: str,
+    run_id: str,
+    api_url: str,
+    token: str,
+) -> dict:
     _, manifest = _load_one_manifest(directory)
-    bundle, manifest_path, checksum = _validate_local(
+    files = _validate_local(
         directory,
         manifest,
         repository=repository,
@@ -126,9 +194,9 @@ def archive(directory: Path, *, repository: str, source_sha: str, run_id: str, a
         run_id=run_id,
     )
     tag = release_tag(manifest["artifact_name"])
-    expected_record = _release_record(manifest)
+    expected_record = _release_record(manifest, files)
     existing = _get_release(api_url, repository, tag, token)
-    expected_assets = {bundle.name, manifest_path.name, checksum.name}
+    expected_assets = set(expected_record["assets_sha256"])
     if existing is not None:
         try:
             record = json.loads(existing.get("body") or "{}")
@@ -156,7 +224,7 @@ def archive(directory: Path, *, repository: str, source_sha: str, run_id: str, a
     )
     assert isinstance(created, dict)
     upload_template = created["upload_url"].split("{", 1)[0]
-    for path in (bundle, manifest_path, checksum):
+    for path in files:
         upload_url = f"{upload_template}?name={urllib.parse.quote(path.name)}"
         _request(
             upload_url,
@@ -168,7 +236,15 @@ def archive(directory: Path, *, repository: str, source_sha: str, run_id: str, a
     return {"status": "archived", "release_tag": tag, **expected_record}
 
 
-def download(directory: Path, *, repository: str, artifact_name: str, expected_sha256: str, api_url: str, token: str) -> dict:
+def download(
+    directory: Path,
+    *,
+    repository: str,
+    artifact_name: str,
+    expected_sha256: str,
+    api_url: str,
+    token: str,
+) -> dict:
     tag = release_tag(artifact_name)
     release = _get_release(api_url, repository, tag, token)
     if release is None:
@@ -177,15 +253,22 @@ def download(directory: Path, *, repository: str, artifact_name: str, expected_s
         record = json.loads(release.get("body") or "{}")
     except json.JSONDecodeError as exc:
         raise ValueError("release metadata is not valid JSON") from exc
+    if record.get("schema_version") != 2:
+        raise ValueError("release does not contain supply-chain archive metadata v2")
     if record.get("artifact_name") != artifact_name:
         raise ValueError("release artifact name does not match requested artifact")
     if record.get("bundle_sha256") != expected_sha256:
         raise ValueError("release digest does not match requested digest")
 
+    expected_assets = record.get("assets_sha256")
+    if not isinstance(expected_assets, dict) or not expected_assets:
+        raise ValueError("release asset digest map is missing")
     directory.mkdir(parents=True, exist_ok=True)
     assets = release.get("assets", [])
-    if len(assets) != 3:
-        raise ValueError(f"expected three immutable release assets, found {len(assets)}")
+    actual_names = {asset.get("name") for asset in assets}
+    if actual_names != set(expected_assets):
+        raise ValueError("release asset set does not match immutable metadata")
+
     for asset in assets:
         name = asset.get("name", "")
         if not name or Path(name).name != name:
@@ -202,7 +285,11 @@ def download(directory: Path, *, repository: str, artifact_name: str, expected_s
             },
         )
         with urllib.request.urlopen(request, timeout=60) as response:
-            (directory / name).write_bytes(response.read())
+            target = directory / name
+            target.write_bytes(response.read())
+        actual = sha256(target)
+        if actual != expected_assets[name]:
+            raise ValueError(f"release asset digest mismatch for {name}")
     return {"status": "downloaded", "release_tag": tag, **record}
 
 
@@ -210,7 +297,13 @@ def _emit(result: dict) -> None:
     output = os.getenv("GITHUB_OUTPUT")
     if output:
         with open(output, "a", encoding="utf-8") as handle:
-            for key in ("release_tag", "artifact_name", "bundle_sha256", "source_sha", "workflow_run_id"):
+            for key in (
+                "release_tag",
+                "artifact_name",
+                "bundle_sha256",
+                "source_sha",
+                "workflow_run_id",
+            ):
                 if key in result:
                     handle.write(f"{key}={result[key]}\n")
     print(json.dumps(result, indent=2, ensure_ascii=False))
