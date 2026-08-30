@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "engine": "postgresql",
+  "forbidden_sql": [
+    {
+      "id": "drop-database",
+      "pattern": "\\bDROP\\s+DATABASE\\b",
+      "reason": "CI migration must never destroy a database"
+    },
+    {
+      "id": "drop-schema",
+      "pattern": "\\bDROP\\s+SCHEMA\\b",
+      "reason": "Dropping an entire schema requires an explicit production change process"
+    },
+    {
+      "id": "truncate",
+      "pattern": "\\bTRUNCATE(?:\\s+TABLE)?\\b",
+      "reason": "TRUNCATE is destructive and is not accepted in normal application migration CI"
+    },
+    {
+      "id": "unconditional-delete",
+      "pattern": "\\bDELETE\\s+FROM\\s+[^;]+?\\s*;",
+      "must_not_contain": "\\bWHERE\\b",
+      "reason": "DELETE without WHERE can remove all rows"
+    },
+    {
+      "id": "unconditional-update",
+      "pattern": "\\bUPDATE\\s+[^;]+?\\s+SET\\s+[^;]+?;",
+      "must_not_contain": "\\bWHERE\\b",
+      "reason": "UPDATE without WHERE can rewrite all rows"
+    }
+  ],
+  "evidence_retention_days": 30
+}
