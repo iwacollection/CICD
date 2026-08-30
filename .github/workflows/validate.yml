@@ -60,7 +60,7 @@ jobs:
         run: >-
           python3 scripts/ci/repository_governance.py
           --policy ci/repository-governance-policy.json
-          validate
+          --validate-only
 
       - name: Render build matrix
         run: python3 scripts/ci/discover_matrix.py
