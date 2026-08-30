@@ -20,8 +20,8 @@ commit A
  -> Artifact Contract v2
  -> bundle SHA256 = abc123...
  -> 长期归档
- -> dev 指针      -> abc123...
- -> staging 指针  -> abc123...
+ -> dev 指针        -> abc123...
+ -> staging 指针    -> abc123...
  -> production 指针 -> abc123...
 ```
 
@@ -49,7 +49,7 @@ project
 + source SHA short fingerprint
 ```
 
-详细字段见 `docs/artifact-contract-v2.md`。
+详细字段见 [artifact-contract-v2.md](artifact-contract-v2.md)。
 
 ## 3. Actions Artifact 只做流水线短期运输
 
@@ -65,9 +65,9 @@ Build Job
 
 它不再承担：
 
-- 长期生产归档
-- 环境当前版本指针
-- 回滚历史
+- 长期生产归档；
+- 环境当前版本指针；
+- 回滚历史。
 
 因此即使 Actions Artifact 后续按 14 天策略被清理，已归档生产制品仍然存在。
 
@@ -92,9 +92,19 @@ verify_artifact.py
   +-- tar member SHA256
   |
   v
+Supply-chain policy
+  |
+  +-- vulnerability
+  +-- license
+  +-- secret
+  +-- misconfiguration
+  +-- CycloneDX SBOM
+  |
+  v
 GitHub Attestation verify
-  +-- bundle
-  +-- manifest
+  |
+  v
+Cosign archive signature
   |
   v
 GitHub Release archive
@@ -106,17 +116,18 @@ Release tag 不是人工版本号，而是：
 artifact-v2-<sha256(artifact_name)>
 ```
 
-Release body 绑定：
+Release metadata 绑定：
 
-- Artifact Contract 版本
-- artifact name
-- bundle SHA256
-- source repository
-- source SHA
-- source run ID
-- toolchain identity
+- Artifact Contract 版本；
+- artifact name；
+- bundle SHA256；
+- source repository；
+- source SHA；
+- source run ID；
+- toolchain identity；
+- scan / SBOM / signature evidence digest。
 
-如果同一个 release tag 已存在，归档逻辑只允许完全一致的 metadata + 三个完全一致的资产名；任何冲突都会失败，不自动覆盖。
+如果同一个 release tag 已存在，归档逻辑只允许完全一致的 metadata 与资产；任何冲突都会失败，不自动覆盖。
 
 ## 5. 为什么现在选择 GitHub Release
 
@@ -124,12 +135,12 @@ Release body 绑定：
 
 GitHub Release 具备：
 
-- 不受 Actions Artifact 14/90 天保留期影响
-- 任意二进制文件
-- API 下载
-- 仓库权限控制
-- 审计历史
-- 无需额外 Nexus/S3 账号即可验证整套流程
+- 不受 Actions Artifact 14/90 天保留期影响；
+- 任意二进制文件；
+- API 下载；
+- 仓库权限控制；
+- 审计历史；
+- 无需额外 Nexus/S3 账号即可验证整套流程。
 
 后续可把 `artifact_archive.py` 的后端扩展为：
 
@@ -143,11 +154,70 @@ JFrog Artifactory
 
 Promotion/Rollback 上层契约不需要变化，只替换长期对象存储后端。
 
-## 6. Promotion：移动环境 digest 指针
+## 6. Promotion：不只是“选一个环境”
 
-`promote.yml` 不再从 Actions Artifact 下载。
+`promote.yml` 不再允许把任意归档制品直接跳到任意环境。
 
-现在流程是：
+中央策略位于：
+
+```text
+ci/promotion-policy.json
+```
+
+当前固定晋级路径：
+
+```text
+Build Archive
+    |
+    v
+   dev
+    |
+    v
+ staging
+    |
+    v
+production
+```
+
+对应策略：
+
+```text
+dev        -> 无前置环境
+staging    -> 必须先在 dev 成功部署同一 artifact identity
+production -> 必须先在 staging 成功部署同一 artifact identity
+```
+
+不能：
+
+```text
+Archive -> production        X
+Archive -> staging           X（没有 dev 历史时）
+dev digest-A -> staging digest-B   X
+```
+
+## 7. “同一份制品”怎么证明
+
+晋级前不是只比较版本号或文件名，而是要求前置环境存在一个 successful GitHub Deployment，并且下面五个字段全部一致：
+
+```text
+artifact_name
+bundle_sha256
+source_sha
+source_run_id
+release_tag
+```
+
+也就是：
+
+```text
+exact artifact identity
+```
+
+只要 digest、source run 或 archive release 任意一个不同，都不能拿前置环境的成功记录给另一个制品“借通行证”。
+
+## 8. Promotion 完整流程
+
+当前流程是：
 
 ```text
 人工输入
@@ -163,16 +233,37 @@ expected_sha256
 从长期 Release 下载 exact artifact
   |
   v
-重新验证 bundle + manifest + attestations
+Promotion Path Policy
+  |
+  +-- dev: root allowed
+  |
+  +-- staging: 查 dev successful deployment history
+  |
+  `-- production: 查 staging successful deployment history
+  |
+  v
+重新验证 bundle + manifest
+  |
+  v
+重新执行 supply-chain policy
+  |
+  v
+验证 GitHub Attestation + Cosign
   |
   v
 进入 GitHub Environment 审批
   |
   v
-创建 GitHub Deployment
+创建 GitHub Deployment pointer
 ```
 
-Deployment payload 就是环境当前制品指针：
+Promotion Policy 查询的是**历史 successful deployment**，而不是只看前置环境当前版本。
+
+所以即使 dev 后来已经前进到 digest-B，只要 digest-A 曾经在 dev 真实成功部署过，仍然可以按变更流程把经过验证的 digest-A 晋级到 staging。
+
+## 9. GitHub Deployment 是环境 digest pointer + 审计链
+
+Deployment payload 记录：
 
 ```text
 environment
@@ -181,40 +272,88 @@ environment
  -> source_sha
  -> source_run_id
  -> release_tag
+ -> promoted_from_deployment_id   # promotion 时
+ -> restored_from_deployment_id   # rollback 时
 ```
 
-因此：
+例如：
 
 ```text
-dev       -> digest-A
-staging   -> digest-A
-production-> digest-A
+Deployment 101
+  environment=dev
+  digest=A
+
+Deployment 120
+  environment=staging
+  digest=A
+  promoted_from_deployment_id=101
+
+Deployment 140
+  environment=production
+  digest=A
+  promoted_from_deployment_id=120
 ```
 
-是可查询、可审计的真实状态，而不是 README 里的说明。
+这使生产发布不只是：
 
-## 7. 为什么用 GitHub Deployment 记录环境指针
+```text
+production -> digest-A
+```
 
-环境指针必须同时满足：
+还可以反查：
 
-- 可以变化
-- 每次变化必须有历史
-- 能知道谁触发
-- 能知道何时发生
-- 能知道指向哪个 digest
-- 不能为了更新指针去修改/重建制品
+```text
+production 140
+  <- staging 120
+       <- dev 101
+```
 
-GitHub Deployment 正好是追加式部署记录。
+形成可审计晋级链。
 
-`deployment_pointer.py` 创建的新 Deployment 成功后，GitHub 会自动把同环境旧 Deployment 标记为 inactive；最新 successful deployment 就是当前环境指针。
+## 10. 为什么 Environment Approval 仍然需要
 
-## 8. Rollback：不是重新 Build
+Promotion Path Policy 解决的是：
+
+> 这份 bytes 有没有经过规定的环境路径？
+
+GitHub Environment Approval 解决的是：
+
+> 这次变更现在是否允许进入这个环境？
+
+二者不是一回事。
+
+production 仍应配置：
+
+- Required reviewers；
+- Allowed branches = main；
+- 环境级 secrets；
+- 必要等待时间 / 变更窗口。
+
+所以 production 发布要同时满足：
+
+```text
+可信 main Build
++ immutable archive
++ supply-chain verification
++ staging successful exact identity
++ production Environment approval
+```
+
+## 11. Rollback：不是逆向 Promotion
 
 `rollback.yml` 输入：
 
 ```text
 target_environment
 restore_deployment_id
+```
+
+Rollback 不走 `dev -> staging -> production` 前向策略。
+
+它的边界是：
+
+```text
+只能恢复目标环境自己的历史 successful deployment
 ```
 
 流程：
@@ -234,7 +373,7 @@ restore_deployment_id
 从长期库下载旧制品
   |
   v
-重新验证 digest / manifest / provenance
+重新验证 digest / manifest / policy / provenance
   |
   v
 创建新的 rollback Deployment
@@ -243,36 +382,51 @@ restore_deployment_id
 例如：
 
 ```text
-Deployment 101 -> production -> digest-A
-Deployment 102 -> production -> digest-B
+Deployment 140 -> production -> digest-A
+Deployment 150 -> production -> digest-B
 
 发生事故
 
-Rollback restore_deployment_id=101
+Rollback restore_deployment_id=140
 
-Deployment 103 -> production -> digest-A
+Deployment 151 -> production -> digest-A
 reason=rollback
-restored_from_deployment_id=101
+restored_from_deployment_id=140
 ```
 
-所以完整历史仍然存在：A -> B -> A，而不是把 102 偷偷改掉。
+完整历史是：
 
-## 9. 生产审批
+```text
+A -> B -> A
+```
 
-`promote.yml` 和 `rollback.yml` 都进入目标 GitHub Environment。
+旧记录不会被修改。
 
-因此 production 应配置：
+## 12. 为什么 Rollback 不要求重新经过 staging
 
-- Required reviewers
-- Allowed branches = main
-- 环境级 secrets
-- 必要等待时间/变更窗口
+事故回滚的目标是恢复**这个环境曾经已经成功运行过的历史 bytes**。
 
-审批页面关注的是**具体 digest**，不是一句“发 v1.2”。
+如果强制 production rollback 再走：
 
-## 10. 故障恢复边界
+```text
+production -> dev -> staging -> production
+```
 
-CI 的 Rollback 指针只能保证“重新选择旧二进制”。
+会把应急恢复变成重新发布，失去 rollback 的意义。
+
+所以规则分开：
+
+```text
+Forward Promotion
+  -> 必须 dev -> staging -> production
+
+Rollback
+  -> 只能恢复同环境历史 successful digest
+```
+
+## 13. 故障恢复边界
+
+CI 的 Rollback pointer 只能保证“重新选择旧二进制”。
 
 数据库、固件仍有自己的系统级兼容约束。
 
@@ -284,16 +438,16 @@ CI 的 Rollback 指针只能保证“重新选择旧二进制”。
 
 还要考虑：
 
-- Bootloader 向后兼容
-- 分区表变化
-- Anti-rollback fuse/policy
-- 数据分区格式
-- OTA 中断恢复
-- A/B 分区
+- Bootloader 向后兼容；
+- 分区表变化；
+- Anti-rollback fuse/policy；
+- 数据分区格式；
+- OTA 中断恢复；
+- A/B 分区。
 
 所以“制品可回滚”与“整个业务/设备可回滚”必须分开评估。
 
-## 11. 当前闭环
+## 14. 当前完整闭环
 
 ```text
 Source
@@ -302,20 +456,26 @@ Build once
   |
 Artifact Contract v2
   |
+Supply-chain Scan + SBOM
+  |
 GitHub Attestation
   |
 Actions Artifact (short-lived transport)
   |
 Archive Trusted Artifacts
   |
-GitHub Release (long-term object)
+GitHub Release + Cosign (long-term object)
   |
-Promotion
+Promotion Path Policy
   |
-GitHub Deployment environment digest pointer
+  +-- dev
+  +-- staging requires exact successful dev identity
+  `-- production requires exact successful staging identity
+  |
+GitHub Environment Approval
+  |
+GitHub Deployment pointer + promoted_from lineage
   |
 Rollback
-  `-> historical Deployment -> same old Release bytes
+  `-> same-environment historical Deployment -> same old Release bytes
 ```
-
-下一层是供应链 Policy Gate：SBOM、漏洞、License、签名和依赖固定必须成为 Promotion 前置条件，而不是仅记录文档。
