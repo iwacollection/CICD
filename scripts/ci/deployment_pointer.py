@@ -31,6 +31,9 @@ def _validate_payload(payload: dict[str, Any]) -> None:
         raise ValueError("deployment payload source_run_id is invalid")
     if not isinstance(payload.get("release_tag"), str) or not payload["release_tag"].startswith("artifact-v2-"):
         raise ValueError("deployment payload release_tag is invalid")
+    for field in ("restored_from_deployment_id", "promoted_from_deployment_id"):
+        if field in payload and not str(payload[field]).isdigit():
+            raise ValueError(f"deployment payload {field} is invalid")
 
 
 def create_pointer(
@@ -46,6 +49,7 @@ def create_pointer(
     release_tag: str,
     reason: str,
     restored_from_deployment_id: str = "",
+    promoted_from_deployment_id: str = "",
 ) -> dict:
     if not ENV_RE.fullmatch(environment):
         raise ValueError("environment contains unsupported characters")
@@ -69,6 +73,10 @@ def create_pointer(
         if not restored_from_deployment_id.isdigit():
             raise ValueError("restored_from_deployment_id must be numeric")
         payload["restored_from_deployment_id"] = restored_from_deployment_id
+    if promoted_from_deployment_id:
+        if not promoted_from_deployment_id.isdigit():
+            raise ValueError("promoted_from_deployment_id must be numeric")
+        payload["promoted_from_deployment_id"] = promoted_from_deployment_id
     _validate_payload(payload)
 
     deployment_url = f"{api_url.rstrip('/')}/repos/{repository}/deployments"
@@ -181,6 +189,7 @@ def main() -> int:
     create_parser.add_argument("--release-tag", required=True)
     create_parser.add_argument("--reason", choices=("promotion", "rollback"), required=True)
     create_parser.add_argument("--restored-from-deployment-id", default="")
+    create_parser.add_argument("--promoted-from-deployment-id", default="")
 
     inspect_parser = subparsers.add_parser("inspect")
     inspect_parser.add_argument("--repository", required=True)
@@ -208,6 +217,7 @@ def main() -> int:
                 release_tag=args.release_tag,
                 reason=args.reason,
                 restored_from_deployment_id=args.restored_from_deployment_id,
+                promoted_from_deployment_id=args.promoted_from_deployment_id,
             )
         elif args.command == "inspect":
             result = inspect_pointer(
