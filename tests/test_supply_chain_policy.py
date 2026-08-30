@@ -32,7 +32,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertEqual(validate_dockerfile(dockerfile, self.policy), [])
         text = dockerfile.read_text(encoding="utf-8")
         self.assertRegex(text, r"FROM ubuntu:24\.04@sha256:[0-9a-f]{64}")
-        self.assertIn('APT::Snapshot "20260810T000000Z"', text)
+        self.assertIn('APT::Snapshot "20260828T000000Z"', text)
 
     def test_floating_container_base_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -67,6 +67,24 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertTrue(any("vulnerability blocked" in error for error in errors))
         self.assertTrue(any("secret finding blocked" in error for error in errors))
 
+    def test_license_policy_blocks_named_denials_not_all_copyleft(self) -> None:
+        report = {
+            "Results": [
+                {
+                    "Target": "OS Packages",
+                    "Licenses": [
+                        {"Name": "GPL-3.0-only", "Severity": "HIGH"},
+                        {"Name": "AGPL-3.0-only", "Severity": "HIGH"},
+                    ],
+                }
+            ]
+        }
+        errors, summary = validate_trivy_report(report, self.policy)
+        self.assertEqual(summary["licenses"], 2)
+        self.assertEqual(summary["denied_licenses"], 1)
+        self.assertFalse(any("GPL-3.0-only" in error and "AGPL" not in error for error in errors))
+        self.assertTrue(any("AGPL-3.0-only" in error for error in errors))
+
     def test_cyclonedx_sbom_is_required_shape(self) -> None:
         valid = {
             "bomFormat": "CycloneDX",
@@ -81,12 +99,21 @@ class SupplyChainPolicyTests(unittest.TestCase):
         central = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         reusable = (ROOT / ".github" / "workflows" / "reusable-build.yml").read_text(encoding="utf-8")
         toolchain = (ROOT / ".github" / "workflows" / "toolchain-images.yml").read_text(encoding="utf-8")
-        archive = (ROOT / ".github" / "workflows" / "archive-artifacts.yml").read_text(encoding="utf-8")
-        promote = (ROOT / ".github" / "workflows" / "promote.yml").read_text(encoding="utf-8")
-        rollback = (ROOT / ".github" / "workflows" / "rollback.yml").read_text(encoding="utf-8")
+        archive = (ROOT / ".github" / "workflows" / "archive-artifacts.yml").read_text(
+            encoding="utf-8"
+        )
+        promote = (ROOT / ".github" / "workflows" / "promote.yml").read_text(
+            encoding="utf-8"
+        )
+        rollback = (ROOT / ".github" / "workflows" / "rollback.yml").read_text(
+            encoding="utf-8"
+        )
 
         for workflow in (central, reusable, toolchain):
-            self.assertIn("aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25", workflow)
+            self.assertIn(
+                "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25",
+                workflow,
+            )
             self.assertIn("v0.70.0", workflow)
             self.assertIn("supply_chain_policy.py", workflow)
 
@@ -95,7 +122,10 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertIn("security-scan.json", reusable)
         self.assertIn("security-sbom.cdx.json", reusable)
 
-        self.assertIn("sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6", toolchain)
+        self.assertIn(
+            "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6",
+            toolchain,
+        )
         self.assertIn("cosign verify", toolchain)
         self.assertIn("cosign sign-blob", archive)
         self.assertIn("id-token: write", archive)
