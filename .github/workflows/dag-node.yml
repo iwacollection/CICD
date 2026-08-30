@@ -1,0 +1,371 @@
+name: DAG Build Node
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+      path:
+        required: true
+        type: string
+      depends_on_json:
+        required: false
+        default: "[]"
+        type: string
+      soc:
+        required: true
+        type: string
+      target_os:
+        required: true
+        type: string
+      arch:
+        required: true
+        type: string
+      toolchain:
+        required: true
+        type: string
+      toolchain_identity:
+        required: true
+        type: string
+      runner_labels_json:
+        required: true
+        type: string
+      execution_mode:
+        required: true
+        type: string
+      container_image:
+        required: false
+        default: ""
+        type: string
+      build_command:
+        required: true
+        type: string
+      test_command:
+        required: false
+        default: ""
+        type: string
+      pr_validation_command:
+        required: false
+        default: ""
+        type: string
+      artifact_paths_json:
+        required: true
+        type: string
+      dependency_lock_files_json:
+        required: false
+        default: "[]"
+        type: string
+      cache_paths:
+        required: false
+        default: ""
+        type: string
+      cache_key_files_json:
+        required: false
+        default: "[]"
+        type: string
+      lane:
+        required: true
+        type: string
+      platform_ref:
+        description: "Exact 40-character CICD platform commit SHA"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ inputs.lane }} / ${{ inputs.project }} / ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(inputs.runner_labels_json) }}
+    timeout-minutes: 120
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Require immutable platform revision
+        shell: bash
+        env:
+          CI_PLATFORM_REF: ${{ inputs.platform_ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CI_PLATFORM_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "platform_ref must be an exact 40-character commit SHA" >&2
+            exit 1
+          fi
+
+      - name: Checkout immutable platform scripts and policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: iwacollection/CICD
+          ref: ${{ inputs.platform_ref }}
+          path: .ci-platform
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci
+            ci
+          sparse-checkout-cone-mode: true
+
+      - name: Select trust lane
+        id: trust
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUNNER_LABELS_JSON: ${{ inputs.runner_labels_json }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+
+          labels = json.loads(os.environ["RUNNER_LABELS_JSON"])
+          if not isinstance(labels, list) or not labels or not all(isinstance(x, str) and x for x in labels):
+              raise SystemExit("runner_labels_json must be a non-empty JSON string array")
+          hardware_pr = os.environ["EVENT_NAME"] == "pull_request" and "self-hosted" in labels
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"hardware_pr={str(hardware_pr).lower()}\n")
+          PY
+
+      - name: Hosted hardware PR validation
+        if: steps.trust.outputs.hardware_pr == 'true'
+        shell: bash
+        env:
+          CI_PR_VALIDATION_COMMAND: ${{ inputs.pr_validation_command }}
+          CI_WORKING_DIRECTORY: ${{ inputs.path }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CI_PR_VALIDATION_COMMAND" ]]; then
+            echo "Self-hosted DAG target requires pr_validation_command on pull requests." >&2
+            exit 1
+          fi
+          python3 .ci-platform/scripts/ci/run_build.py \
+            --working-directory "source/$CI_WORKING_DIRECTORY" \
+            --command "$CI_PR_VALIDATION_COMMAND"
+
+      - name: Download previous DAG level artifacts
+        if: inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: dag-*
+          path: upstream-artifacts
+          merge-multiple: false
+
+      - name: Verify and stage declared upstream artifacts
+        id: upstream
+        if: inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
+        shell: bash
+        env:
+          CI_DEPENDS_ON: ${{ inputs.depends_on_json }}
+          CI_WORKING_DIRECTORY: ${{ inputs.path }}
+        run: |
+          set -euo pipefail
+          python3 .ci-platform/scripts/ci/resolve_upstream_artifacts.py \
+            --directory upstream-artifacts \
+            --dependencies-json "$CI_DEPENDS_ON" \
+            --soc "${{ inputs.soc }}" \
+            --target-os "${{ inputs.target_os }}" \
+            --arch "${{ inputs.arch }}" \
+            --destination "source/$CI_WORKING_DIRECTORY/.ci-upstream" \
+            --expected-source-sha "$GITHUB_SHA" \
+            --expected-repository "$GITHUB_REPOSITORY"
+
+      - name: Compute declared cache fingerprint
+        id: cache-key
+        if: inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
+        shell: bash
+        env:
+          CI_CACHE_KEY_FILES: ${{ inputs.cache_key_files_json }}
+          CI_WORKING_DIRECTORY: ${{ inputs.path }}
+        run: >-
+          python3 .ci-platform/scripts/ci/cache_fingerprint.py
+          --working-directory "source/$CI_WORKING_DIRECTORY"
+          --patterns-json "$CI_CACHE_KEY_FILES"
+
+      - name: Restore build cache
+        if: inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ inputs.cache_paths }}
+          key: dag-ci-v1-${{ inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ steps.upstream.outputs.fingerprint || 'no-upstream' }}-${{ steps.cache-key.outputs.fingerprint }}
+          restore-keys: |
+            dag-ci-v1-${{ inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ steps.upstream.outputs.fingerprint || 'no-upstream' }}-
+
+      - name: Pull and verify immutable toolchain
+        id: container
+        if: inputs.execution_mode == 'container' && steps.trust.outputs.hardware_pr != 'true'
+        shell: bash
+        env:
+          CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CI_CONTAINER_IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
+            echo "Container toolchains must be pinned by immutable sha256 digest: $CI_CONTAINER_IMAGE" >&2
+            exit 1
+          fi
+          docker pull "$CI_CONTAINER_IMAGE"
+          expected="${CI_CONTAINER_IMAGE##*@}"
+          repo_digests="$(docker image inspect "$CI_CONTAINER_IMAGE" --format '{{json .RepoDigests}}')"
+          if [[ "$repo_digests" != *"@$expected"* ]]; then
+            echo "Pulled image does not resolve to expected digest $expected" >&2
+            exit 1
+          fi
+          echo "image=$CI_CONTAINER_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        if: steps.trust.outputs.hardware_pr != 'true'
+        shell: bash
+        env:
+          CI_BUILD_COMMAND: ${{ inputs.build_command }}
+          CI_CONTAINER_IMAGE: ${{ steps.container.outputs.image }}
+          CI_UPSTREAM_ROOT: ${{ steps.upstream.outputs.root }}
+          CI_UPSTREAM_INDEX: ${{ steps.upstream.outputs.index }}
+          CI_WORKING_DIRECTORY: ${{ inputs.path }}
+        run: |
+          set -euo pipefail
+          args=(--working-directory "source/$CI_WORKING_DIRECTORY" --command "$CI_BUILD_COMMAND")
+          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
+            args+=(--container-image "$CI_CONTAINER_IMAGE")
+          fi
+          python3 .ci-platform/scripts/ci/run_build.py "${args[@]}"
+
+      - name: Test
+        if: inputs.test_command != '' && steps.trust.outputs.hardware_pr != 'true'
+        shell: bash
+        env:
+          CI_TEST_COMMAND: ${{ inputs.test_command }}
+          CI_CONTAINER_IMAGE: ${{ steps.container.outputs.image }}
+          CI_UPSTREAM_ROOT: ${{ steps.upstream.outputs.root }}
+          CI_UPSTREAM_INDEX: ${{ steps.upstream.outputs.index }}
+          CI_WORKING_DIRECTORY: ${{ inputs.path }}
+        run: |
+          set -euo pipefail
+          args=(--working-directory "source/$CI_WORKING_DIRECTORY" --command "$CI_TEST_COMMAND")
+          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
+            args+=(--container-image "$CI_CONTAINER_IMAGE")
+          fi
+          python3 .ci-platform/scripts/ci/run_build.py "${args[@]}"
+
+      - name: Prepare supply-chain evidence
+        run: rm -rf security-evidence && mkdir -p security-evidence
+
+      - name: Scan project vulnerabilities, licenses, secrets and misconfigurations
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: fs
+          scan-ref: source/${{ inputs.path }}
+          scanners: vuln,license,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: security-evidence/security-scan.json
+          exit-code: "0"
+          version: v0.70.0
+
+      - name: Generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: fs
+          scan-ref: source/${{ inputs.path }}
+          format: cyclonedx
+          output: security-evidence/security-sbom.cdx.json
+          version: v0.70.0
+
+      - name: Enforce supply-chain policy
+        run: >-
+          python3 .ci-platform/scripts/ci/supply_chain_policy.py
+          --policy .ci-platform/ci/supply-chain-policy.json
+          --skip-dockerfiles
+          --report security-evidence/security-scan.json
+          --sbom security-evidence/security-sbom.cdx.json
+
+      - name: Collect build environment metadata
+        if: steps.trust.outputs.hardware_pr != 'true'
+        shell: bash
+        env:
+          CI_CONTAINER_IMAGE: ${{ steps.container.outputs.image }}
+          CI_WORKING_DIRECTORY: ${{ inputs.path }}
+        run: |
+          set -euo pipefail
+          args=(--working-directory "source/$CI_WORKING_DIRECTORY" --output build-environment.json)
+          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
+            args+=(--container-image "$CI_CONTAINER_IMAGE")
+          fi
+          python3 .ci-platform/scripts/ci/collect_build_metadata.py "${args[@]}"
+
+      - name: Package immutable Artifact Contract v2
+        id: package
+        if: steps.trust.outputs.hardware_pr != 'true'
+        shell: bash
+        env:
+          CI_ARTIFACT_PATHS: ${{ inputs.artifact_paths_json }}
+          CI_DEPENDENCY_LOCKS: ${{ inputs.dependency_lock_files_json }}
+          CI_RUNNER_LABELS: ${{ inputs.runner_labels_json }}
+          CI_CONTAINER_IMAGE: ${{ inputs.container_image }}
+          CI_UPSTREAM_INDEX: ${{ steps.upstream.outputs.index }}
+          CI_WORKING_DIRECTORY: ${{ inputs.path }}
+        run: |
+          set -euo pipefail
+          args=(
+            --project "${{ inputs.project }}"
+            --working-directory "source/$CI_WORKING_DIRECTORY"
+            --artifacts-json "$CI_ARTIFACT_PATHS"
+            --dependency-locks-json "$CI_DEPENDENCY_LOCKS"
+            --soc "${{ inputs.soc }}"
+            --target-os "${{ inputs.target_os }}"
+            --arch "${{ inputs.arch }}"
+            --toolchain "${{ inputs.toolchain }}"
+            --toolchain-identity "${{ inputs.toolchain_identity }}"
+            --execution-mode "${{ inputs.execution_mode }}"
+            --container-image "$CI_CONTAINER_IMAGE"
+            --runner-labels-json "$CI_RUNNER_LABELS"
+            --build-metadata-file build-environment.json
+          )
+          if [[ -n "${CI_UPSTREAM_INDEX:-}" ]]; then
+            args+=(--upstream-index "$CI_UPSTREAM_INDEX")
+          fi
+          python3 .ci-platform/scripts/ci/package_artifact.py "${args[@]}"
+
+      - name: Verify packaged artifact
+        if: steps.trust.outputs.hardware_pr != 'true'
+        run: >-
+          python3 .ci-platform/scripts/ci/verify_artifact.py
+          --directory dist
+          --expected-sha256 "${{ steps.package.outputs.digest }}"
+
+      - name: Upload DAG artifact and security evidence
+        if: steps.trust.outputs.hardware_pr != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dag-${{ steps.package.outputs.artifact_name }}
+          path: |
+            ${{ steps.package.outputs.bundle }}
+            ${{ steps.package.outputs.manifest }}
+            ${{ steps.package.outputs.checksum }}
+            security-evidence/security-scan.json
+            security-evidence/security-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: DAG node summary
+        shell: bash
+        run: |
+          {
+            echo "### DAG node"
+            echo "- Project: ${{ inputs.project }}"
+            echo "- Target: ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}"
+            echo "- Depends on: ${{ inputs.depends_on_json }}"
+            echo "- Upstream fingerprint: ${{ steps.upstream.outputs.fingerprint || 'root-node' }}"
+            if [[ "${{ steps.trust.outputs.hardware_pr }}" == "true" ]]; then
+              echo "- Execution: hosted-safe PR validation only"
+            else
+              echo "- Artifact: dag-${{ steps.package.outputs.artifact_name }}"
+              echo "- SHA256: ${{ steps.package.outputs.digest }}"
+              echo "- Supply-chain policy: PASSED"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
