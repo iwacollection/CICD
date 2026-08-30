@@ -22,7 +22,7 @@ on:
         default: ""
         type: string
       pr_validation_command:
-        description: "Optional hosted-safe validation command for self-hosted targets on pull requests"
+        description: "Hosted-safe validation command required when a self-hosted target is invoked by a pull request"
         required: false
         default: ""
         type: string
@@ -95,7 +95,9 @@ permissions:
 jobs:
   build:
     name: ${{ inputs.project_name }} / ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(inputs.runner_labels_json) }}
+    # A self-hosted target is eligible for privileged scheduling only from main.
+    # PRs and any other non-main refs are forced onto an ephemeral hosted runner.
+    runs-on: ${{ contains(fromJSON(inputs.runner_labels_json), 'self-hosted') && github.ref != 'refs/heads/main' && 'ubuntu-latest' || fromJSON(inputs.runner_labels_json) }}
     timeout-minutes: 120
     steps:
       - name: Checkout caller source
@@ -144,6 +146,7 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_VALUE: ${{ github.ref }}
           RUNNER_LABELS_JSON: ${{ inputs.runner_labels_json }}
         run: |
           set -euo pipefail
@@ -156,11 +159,14 @@ jobs:
               isinstance(label, str) and label for label in labels
           ):
               raise SystemExit("runner_labels_json must be a non-empty JSON string array")
-          hardware_pr = (
-              os.environ["EVENT_NAME"] == "pull_request" and "self-hosted" in labels
-          )
+          self_hosted = "self-hosted" in labels
+          event_name = os.environ["EVENT_NAME"]
+          ref = os.environ["GITHUB_REF_VALUE"]
+          hardware_pr = event_name == "pull_request" and self_hosted
+          untrusted_hardware = self_hosted and ref != "refs/heads/main" and not hardware_pr
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"hardware_pr={str(hardware_pr).lower()}\n")
+              output.write(f"untrusted_hardware={str(untrusted_hardware).lower()}\n")
           PY
 
       - name: Hosted PR validation lane
@@ -172,13 +178,21 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "$CI_PR_VALIDATION_COMMAND" ]]; then
-            echo "Self-hosted hardware build skipped for untrusted pull-request code."
-            echo "Configure pr_validation_command to run a hosted-safe source validation."
-            exit 0
+            echo "Self-hosted hardware PR validation requires pr_validation_command." >&2
+            echo "The job is intentionally failing instead of reporting metadata-only success." >&2
+            exit 1
           fi
           python3 .ci-platform/scripts/ci/run_build.py \
             --working-directory "source/$CI_WORKING_DIRECTORY" \
             --command "$CI_PR_VALIDATION_COMMAND"
+
+      - name: Reject untrusted self-hosted event
+        if: steps.lane.outputs.untrusted_hardware == 'true'
+        shell: bash
+        run: |
+          echo "Self-hosted targets may only execute privileged builds from refs/heads/main." >&2
+          echo "Non-main manual dispatches, branch pushes, tags, and other refs are blocked." >&2
+          exit 1
 
       - name: Login private toolchain registry
         if: steps.lane.outputs.hardware_pr != 'true' && inputs.container_image != '' && inputs.container_registry != ''
@@ -320,11 +334,7 @@ jobs:
             echo "- Toolchain: $TOOLCHAIN"
             if [[ "$HARDWARE_PR" == "true" ]]; then
               echo "- Execution: hosted pull-request validation lane"
-              if [[ -n "$PR_VALIDATION_COMMAND" ]]; then
-                echo "- Validation: hosted-safe command completed"
-              else
-                echo "- Validation: metadata only; hardware build deferred until trusted main"
-              fi
+              echo "- Validation: hosted-safe command completed"
               echo "- Artifact: skipped for pull-request hardware lane"
             else
               echo "- Execution: $EXECUTION_MODE"
