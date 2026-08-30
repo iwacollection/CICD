@@ -3,12 +3,17 @@ FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Freeze the entire Ubuntu archive dependency graph at one UTC snapshot.
-# Updating this timestamp is an explicit supply-chain change reviewed through PR + Toolchain gate.
+# The minimal Ubuntu base does not contain CA certificates. The first two APT
+# commands therefore disable only HTTPS peer verification while APT still
+# verifies the fixed Snapshot metadata and packages through Ubuntu's archive
+# signing key and package hashes. Once ca-certificates is installed, all
+# subsequent Snapshot access returns to normal TLS verification.
 RUN printf '%s\n' 'APT::Snapshot "20260810T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+    && apt-get -o Acquire::https::Verify-Peer=false update \
+    && apt-get -o Acquire::https::Verify-Peer=false install -y --no-install-recommends ca-certificates \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
        bash \
-       ca-certificates \
        build-essential \
        cmake \
        ninja-build \
