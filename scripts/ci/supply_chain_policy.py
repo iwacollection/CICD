@@ -113,9 +113,7 @@ def validate_trivy_report(report: dict, policy: dict) -> tuple[list[str], dict]:
                 continue
             summary["secrets"] += 1
             if deny_secrets:
-                errors.append(
-                    f"secret finding blocked: {finding.get('RuleID', 'unknown')} target={target}"
-                )
+                errors.append(f"secret finding blocked: {finding.get('RuleID', 'unknown')} target={target}")
         for finding in result.get("Misconfigurations") or []:
             if not isinstance(finding, dict):
                 continue
@@ -133,6 +131,7 @@ def main() -> int:
     parser.add_argument("--policy", default="ci/supply-chain-policy.json")
     parser.add_argument("--report")
     parser.add_argument("--dockerfiles", nargs="*")
+    parser.add_argument("--skip-dockerfiles", action="store_true")
     args = parser.parse_args()
 
     try:
@@ -141,14 +140,17 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     errors = validate_policy(policy)
-    dockerfiles = [Path(path) for path in (args.dockerfiles or [])]
-    if not dockerfiles:
-        dockerfiles = sorted(Path("docker").rglob("Dockerfile")) if Path("docker").exists() else []
-    for path in dockerfiles:
-        try:
-            errors.extend(validate_dockerfile(path, policy))
-        except OSError as exc:
-            errors.append(f"cannot read Dockerfile {path}: {exc}")
+
+    if not args.skip_dockerfiles:
+        if args.dockerfiles is not None:
+            dockerfiles = [Path(path) for path in args.dockerfiles]
+        else:
+            dockerfiles = sorted(Path("docker").rglob("Dockerfile")) if Path("docker").exists() else []
+        for path in dockerfiles:
+            try:
+                errors.extend(validate_dockerfile(path, policy))
+            except OSError as exc:
+                errors.append(f"cannot read Dockerfile {path}: {exc}")
 
     summary: dict = {}
     if args.report:
