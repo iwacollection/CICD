@@ -26,6 +26,13 @@ jobs:
       changed_count: ${{ steps.impact.outputs.changed_count }}
       impacted_count: ${{ steps.impact.outputs.impacted_count }}
     steps:
+      - name: Reject non-main manual dispatch
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        shell: bash
+        run: |
+          echo "workflow_dispatch may only run privileged build targets from refs/heads/main" >&2
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -119,7 +126,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
     # Pull-request code is never dispatched to catalog-selected self-hosted
-    # runners. Trusted main/dispatch builds may use the declared runner pool.
+    # runners. Trusted main builds may use the declared runner pool.
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(matrix.runner_labels) }}
     timeout-minutes: 120
     steps:
@@ -128,9 +135,49 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Select PR trust lane
+        id: trust
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUNNER_LABELS_JSON: ${{ matrix.runner_labels }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+
+          labels = json.loads(os.environ["RUNNER_LABELS_JSON"])
+          if not isinstance(labels, list) or not labels or not all(
+              isinstance(label, str) and label for label in labels
+          ):
+              raise SystemExit("runner_labels must be a non-empty JSON string array")
+          hardware_pr = (
+              os.environ["EVENT_NAME"] == "pull_request" and "self-hosted" in labels
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"hardware_pr={str(hardware_pr).lower()}\n")
+          PY
+
+      - name: Hosted hardware PR validation
+        if: steps.trust.outputs.hardware_pr == 'true'
+        shell: bash
+        env:
+          CI_PR_VALIDATION_COMMAND: ${{ matrix.pr_validation_command }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CI_PR_VALIDATION_COMMAND" ]]; then
+            echo "Self-hosted target cannot pass PR validation without pr_validation_command." >&2
+            echo "Configure a hosted-safe source validation command in ci/projects.json." >&2
+            exit 1
+          fi
+          python3 scripts/ci/run_build.py \
+            --working-directory "${{ matrix.path }}" \
+            --command "$CI_PR_VALIDATION_COMMAND"
+
       - name: Compute declared cache fingerprint
         id: cache-key
-        if: matrix.cache_paths != ''
+        if: matrix.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
         shell: bash
         env:
           CI_CACHE_KEY_FILES: ${{ matrix.cache_key_files }}
@@ -140,7 +187,7 @@ jobs:
           --patterns-json "$CI_CACHE_KEY_FILES"
 
       - name: Restore build cache
-        if: matrix.cache_paths != ''
+        if: matrix.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ matrix.cache_paths }}
@@ -150,7 +197,7 @@ jobs:
 
       - name: Pull and verify immutable toolchain
         id: container
-        if: matrix.execution_mode == 'container'
+        if: matrix.execution_mode == 'container' && steps.trust.outputs.hardware_pr != 'true'
         shell: bash
         env:
           CI_CONTAINER_IMAGE: ${{ matrix.container_image }}
@@ -172,6 +219,7 @@ jobs:
           echo "identity=$expected" >> "$GITHUB_OUTPUT"
 
       - name: Build
+        if: steps.trust.outputs.hardware_pr != 'true'
         shell: bash
         env:
           CI_BUILD_COMMAND: ${{ matrix.build_command }}
@@ -185,7 +233,7 @@ jobs:
           python3 scripts/ci/run_build.py "${args[@]}"
 
       - name: Test (${{ matrix.lane }})
-        if: matrix.test_command != ''
+        if: matrix.test_command != '' && steps.trust.outputs.hardware_pr != 'true'
         shell: bash
         env:
           CI_TEST_COMMAND: ${{ matrix.test_command }}
@@ -234,6 +282,7 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          HARDWARE_PR: ${{ steps.trust.outputs.hardware_pr }}
         run: |
           {
             echo "### Build complete"
@@ -242,14 +291,20 @@ jobs:
             echo "- Target: ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}"
             echo "- Toolchain: ${{ matrix.toolchain }}"
             echo "- Toolchain identity: ${{ matrix.toolchain_identity }}"
-            echo "- Execution: ${{ matrix.execution_mode }}"
-            echo "- Container identity: ${{ steps.container.outputs.identity || 'host execution' }}"
-            if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if [[ "$HARDWARE_PR" == "true" ]]; then
+              echo "- Execution: hosted-safe PR validation only"
+              echo "- Self-hosted build: blocked for untrusted PR code"
               echo "- Artifact: skipped on PR validation"
             else
-              echo "- SHA256: ${{ steps.package.outputs.digest }}"
-              echo "- Artifact: ${{ steps.package.outputs.artifact_name }}"
-              echo "- Provenance: generated by the separate least-privilege attestation job"
+              echo "- Execution: ${{ matrix.execution_mode }}"
+              echo "- Container identity: ${{ steps.container.outputs.identity || 'host execution' }}"
+              if [[ "$EVENT_NAME" == "pull_request" ]]; then
+                echo "- Artifact: skipped on PR validation"
+              else
+                echo "- SHA256: ${{ steps.package.outputs.digest }}"
+                echo "- Artifact: ${{ steps.package.outputs.artifact_name }}"
+                echo "- Provenance: generated by the separate least-privilege attestation job"
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
