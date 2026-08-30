@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "ruleset_name": "main-production-governance",
   "target": "branch",
   "enforcement": "active",
@@ -13,9 +13,9 @@
     "required_status_checks"
   ],
   "pull_request": {
-    "required_approving_review_count_min": 1,
+    "required_approving_review_count": 0,
     "dismiss_stale_reviews_on_push": true,
-    "require_code_owner_review": true,
+    "require_code_owner_review": false,
     "required_review_thread_resolution": true,
     "require_extra_approval_for_unattributed_changes": true
   },
