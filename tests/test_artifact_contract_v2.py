@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
-import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -62,7 +60,8 @@ class ArtifactContractV2Tests(unittest.TestCase):
             artifact.write_bytes(b"binary\n")
             lock = workdir / "deps.lock"
             lock.write_text("dep=1\n", encoding="utf-8")
-            bundle = out / "demo.tar.gz"
+            base = "demo-generic-linux-x86_64-gcc-v1-bbbbbbbbbbbb-cccccccccccc"
+            bundle = out / f"{base}.tar.gz"
             _write_reproducible_tar_gz(bundle, [artifact], workdir, 0)
 
             args = argparse.Namespace(
@@ -100,7 +99,7 @@ class ArtifactContractV2Tests(unittest.TestCase):
                     dependency_locks=[lock],
                     bundle=bundle,
                     bundle_digest=sha256(bundle),
-                    base="demo-generic-linux-x86_64-gcc-v1-bbbbbbbbbbbb-cccccccccccc",
+                    base=base,
                     toolchain_identity="sha256:" + "b" * 64,
                     build_metadata=metadata,
                     source_date_epoch=0,
