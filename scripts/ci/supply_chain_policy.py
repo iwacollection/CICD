@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate immutable dependency policy and Trivy security reports."""
+"""Validate immutable dependency policy and Trivy security evidence."""
 from __future__ import annotations
 
 import argparse
@@ -42,6 +42,13 @@ def validate_policy(policy: dict) -> list[str]:
             for value in severities
         ):
             errors.append(f"policy.{section}.deny_severities is invalid")
+    artifact = policy.get("artifact")
+    if not isinstance(artifact, dict):
+        errors.append("policy.artifact must be an object")
+    else:
+        for field in ("require_sbom", "require_scan_report", "require_cosign_bundle_for_archive"):
+            if not isinstance(artifact.get(field), bool):
+                errors.append(f"policy.artifact.{field} must be boolean")
     return errors
 
 
@@ -113,7 +120,9 @@ def validate_trivy_report(report: dict, policy: dict) -> tuple[list[str], dict]:
                 continue
             summary["secrets"] += 1
             if deny_secrets:
-                errors.append(f"secret finding blocked: {finding.get('RuleID', 'unknown')} target={target}")
+                errors.append(
+                    f"secret finding blocked: {finding.get('RuleID', 'unknown')} target={target}"
+                )
         for finding in result.get("Misconfigurations") or []:
             if not isinstance(finding, dict):
                 continue
@@ -126,12 +135,33 @@ def validate_trivy_report(report: dict, policy: dict) -> tuple[list[str], dict]:
     return errors, summary
 
 
+def validate_sbom(sbom: dict) -> list[str]:
+    errors: list[str] = []
+    if sbom.get("bomFormat") != "CycloneDX":
+        errors.append("SBOM must use CycloneDX format")
+    spec_version = sbom.get("specVersion")
+    if not isinstance(spec_version, str) or not spec_version:
+        errors.append("SBOM specVersion is required")
+    components = sbom.get("components", [])
+    if not isinstance(components, list):
+        errors.append("SBOM components must be a list")
+    metadata = sbom.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        errors.append("SBOM metadata must be an object when present")
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--policy", default="ci/supply-chain-policy.json")
     parser.add_argument("--report")
+    parser.add_argument("--sbom")
     parser.add_argument("--dockerfiles", nargs="*")
-    parser.add_argument("--skip-dockerfiles", action="store_true")
+    parser.add_argument(
+        "--skip-dockerfiles",
+        action="store_true",
+        help="Validate report/SBOM evidence without re-scanning repository Dockerfiles.",
+    )
     args = parser.parse_args()
 
     try:
@@ -142,9 +172,8 @@ def main() -> int:
     errors = validate_policy(policy)
 
     if not args.skip_dockerfiles:
-        if args.dockerfiles is not None:
-            dockerfiles = [Path(path) for path in args.dockerfiles]
-        else:
+        dockerfiles = [Path(path) for path in (args.dockerfiles or [])]
+        if not dockerfiles:
             dockerfiles = sorted(Path("docker").rglob("Dockerfile")) if Path("docker").exists() else []
         for path in dockerfiles:
             try:
@@ -161,6 +190,18 @@ def main() -> int:
         else:
             report_errors, summary = validate_trivy_report(report, policy)
             errors.extend(report_errors)
+    elif policy.get("artifact", {}).get("require_scan_report") and args.sbom:
+        errors.append("security scan report is required when validating artifact evidence")
+
+    if args.sbom:
+        try:
+            sbom = load_json(Path(args.sbom))
+        except ValueError as exc:
+            errors.append(str(exc))
+        else:
+            errors.extend(validate_sbom(sbom))
+    elif policy.get("artifact", {}).get("require_sbom") and args.report:
+        errors.append("SBOM is required when validating artifact evidence")
 
     if errors:
         for error in errors:
