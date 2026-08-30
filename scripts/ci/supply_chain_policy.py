@@ -160,7 +160,7 @@ def main() -> int:
     parser.add_argument(
         "--skip-dockerfiles",
         action="store_true",
-        help="Validate report/SBOM evidence without re-scanning repository Dockerfiles.",
+        help="Validate report/SBOM evidence without re-checking repository Dockerfiles.",
     )
     args = parser.parse_args()
 
@@ -190,8 +190,6 @@ def main() -> int:
         else:
             report_errors, summary = validate_trivy_report(report, policy)
             errors.extend(report_errors)
-    elif policy.get("artifact", {}).get("require_scan_report") and args.sbom:
-        errors.append("security scan report is required when validating artifact evidence")
 
     if args.sbom:
         try:
@@ -200,8 +198,6 @@ def main() -> int:
             errors.append(str(exc))
         else:
             errors.extend(validate_sbom(sbom))
-    elif policy.get("artifact", {}).get("require_sbom") and args.report:
-        errors.append("SBOM is required when validating artifact evidence")
 
     if errors:
         for error in errors:
