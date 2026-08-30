@@ -19,6 +19,7 @@ class RunnerTrustBoundaryTests(unittest.TestCase):
                     "name": "firmware",
                     "enabled": True,
                     "path": "firmware/product-a",
+                    "depends_on": [],
                     "targets": [
                         {
                             "enabled": True,
@@ -56,15 +57,22 @@ class RunnerTrustBoundaryTests(unittest.TestCase):
             matrix["include"][0]["pr_validation_command"],
             "./ci/pr-validate.sh rk linux arm64",
         )
+        self.assertEqual(matrix["include"][0]["depends_on"], "[]")
 
-    def test_central_workflow_blocks_untrusted_hardware_execution(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertIn("name: Reject non-main manual dispatch", workflow)
-        self.assertIn("github.ref != 'refs/heads/main'", workflow)
-        self.assertIn("name: Hosted hardware PR validation", workflow)
-        self.assertIn("matrix.pr_validation_command", workflow)
-        self.assertIn("Self-hosted target cannot pass PR validation without pr_validation_command", workflow)
-        self.assertIn("if: steps.trust.outputs.hardware_pr != 'true'", workflow)
+    def test_central_dag_preserves_untrusted_hardware_boundary(self) -> None:
+        central = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        node = (ROOT / ".github" / "workflows" / "dag-node.yml").read_text(encoding="utf-8")
+        self.assertIn("name: Reject non-main manual dispatch", central)
+        self.assertIn("github.ref != 'refs/heads/main'", central)
+        self.assertIn("dag-node.yml", central)
+
+        self.assertIn("github.event_name == 'pull_request' && 'ubuntu-latest'", node)
+        self.assertIn("name: Hosted hardware PR validation", node)
+        self.assertIn("inputs.pr_validation_command", node)
+        self.assertIn("Self-hosted DAG target requires pr_validation_command", node)
+        self.assertIn("if: steps.trust.outputs.hardware_pr != 'true'", node)
+        self.assertNotIn("id-token: write", node)
+        self.assertNotIn("attestations: write", node)
 
     def test_reusable_workflow_fails_closed_for_self_hosted_prs(self) -> None:
         workflow = (

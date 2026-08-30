@@ -56,16 +56,19 @@ def _is_ignored(path: str) -> bool:
 def _project_paths(project: dict) -> list[str]:
     paths = [project["path"]]
     paths.extend(project.get("impact_paths", []))
-    # Preserve order but remove duplicates.
     return list(dict.fromkeys(_normalise(path) for path in paths if path))
 
 
-def _expand_dependents(data: dict, roots: set[str]) -> set[str]:
-    enabled = {
+def _enabled_index(data: dict) -> dict[str, dict]:
+    return {
         project["name"]: project
         for project in data["projects"]
         if project.get("enabled", True)
     }
+
+
+def _expand_dependents(data: dict, roots: set[str]) -> set[str]:
+    enabled = _enabled_index(data)
     dependents: dict[str, list[str]] = defaultdict(list)
     for name, project in enabled.items():
         for dependency in project.get("depends_on", []):
@@ -81,6 +84,23 @@ def _expand_dependents(data: dict, roots: set[str]) -> set[str]:
                 impacted.add(dependent)
                 queue.append(dependent)
     return impacted
+
+
+def _expand_dependencies(data: dict, roots: set[str]) -> set[str]:
+    """Include every enabled prerequisite needed to build the selected roots."""
+    enabled = _enabled_index(data)
+    expanded = set(roots)
+    queue = deque(sorted(roots))
+    while queue:
+        current = queue.popleft()
+        project = enabled.get(current)
+        if not project:
+            continue
+        for dependency in sorted(project.get("depends_on", [])):
+            if dependency in enabled and dependency not in expanded:
+                expanded.add(dependency)
+                queue.append(dependency)
+    return expanded
 
 
 def analyze_impact(data: dict, changed_files: list[str], force_full: bool = False) -> dict:
@@ -126,9 +146,6 @@ def analyze_impact(data: dict, changed_files: list[str], force_full: bool = Fals
         path for path in changed if path not in matched_files and not _is_ignored(path)
     ]
     if actionable_unmatched:
-        # Unknown files are deliberately fail-safe. A new root-level shared
-        # library must never silently bypass CI just because catalog ownership
-        # has not been configured yet.
         return {
             "lane": "full",
             "projects": all_names,
@@ -146,13 +163,18 @@ def analyze_impact(data: dict, changed_files: list[str], force_full: bool = Fals
             "reason": "only ignored/non-build files changed",
         }
 
+    # A changed library must rebuild all downstream consumers. A changed
+    # downstream project still needs its unchanged prerequisites built in the
+    # same run so the DAG can hand off exact upstream artifacts instead of
+    # silently using stale workspace/cache contents.
     impacted = _expand_dependents(data, direct)
+    impacted = _expand_dependencies(data, impacted)
     return {
         "lane": "fast",
         "projects": [name for name in all_names if name in impacted],
         "direct_projects": sorted(direct),
         "changed_files": changed,
-        "reason": "project-scoped change with dependent expansion",
+        "reason": "project-scoped change with dependency and dependent closure",
     }
 
 

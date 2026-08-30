@@ -15,16 +15,33 @@ concurrency:
 
 jobs:
   discover:
-    name: Discover impacted build matrix
+    name: Discover impacted dependency DAG
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
-      count: ${{ steps.matrix.outputs.count }}
       lane: ${{ steps.impact.outputs.lane }}
       reason: ${{ steps.impact.outputs.reason }}
       changed_count: ${{ steps.impact.outputs.changed_count }}
       impacted_count: ${{ steps.impact.outputs.impacted_count }}
+      level_count: ${{ steps.dag.outputs.level_count }}
+      total_targets: ${{ steps.dag.outputs.total_targets }}
+      levels: ${{ steps.dag.outputs.levels }}
+      level_0_matrix: ${{ steps.dag.outputs.level_0_matrix }}
+      level_0_count: ${{ steps.dag.outputs.level_0_count }}
+      level_1_matrix: ${{ steps.dag.outputs.level_1_matrix }}
+      level_1_count: ${{ steps.dag.outputs.level_1_count }}
+      level_2_matrix: ${{ steps.dag.outputs.level_2_matrix }}
+      level_2_count: ${{ steps.dag.outputs.level_2_count }}
+      level_3_matrix: ${{ steps.dag.outputs.level_3_matrix }}
+      level_3_count: ${{ steps.dag.outputs.level_3_count }}
+      level_4_matrix: ${{ steps.dag.outputs.level_4_matrix }}
+      level_4_count: ${{ steps.dag.outputs.level_4_count }}
+      level_5_matrix: ${{ steps.dag.outputs.level_5_matrix }}
+      level_5_count: ${{ steps.dag.outputs.level_5_count }}
+      level_6_matrix: ${{ steps.dag.outputs.level_6_matrix }}
+      level_6_count: ${{ steps.dag.outputs.level_6_count }}
+      level_7_matrix: ${{ steps.dag.outputs.level_7_matrix }}
+      level_7_count: ${{ steps.dag.outputs.level_7_count }}
     steps:
       - name: Reject non-main manual dispatch
         if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
@@ -39,10 +56,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate catalogs and supply-chain policy
+      - name: Validate catalogs, DAG and supply-chain policy
         run: |
           python3 scripts/ci/toolchain_catalog.py
           python3 scripts/ci/validate_config.py
+          python3 scripts/ci/dependency_plan.py
           python3 scripts/ci/supply_chain_policy.py
 
       - name: Detect changed files
@@ -80,7 +98,7 @@ jobs:
           echo "force_full=$force_full" >> "$GITHUB_OUTPUT"
           cat "$changed_file" || true
 
-      - name: Analyze change impact
+      - name: Analyze change impact and dependency closure
         id: impact
         shell: bash
         env:
@@ -94,284 +112,339 @@ jobs:
           fi
           python3 scripts/ci/impact_analysis.py "${args[@]}"
 
-      - name: Build impacted matrix
-        id: matrix
+      - name: Render executable DAG matrices
+        id: dag
         shell: bash
         env:
           IMPACTED_PROJECTS: ${{ steps.impact.outputs.projects }}
           CI_LANE: ${{ steps.impact.outputs.lane }}
         run: |
           set -euo pipefail
-          python3 scripts/ci/discover_matrix.py \
+          python3 scripts/ci/dag_plan.py \
             --projects-json "$IMPACTED_PROJECTS" \
             --lane "$CI_LANE"
 
-      - name: Impact summary
+      - name: DAG summary
         run: |
           {
-            echo "### Change impact"
+            echo "### Dependency DAG"
             echo "- Lane: ${{ steps.impact.outputs.lane }}"
             echo "- Changed files: ${{ steps.impact.outputs.changed_count }}"
-            echo "- Impacted projects: ${{ steps.impact.outputs.impacted_count }}"
-            echo "- Matrix targets: ${{ steps.matrix.outputs.count }}"
+            echo "- Impacted projects (including prerequisites): ${{ steps.impact.outputs.impacted_count }}"
+            echo "- DAG levels: ${{ steps.dag.outputs.level_count }}"
+            echo "- Matrix targets: ${{ steps.dag.outputs.total_targets }}"
+            echo "- Levels: ${{ steps.dag.outputs.levels }}"
             echo "- Decision: ${{ steps.impact.outputs.reason }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  build:
-    name: ${{ needs.discover.outputs.lane }} / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
+  level_0:
+    name: DAG L0 / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
     needs: discover
-    if: needs.discover.outputs.count != '0'
-    permissions:
-      contents: read
+    if: needs.discover.outputs.level_0_count != '0'
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(matrix.runner_labels) }}
-    timeout-minutes: 120
+      matrix: ${{ fromJSON(needs.discover.outputs.level_0_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-node.yml
+    with:
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      depends_on_json: ${{ matrix.depends_on }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      runner_labels_json: ${{ matrix.runner_labels }}
+      execution_mode: ${{ matrix.execution_mode }}
+      container_image: ${{ matrix.container_image }}
+      build_command: ${{ matrix.build_command }}
+      test_command: ${{ matrix.test_command }}
+      pr_validation_command: ${{ matrix.pr_validation_command }}
+      artifact_paths_json: ${{ matrix.artifact_paths }}
+      dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
+      cache_paths: ${{ matrix.cache_paths }}
+      cache_key_files_json: ${{ matrix.cache_key_files }}
+      lane: ${{ matrix.lane }}
+      platform_ref: ${{ github.sha }}
+
+  level_1:
+    name: DAG L1 / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
+    needs: [discover, level_0]
+    if: needs.discover.outputs.level_1_count != '0' && needs.level_0.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_1_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-node.yml
+    with:
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      depends_on_json: ${{ matrix.depends_on }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      runner_labels_json: ${{ matrix.runner_labels }}
+      execution_mode: ${{ matrix.execution_mode }}
+      container_image: ${{ matrix.container_image }}
+      build_command: ${{ matrix.build_command }}
+      test_command: ${{ matrix.test_command }}
+      pr_validation_command: ${{ matrix.pr_validation_command }}
+      artifact_paths_json: ${{ matrix.artifact_paths }}
+      dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
+      cache_paths: ${{ matrix.cache_paths }}
+      cache_key_files_json: ${{ matrix.cache_key_files }}
+      lane: ${{ matrix.lane }}
+      platform_ref: ${{ github.sha }}
+
+  level_2:
+    name: DAG L2 / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
+    needs: [discover, level_1]
+    if: needs.discover.outputs.level_2_count != '0' && needs.level_1.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_2_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-node.yml
+    with:
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      depends_on_json: ${{ matrix.depends_on }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      runner_labels_json: ${{ matrix.runner_labels }}
+      execution_mode: ${{ matrix.execution_mode }}
+      container_image: ${{ matrix.container_image }}
+      build_command: ${{ matrix.build_command }}
+      test_command: ${{ matrix.test_command }}
+      pr_validation_command: ${{ matrix.pr_validation_command }}
+      artifact_paths_json: ${{ matrix.artifact_paths }}
+      dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
+      cache_paths: ${{ matrix.cache_paths }}
+      cache_key_files_json: ${{ matrix.cache_key_files }}
+      lane: ${{ matrix.lane }}
+      platform_ref: ${{ github.sha }}
+
+  level_3:
+    name: DAG L3 / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
+    needs: [discover, level_2]
+    if: needs.discover.outputs.level_3_count != '0' && needs.level_2.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_3_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-node.yml
+    with:
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      depends_on_json: ${{ matrix.depends_on }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      runner_labels_json: ${{ matrix.runner_labels }}
+      execution_mode: ${{ matrix.execution_mode }}
+      container_image: ${{ matrix.container_image }}
+      build_command: ${{ matrix.build_command }}
+      test_command: ${{ matrix.test_command }}
+      pr_validation_command: ${{ matrix.pr_validation_command }}
+      artifact_paths_json: ${{ matrix.artifact_paths }}
+      dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
+      cache_paths: ${{ matrix.cache_paths }}
+      cache_key_files_json: ${{ matrix.cache_key_files }}
+      lane: ${{ matrix.lane }}
+      platform_ref: ${{ github.sha }}
+
+  level_4:
+    name: DAG L4 / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
+    needs: [discover, level_3]
+    if: needs.discover.outputs.level_4_count != '0' && needs.level_3.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_4_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-node.yml
+    with:
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      depends_on_json: ${{ matrix.depends_on }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      runner_labels_json: ${{ matrix.runner_labels }}
+      execution_mode: ${{ matrix.execution_mode }}
+      container_image: ${{ matrix.container_image }}
+      build_command: ${{ matrix.build_command }}
+      test_command: ${{ matrix.test_command }}
+      pr_validation_command: ${{ matrix.pr_validation_command }}
+      artifact_paths_json: ${{ matrix.artifact_paths }}
+      dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
+      cache_paths: ${{ matrix.cache_paths }}
+      cache_key_files_json: ${{ matrix.cache_key_files }}
+      lane: ${{ matrix.lane }}
+      platform_ref: ${{ github.sha }}
+
+  level_5:
+    name: DAG L5 / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
+    needs: [discover, level_4]
+    if: needs.discover.outputs.level_5_count != '0' && needs.level_4.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_5_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-node.yml
+    with:
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      depends_on_json: ${{ matrix.depends_on }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      runner_labels_json: ${{ matrix.runner_labels }}
+      execution_mode: ${{ matrix.execution_mode }}
+      container_image: ${{ matrix.container_image }}
+      build_command: ${{ matrix.build_command }}
+      test_command: ${{ matrix.test_command }}
+      pr_validation_command: ${{ matrix.pr_validation_command }}
+      artifact_paths_json: ${{ matrix.artifact_paths }}
+      dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
+      cache_paths: ${{ matrix.cache_paths }}
+      cache_key_files_json: ${{ matrix.cache_key_files }}
+      lane: ${{ matrix.lane }}
+      platform_ref: ${{ github.sha }}
+
+  level_6:
+    name: DAG L6 / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
+    needs: [discover, level_5]
+    if: needs.discover.outputs.level_6_count != '0' && needs.level_5.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_6_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-node.yml
+    with:
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      depends_on_json: ${{ matrix.depends_on }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      runner_labels_json: ${{ matrix.runner_labels }}
+      execution_mode: ${{ matrix.execution_mode }}
+      container_image: ${{ matrix.container_image }}
+      build_command: ${{ matrix.build_command }}
+      test_command: ${{ matrix.test_command }}
+      pr_validation_command: ${{ matrix.pr_validation_command }}
+      artifact_paths_json: ${{ matrix.artifact_paths }}
+      dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
+      cache_paths: ${{ matrix.cache_paths }}
+      cache_key_files_json: ${{ matrix.cache_key_files }}
+      lane: ${{ matrix.lane }}
+      platform_ref: ${{ github.sha }}
+
+  level_7:
+    name: DAG L7 / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
+    needs: [discover, level_6]
+    if: needs.discover.outputs.level_7_count != '0' && needs.level_6.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_7_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-node.yml
+    with:
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      depends_on_json: ${{ matrix.depends_on }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      runner_labels_json: ${{ matrix.runner_labels }}
+      execution_mode: ${{ matrix.execution_mode }}
+      container_image: ${{ matrix.container_image }}
+      build_command: ${{ matrix.build_command }}
+      test_command: ${{ matrix.test_command }}
+      pr_validation_command: ${{ matrix.pr_validation_command }}
+      artifact_paths_json: ${{ matrix.artifact_paths }}
+      dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
+      cache_paths: ${{ matrix.cache_paths }}
+      cache_key_files_json: ${{ matrix.cache_key_files }}
+      lane: ${{ matrix.lane }}
+      platform_ref: ${{ github.sha }}
+
+  build_complete:
+    name: Dependency DAG barrier
+    needs: [discover, level_0, level_1, level_2, level_3, level_4, level_5, level_6, level_7]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-
-      - name: Select PR trust lane
-        id: trust
+      - name: Enforce every planned level
         shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          RUNNER_LABELS_JSON: ${{ matrix.runner_labels }}
+          TOTAL_TARGETS: ${{ needs.discover.outputs.total_targets }}
+          L0_COUNT: ${{ needs.discover.outputs.level_0_count }}
+          L1_COUNT: ${{ needs.discover.outputs.level_1_count }}
+          L2_COUNT: ${{ needs.discover.outputs.level_2_count }}
+          L3_COUNT: ${{ needs.discover.outputs.level_3_count }}
+          L4_COUNT: ${{ needs.discover.outputs.level_4_count }}
+          L5_COUNT: ${{ needs.discover.outputs.level_5_count }}
+          L6_COUNT: ${{ needs.discover.outputs.level_6_count }}
+          L7_COUNT: ${{ needs.discover.outputs.level_7_count }}
+          L0_RESULT: ${{ needs.level_0.result }}
+          L1_RESULT: ${{ needs.level_1.result }}
+          L2_RESULT: ${{ needs.level_2.result }}
+          L3_RESULT: ${{ needs.level_3.result }}
+          L4_RESULT: ${{ needs.level_4.result }}
+          L5_RESULT: ${{ needs.level_5.result }}
+          L6_RESULT: ${{ needs.level_6.result }}
+          L7_RESULT: ${{ needs.level_7.result }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-
-          labels = json.loads(os.environ["RUNNER_LABELS_JSON"])
-          if not isinstance(labels, list) or not labels or not all(
-              isinstance(label, str) and label for label in labels
-          ):
-              raise SystemExit("runner_labels must be a non-empty JSON string array")
-          hardware_pr = (
-              os.environ["EVENT_NAME"] == "pull_request" and "self-hosted" in labels
-          )
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"hardware_pr={str(hardware_pr).lower()}\n")
-          PY
-
-      - name: Hosted hardware PR validation
-        if: steps.trust.outputs.hardware_pr == 'true'
-        shell: bash
-        env:
-          CI_PR_VALIDATION_COMMAND: ${{ matrix.pr_validation_command }}
-        run: |
-          set -euo pipefail
-          if [[ -z "$CI_PR_VALIDATION_COMMAND" ]]; then
-            echo "Self-hosted target cannot pass PR validation without pr_validation_command." >&2
-            echo "Configure a hosted-safe source validation command in ci/projects.json." >&2
-            exit 1
-          fi
-          python3 scripts/ci/run_build.py \
-            --working-directory "${{ matrix.path }}" \
-            --command "$CI_PR_VALIDATION_COMMAND"
-
-      - name: Compute declared cache fingerprint
-        id: cache-key
-        if: matrix.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
-        shell: bash
-        env:
-          CI_CACHE_KEY_FILES: ${{ matrix.cache_key_files }}
-        run: >-
-          python3 scripts/ci/cache_fingerprint.py
-          --working-directory "${{ matrix.path }}"
-          --patterns-json "$CI_CACHE_KEY_FILES"
-
-      - name: Restore build cache
-        if: matrix.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ matrix.cache_paths }}
-          key: ci-v4-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain_identity }}-${{ steps.cache-key.outputs.fingerprint }}
-          restore-keys: |
-            ci-v4-${{ matrix.project }}-${{ matrix.soc }}-${{ matrix.target_os }}-${{ matrix.arch }}-${{ matrix.toolchain_identity }}-
-
-      - name: Pull and verify immutable toolchain
-        id: container
-        if: matrix.execution_mode == 'container' && steps.trust.outputs.hardware_pr != 'true'
-        shell: bash
-        env:
-          CI_CONTAINER_IMAGE: ${{ matrix.container_image }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$CI_CONTAINER_IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
-            echo "Container toolchains must be pinned by immutable sha256 digest: $CI_CONTAINER_IMAGE" >&2
-            exit 1
-          fi
-          docker pull "$CI_CONTAINER_IMAGE"
-          expected="${CI_CONTAINER_IMAGE##*@}"
-          repo_digests="$(docker image inspect "$CI_CONTAINER_IMAGE" --format '{{json .RepoDigests}}')"
-          if [[ "$repo_digests" != *"@$expected"* ]]; then
-            echo "Pulled image does not resolve to expected digest $expected" >&2
-            echo "Resolved RepoDigests: $repo_digests" >&2
-            exit 1
-          fi
-          echo "image=$CI_CONTAINER_IMAGE" >> "$GITHUB_OUTPUT"
-          echo "identity=$expected" >> "$GITHUB_OUTPUT"
-
-      - name: Build
-        if: steps.trust.outputs.hardware_pr != 'true'
-        shell: bash
-        env:
-          CI_BUILD_COMMAND: ${{ matrix.build_command }}
-          CI_CONTAINER_IMAGE: ${{ steps.container.outputs.image }}
-        run: |
-          set -euo pipefail
-          args=(--working-directory "${{ matrix.path }}" --command "$CI_BUILD_COMMAND")
-          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
-            args+=(--container-image "$CI_CONTAINER_IMAGE")
-          fi
-          python3 scripts/ci/run_build.py "${args[@]}"
-
-      - name: Test (${{ matrix.lane }})
-        if: matrix.test_command != '' && steps.trust.outputs.hardware_pr != 'true'
-        shell: bash
-        env:
-          CI_TEST_COMMAND: ${{ matrix.test_command }}
-          CI_CONTAINER_IMAGE: ${{ steps.container.outputs.image }}
-        run: |
-          set -euo pipefail
-          args=(--working-directory "${{ matrix.path }}" --command "$CI_TEST_COMMAND")
-          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
-            args+=(--container-image "$CI_CONTAINER_IMAGE")
-          fi
-          python3 scripts/ci/run_build.py "${args[@]}"
-
-      - name: Prepare supply-chain evidence directory
-        run: rm -rf security-evidence && mkdir -p security-evidence
-
-      - name: Scan project vulnerabilities, licenses, secrets and misconfigurations
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
-        with:
-          scan-type: fs
-          scan-ref: ${{ matrix.path }}
-          scanners: vuln,license,secret,misconfig
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          format: json
-          output: security-evidence/security-scan.json
-          exit-code: "0"
-          version: v0.70.0
-
-      - name: Enforce project supply-chain policy
-        run: >-
-          python3 scripts/ci/supply_chain_policy.py
-          --skip-dockerfiles
-          --report security-evidence/security-scan.json
-
-      - name: Generate project SBOM
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
-        with:
-          scan-type: fs
-          scan-ref: ${{ matrix.path }}
-          format: cyclonedx
-          output: security-evidence/security-sbom.cdx.json
-          version: v0.70.0
-
-      - name: Collect build environment metadata
-        if: github.event_name != 'pull_request' && steps.trust.outputs.hardware_pr != 'true'
-        shell: bash
-        env:
-          CI_CONTAINER_IMAGE: ${{ steps.container.outputs.image }}
-        run: |
-          set -euo pipefail
-          args=(--working-directory "${{ matrix.path }}" --output build-environment.json)
-          if [[ -n "${CI_CONTAINER_IMAGE:-}" ]]; then
-            args+=(--container-image "$CI_CONTAINER_IMAGE")
-          fi
-          python3 scripts/ci/collect_build_metadata.py "${args[@]}"
-
-      - name: Package immutable artifact v2
-        id: package
-        if: github.event_name != 'pull_request'
-        shell: bash
-        env:
-          CI_ARTIFACT_PATHS: ${{ matrix.artifact_paths }}
-          CI_DEPENDENCY_LOCKS: ${{ matrix.dependency_lock_files }}
-          CI_RUNNER_LABELS: ${{ matrix.runner_labels }}
-          CI_CONTAINER_IMAGE: ${{ matrix.container_image }}
-        run: |
-          set -euo pipefail
-          python3 scripts/ci/package_artifact.py \
-            --project "${{ matrix.project }}" \
-            --working-directory "${{ matrix.path }}" \
-            --artifacts-json "$CI_ARTIFACT_PATHS" \
-            --dependency-locks-json "$CI_DEPENDENCY_LOCKS" \
-            --soc "${{ matrix.soc }}" \
-            --target-os "${{ matrix.target_os }}" \
-            --arch "${{ matrix.arch }}" \
-            --toolchain "${{ matrix.toolchain }}" \
-            --toolchain-identity "${{ matrix.toolchain_identity }}" \
-            --execution-mode "${{ matrix.execution_mode }}" \
-            --container-image "$CI_CONTAINER_IMAGE" \
-            --runner-labels-json "$CI_RUNNER_LABELS" \
-            --build-metadata-file build-environment.json
-
-      - name: Verify packaged artifact
-        if: github.event_name != 'pull_request'
-        run: python3 scripts/ci/verify_artifact.py --directory dist --expected-sha256 "${{ steps.package.outputs.digest }}"
-
-      - name: Upload immutable artifact and security evidence
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ${{ steps.package.outputs.artifact_name }}
-          path: |
-            ${{ steps.package.outputs.bundle }}
-            ${{ steps.package.outputs.manifest }}
-            ${{ steps.package.outputs.checksum }}
-            security-evidence/security-scan.json
-            security-evidence/security-sbom.cdx.json
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 0
-
-      - name: Build summary
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          HARDWARE_PR: ${{ steps.trust.outputs.hardware_pr }}
-        run: |
-          {
-            echo "### Build complete"
-            echo "- Lane: ${{ matrix.lane }}"
-            echo "- Project: ${{ matrix.project }}"
-            echo "- Target: ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}"
-            echo "- Toolchain: ${{ matrix.toolchain }}"
-            echo "- Toolchain identity: ${{ matrix.toolchain_identity }}"
-            echo "- Supply-chain policy: PASSED"
-            echo "- SBOM: generated by Trivy v0.70.0"
-            if [[ "$HARDWARE_PR" == "true" ]]; then
-              echo "- Execution: hosted-safe PR validation only"
-              echo "- Self-hosted build: blocked for untrusted PR code"
-              echo "- Artifact: skipped on PR validation"
-            else
-              echo "- Execution: ${{ matrix.execution_mode }}"
-              echo "- Container identity: ${{ steps.container.outputs.identity || 'host execution' }}"
-              if [[ "$EVENT_NAME" == "pull_request" ]]; then
-                echo "- Artifact: skipped on PR validation"
-              else
-                echo "- Artifact contract: v2"
-                echo "- SHA256: ${{ steps.package.outputs.digest }}"
-                echo "- Artifact: ${{ steps.package.outputs.artifact_name }}"
-                echo "- Reproducible bundle: YES"
-                echo "- Provenance: generated by the separate least-privilege attestation job"
+          for index in 0 1 2 3 4 5 6 7; do
+            count_var="L${index}_COUNT"
+            result_var="L${index}_RESULT"
+            count="${!count_var}"
+            result="${!result_var}"
+            if [[ "$count" == "0" ]]; then
+              if [[ "$result" != "skipped" && "$result" != "success" ]]; then
+                echo "DAG level $index had no targets but result=$result" >&2
+                exit 1
               fi
+            elif [[ "$result" != "success" ]]; then
+              echo "DAG level $index planned $count target(s) but result=$result" >&2
+              exit 1
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "Dependency DAG completed successfully: total_targets=$TOTAL_TARGETS"
 
   attest:
-    name: Attest trusted build artifacts
-    needs: [discover, build]
-    if: github.event_name != 'pull_request' && needs.build.result == 'success'
+    name: Attest trusted DAG artifacts
+    needs: [discover, build_complete]
+    if: github.event_name != 'pull_request' && needs.build_complete.result == 'success' && needs.discover.outputs.total_targets != '0'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -380,10 +453,12 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - name: Download artifacts from this run
+      - name: Download DAG artifacts from this run
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          pattern: dag-*
           path: provenance-input
+          merge-multiple: false
 
       - name: Attest exact uploaded bundles
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
@@ -404,38 +479,33 @@ jobs:
 
   gate:
     name: Build gate
-    needs: [discover, build, attest]
+    needs: [discover, build_complete, attest]
     if: always()
     permissions:
       contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Enforce aggregate build result
+      - name: Enforce aggregate DAG result
         shell: bash
         env:
           DISCOVER_RESULT: ${{ needs.discover.result }}
-          BUILD_RESULT: ${{ needs.build.result }}
+          DAG_RESULT: ${{ needs.build_complete.result }}
           ATTEST_RESULT: ${{ needs.attest.result }}
-          MATRIX_COUNT: ${{ needs.discover.outputs.count }}
+          TOTAL_TARGETS: ${{ needs.discover.outputs.total_targets }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           if [[ "$DISCOVER_RESULT" != "success" ]]; then
-            echo "Discover job failed: $DISCOVER_RESULT" >&2
+            echo "DAG discovery failed: $DISCOVER_RESULT" >&2
             exit 1
           fi
-          if [[ "$MATRIX_COUNT" == "0" ]]; then
-            if [[ "$BUILD_RESULT" != "skipped" && "$BUILD_RESULT" != "success" ]]; then
-              echo "Zero-target build should be skipped/success, got: $BUILD_RESULT" >&2
-              exit 1
-            fi
-          elif [[ "$BUILD_RESULT" != "success" ]]; then
-            echo "One or more matrix builds failed: $BUILD_RESULT" >&2
+          if [[ "$DAG_RESULT" != "success" ]]; then
+            echo "Dependency DAG failed: $DAG_RESULT" >&2
             exit 1
           fi
-          if [[ "$EVENT_NAME" != "pull_request" && "$MATRIX_COUNT" != "0" && "$ATTEST_RESULT" != "success" ]]; then
-            echo "Trusted build attestation failed: $ATTEST_RESULT" >&2
+          if [[ "$EVENT_NAME" != "pull_request" && "$TOTAL_TARGETS" != "0" && "$ATTEST_RESULT" != "success" ]]; then
+            echo "Trusted DAG artifact attestation failed: $ATTEST_RESULT" >&2
             exit 1
           fi
-          echo "Build gate passed: matrix_count=$MATRIX_COUNT build_result=$BUILD_RESULT"
+          echo "Build gate passed: total_targets=$TOTAL_TARGETS dag_result=$DAG_RESULT"

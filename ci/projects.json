@@ -2,10 +2,33 @@
   "schema_version": 1,
   "projects": [
     {
+      "name": "hello-lib",
+      "enabled": true,
+      "path": "examples/cpp-lib",
+      "depends_on": [],
+      "targets": [
+        {
+          "enabled": true,
+          "soc": "generic",
+          "target_os": "linux",
+          "arch": "x86_64",
+          "toolchain": "gcc-host-container-v1",
+          "runner_labels": ["ubuntu-latest"],
+          "build_command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && cmake --build build --parallel 2 && ccache --show-stats",
+          "test_command": "test -s build/libhello-lib.a && test -f include/hello_lib.h",
+          "fast_test_command": "test -s build/libhello-lib.a && test -f include/hello_lib.h",
+          "artifact_paths": ["build/libhello-lib.a", "include/hello_lib.h"],
+          "dependency_lock_files": [],
+          "cache_paths": ["examples/cpp-lib/.cache/ccache"],
+          "cache_key_files": ["CMakeLists.txt", "include/hello_lib.h", "src/hello_lib.cpp"]
+        }
+      ]
+    },
+    {
       "name": "hello-cpp",
       "enabled": true,
       "path": "examples/cpp-app",
-      "depends_on": [],
+      "depends_on": ["hello-lib"],
       "targets": [
         {
           "enabled": true,

@@ -49,7 +49,7 @@ class ArtifactContractV2Tests(unittest.TestCase):
         self.assertEqual(_resolve_toolchain_identity("gcc-v1", "", image), digest)
         self.assertEqual(_identity_suffix(digest), "a" * 12)
 
-    def test_v2_manifest_binds_toolchain_runner_locks_and_files(self) -> None:
+    def test_v2_manifest_binds_toolchain_runner_locks_files_and_upstream(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workdir = Path(directory) / "work"
             out = Path(directory) / "dist"
@@ -85,6 +85,21 @@ class ArtifactContractV2Tests(unittest.TestCase):
                 },
                 "tools": {"gcc": "gcc (Ubuntu) 14.2.0", "cmake": "cmake version 3.31.0"},
             }
+            upstream = [
+                {
+                    "project": "hello-lib",
+                    "artifact_name": "hello-lib-artifact",
+                    "bundle_sha256": "d" * 64,
+                    "source_sha": "c" * 40,
+                    "source_repository": "example/repo",
+                    "target": {
+                        "soc": "generic",
+                        "target_os": "linux",
+                        "arch": "x86_64",
+                        "toolchain": "gcc-v1",
+                    },
+                }
+            ]
             env = {
                 "GITHUB_SHA": "c" * 40,
                 "GITHUB_REPOSITORY": "example/repo",
@@ -97,6 +112,7 @@ class ArtifactContractV2Tests(unittest.TestCase):
                     workdir=workdir,
                     files=[artifact],
                     dependency_locks=[lock],
+                    upstream_artifacts=upstream,
                     bundle=bundle,
                     bundle_digest=sha256(bundle),
                     base=base,
@@ -110,6 +126,10 @@ class ArtifactContractV2Tests(unittest.TestCase):
             self.assertEqual(manifest["runner"]["labels"], ["ubuntu-latest"])
             self.assertEqual(manifest["compiler_versions"]["gcc"], "gcc (Ubuntu) 14.2.0")
             self.assertEqual(manifest["dependencies"]["locks"][0]["path"], "deps.lock")
+            self.assertEqual(
+                manifest["dependencies"]["upstream_artifacts"][0]["bundle_sha256"],
+                "d" * 64,
+            )
             self.assertEqual(manifest["files"][0]["path"], "build/app")
             self.assertEqual(validate_manifest_contract(manifest), [])
             self.assertEqual(verify_bundle_contents(bundle, manifest), [])
@@ -134,7 +154,7 @@ class ArtifactContractV2Tests(unittest.TestCase):
                 "toolchain": {"id": "gcc", "identity": "host:gcc", "execution_mode": "host", "container_image": ""},
                 "runner": {"labels": ["ubuntu-latest"]},
                 "compiler_versions": {},
-                "dependencies": {"locks": []},
+                "dependencies": {"locks": [], "upstream_artifacts": []},
                 "bundle": {
                     "file": "bundle.tar.gz",
                     "sha256": sha256(bundle),
@@ -149,14 +169,17 @@ class ArtifactContractV2Tests(unittest.TestCase):
             self.assertTrue(any("digest mismatch" in error for error in errors))
 
     def test_workflows_use_artifact_contract_v2(self) -> None:
-        central = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        dag_node = (ROOT / ".github" / "workflows" / "dag-node.yml").read_text(encoding="utf-8")
         reusable = (ROOT / ".github" / "workflows" / "reusable-build.yml").read_text(encoding="utf-8")
-        for workflow in (central, reusable):
+        for workflow in (dag_node, reusable):
             self.assertIn("collect_build_metadata.py", workflow)
             self.assertIn("--dependency-locks-json", workflow)
             self.assertIn("--build-metadata-file build-environment.json", workflow)
             self.assertIn("Artifact contract: v2", workflow)
-        self.assertIn("Attest artifact manifests", central)
+        self.assertIn("--upstream-index", dag_node)
+        central = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("name: Attest artifact manifests", central)
+        self.assertIn("dag-node.yml", central)
 
 
 if __name__ == "__main__":
