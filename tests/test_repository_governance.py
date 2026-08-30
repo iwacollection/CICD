@@ -26,9 +26,9 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 {
                     "type": "pull_request",
                     "parameters": {
-                        "required_approving_review_count": 1,
+                        "required_approving_review_count": 0,
                         "dismiss_stale_reviews_on_push": True,
-                        "require_code_owner_review": True,
+                        "require_code_owner_review": False,
                         "required_review_thread_resolution": True,
                         "require_extra_approval_for_unattributed_changes": True,
                     },
@@ -50,11 +50,14 @@ class RepositoryGovernanceTests(unittest.TestCase):
 
     def test_repository_policy_is_valid(self) -> None:
         self.assertEqual(validate_policy(self.policy), [])
+        self.assertEqual(self.policy["schema_version"], 2)
         self.assertEqual(self.policy["ruleset_name"], "main-production-governance")
+        self.assertEqual(self.policy["pull_request"]["required_approving_review_count"], 0)
+        self.assertFalse(self.policy["pull_request"]["require_code_owner_review"])
         self.assertFalse(self.policy["bypass_actors"]["allow_when_visible"])
         self.assertFalse(self.policy["bypass_actors"]["visibility_required"])
 
-    def test_current_production_ruleset_shape_is_healthy(self) -> None:
+    def test_single_maintainer_production_ruleset_shape_is_healthy(self) -> None:
         violations, warnings = evaluate_ruleset(self.ruleset, self.policy)
         self.assertEqual(violations, [])
         self.assertEqual(warnings, [])
@@ -63,20 +66,27 @@ class RepositoryGovernanceTests(unittest.TestCase):
         self.assertEqual(report["violations"], [])
         self.assertEqual(report["warnings"], [])
 
-    def test_stronger_approval_count_is_allowed(self) -> None:
+    def test_review_count_must_remain_zero_for_single_maintainer_mode(self) -> None:
         ruleset = deepcopy(self.ruleset)
         pull_request = next(rule for rule in ruleset["rules"] if rule["type"] == "pull_request")
-        pull_request["parameters"]["required_approving_review_count"] = 2
+        pull_request["parameters"]["required_approving_review_count"] = 1
         violations, warnings = evaluate_ruleset(ruleset, self.policy)
-        self.assertEqual(violations, [])
+        self.assertTrue(any("review count must equal policy value 0" in item for item in violations))
         self.assertEqual(warnings, [])
 
-    def test_approval_count_drift_is_rejected(self) -> None:
+    def test_code_owner_review_must_remain_disabled_in_single_maintainer_mode(self) -> None:
         ruleset = deepcopy(self.ruleset)
         pull_request = next(rule for rule in ruleset["rules"] if rule["type"] == "pull_request")
-        pull_request["parameters"]["required_approving_review_count"] = 0
+        pull_request["parameters"]["require_code_owner_review"] = True
         violations, _ = evaluate_ruleset(ruleset, self.policy)
-        self.assertTrue(any("approving review count" in item for item in violations))
+        self.assertTrue(any("require_code_owner_review=false" in item for item in violations))
+
+    def test_review_thread_resolution_stays_required(self) -> None:
+        ruleset = deepcopy(self.ruleset)
+        pull_request = next(rule for rule in ruleset["rules"] if rule["type"] == "pull_request")
+        pull_request["parameters"]["required_review_thread_resolution"] = False
+        violations, _ = evaluate_ruleset(ruleset, self.policy)
+        self.assertTrue(any("required_review_thread_resolution=true" in item for item in violations))
 
     def test_missing_required_check_is_rejected(self) -> None:
         ruleset = deepcopy(self.ruleset)
@@ -92,15 +102,6 @@ class RepositoryGovernanceTests(unittest.TestCase):
         ruleset["rules"] = [rule for rule in ruleset["rules"] if rule["type"] != "non_fast_forward"]
         violations, _ = evaluate_ruleset(ruleset, self.policy)
         self.assertIn("required ruleset rule is missing: non_fast_forward", violations)
-
-    def test_code_owner_and_thread_resolution_cannot_be_disabled(self) -> None:
-        ruleset = deepcopy(self.ruleset)
-        pull_request = next(rule for rule in ruleset["rules"] if rule["type"] == "pull_request")
-        pull_request["parameters"]["require_code_owner_review"] = False
-        pull_request["parameters"]["required_review_thread_resolution"] = False
-        violations, _ = evaluate_ruleset(ruleset, self.policy)
-        self.assertTrue(any("require_code_owner_review=true" in item for item in violations))
-        self.assertTrue(any("required_review_thread_resolution=true" in item for item in violations))
 
     def test_visible_bypass_actor_is_rejected(self) -> None:
         ruleset = deepcopy(self.ruleset)
