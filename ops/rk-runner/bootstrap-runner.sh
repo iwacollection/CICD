@@ -20,6 +20,10 @@ RUNNER_LABELS="linux,x64,soc-rk"
 : "${CI_RESOURCE_BROKER_URL:?Set CI_RESOURCE_BROKER_URL, normally http://127.0.0.1:8765}"
 : "${CI_RESOURCE_BROKER_TOKEN:?Set CI_RESOURCE_BROKER_TOKEN for the local/central HIL broker}"
 
+if [[ "$EUID" -ne 0 ]]; then
+  echo "ERROR: run bootstrap-runner.sh as root (for example: sudo -E bash ops/rk-runner/bootstrap-runner.sh)" >&2
+  exit 2
+fi
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "ERROR: RK build Runner must be Linux" >&2
   exit 2
@@ -40,7 +44,7 @@ fi
 if command -v apt-get >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y --no-install-recommends ca-certificates curl tar git python3 ccache usbutils jq
+  apt-get install -y --no-install-recommends ca-certificates curl tar git python3 ccache usbutils jq util-linux
 else
   echo "ERROR: current bootstrap supports Debian/Ubuntu x86_64 hosts with apt-get" >&2
   exit 2
@@ -49,8 +53,18 @@ fi
 if ! id "$RUNNER_USER" >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash "$RUNNER_USER"
 fi
+for group in dialout plugdev; do
+  if getent group "$group" >/dev/null 2>&1; then
+    usermod -aG "$group" "$RUNNER_USER"
+  fi
+done
 
 install -d -o "$RUNNER_USER" -g "$RUNNER_USER" "$RUNNER_HOME"
+if [[ -e "$RUNNER_HOME/.runner" ]]; then
+  echo "ERROR: Runner is already configured at $RUNNER_HOME; use a controlled maintenance/upgrade path instead of overlaying bootstrap" >&2
+  exit 2
+fi
+
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -69,7 +83,7 @@ EOF
 chown "$RUNNER_USER:$RUNNER_USER" "$RUNNER_HOME/.env"
 chmod 0600 "$RUNNER_HOME/.env"
 
-sudo -u "$RUNNER_USER" bash -lc "cd '$RUNNER_HOME' && ./config.sh --unattended --replace --url '$GITHUB_RUNNER_REPOSITORY_URL' --token '$GITHUB_RUNNER_TOKEN' --name '$RUNNER_NAME' --labels '$RUNNER_LABELS' --work _work"
+runuser -u "$RUNNER_USER" -- bash -lc "cd '$RUNNER_HOME' && ./config.sh --unattended --replace --url '$GITHUB_RUNNER_REPOSITORY_URL' --token '$GITHUB_RUNNER_TOKEN' --name '$RUNNER_NAME' --labels '$RUNNER_LABELS' --work _work"
 
 cd "$RUNNER_HOME"
 ./svc.sh install "$RUNNER_USER"
@@ -81,4 +95,4 @@ printf 'Runner name: %s\n' "$RUNNER_NAME"
 printf 'Repository: %s\n' "$GITHUB_RUNNER_REPOSITORY_URL"
 printf 'Labels: self-hosted, linux, x64, soc-rk\n'
 printf 'Target architecture remains arm64.\n'
-printf 'Next: create SDK identity, start HIL broker, then run RK SDK Enrollment / RK Hardware Runner Readiness.\n'
+printf 'Next: create SDK identity, start HIL broker, then run the private-caller RK enrollment/readiness workflows.\n'
