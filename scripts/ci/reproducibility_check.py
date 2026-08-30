@@ -33,6 +33,7 @@ def _find_project_target(
     soc: str,
     target_os: str,
     arch: str,
+    expected_toolchain: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     project = next(
         (
@@ -44,7 +45,7 @@ def _find_project_target(
     )
     if project is None:
         raise ValueError(f"project not found: {project_name}")
-    if project.get("enabled") is not True:
+    if project.get("enabled", True) is not True:
         raise ValueError(f"project is not enabled: {project_name}")
     target = next(
         (
@@ -54,12 +55,16 @@ def _find_project_target(
             and item.get("soc") == soc
             and item.get("target_os") == target_os
             and item.get("arch") == arch
+            and item.get("toolchain") == expected_toolchain
         ),
         None,
     )
     if target is None:
-        raise ValueError(f"target not found: {project_name}/{soc}/{target_os}/{arch}")
-    if target.get("enabled") is not True:
+        raise ValueError(
+            "reproducibility target not found: "
+            f"{project_name}/{soc}/{target_os}/{arch}/{expected_toolchain}"
+        )
+    if target.get("enabled", True) is not True:
         raise ValueError("reproducibility target must be enabled")
     return project, target
 
@@ -265,6 +270,23 @@ def compare_iterations(first: dict[str, Any], second: dict[str, Any]) -> list[di
 
 
 def render_markdown(report: dict[str, Any]) -> str:
+    if report["status"] == "error":
+        return "\n".join(
+            [
+                "# Reproducibility Gate",
+                "",
+                "Status: **error**",
+                f"Project: `{report['project']}`",
+                f"Target: `{report['target']}`",
+                f"Toolchain: `{report['toolchain']}`",
+                "",
+                "## Failure",
+                "",
+                f"- {report['error']}",
+                "",
+            ]
+        )
+
     lines = [
         "# Reproducibility Gate",
         "",
@@ -297,6 +319,17 @@ def render_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _write_outputs(args: argparse.Namespace, report: dict[str, Any]) -> None:
+    if args.json_out:
+        output = Path(args.json_out)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.markdown_out:
+        output = Path(args.markdown_out)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(render_markdown(report), encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--projects", default="ci/projects.json")
@@ -306,6 +339,7 @@ def main() -> int:
     parser.add_argument("--soc", default="generic")
     parser.add_argument("--target-os", default="linux")
     parser.add_argument("--arch", default="x86_64")
+    parser.add_argument("--toolchain", default="gcc-host-container-v1")
     parser.add_argument("--json-out", default="")
     parser.add_argument("--markdown-out", default="")
     args = parser.parse_args()
@@ -327,11 +361,12 @@ def main() -> int:
             soc=args.soc,
             target_os=args.target_os,
             arch=args.arch,
+            expected_toolchain=args.toolchain,
         )
         indexed_toolchains = index_toolchains(toolchains)
-        toolchain = indexed_toolchains.get(str(target["toolchain"]))
+        toolchain = indexed_toolchains.get(args.toolchain)
         if toolchain is None:
-            raise ValueError(f"unknown toolchain: {target['toolchain']}")
+            raise ValueError(f"unknown toolchain: {args.toolchain}")
         if toolchain.get("status") != "active":
             raise ValueError("reproducibility target requires active toolchain")
         if toolchain.get("execution_mode") != "container":
@@ -377,7 +412,7 @@ def main() -> int:
             "status": "reproducible" if not mismatches else "non-reproducible",
             "project": project["name"],
             "target": f"{target['soc']}/{target['target_os']}/{target['arch']}",
-            "toolchain": target["toolchain"],
+            "toolchain": args.toolchain,
             "toolchain_identity": toolchain_identity(toolchain),
             "container_image": container_image,
             "source_date_epoch": source_date_epoch,
@@ -385,18 +420,21 @@ def main() -> int:
             "mismatches": mismatches,
         }
     except (ValueError, RuntimeError, OSError) as exc:
+        report = {
+            "schema_version": 1,
+            "status": "error",
+            "project": args.project,
+            "target": f"{args.soc}/{args.target_os}/{args.arch}",
+            "toolchain": args.toolchain,
+            "error": str(exc),
+            "iterations": [],
+            "mismatches": [],
+        }
+        _write_outputs(args, report)
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
-    if args.json_out:
-        output = Path(args.json_out)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    if args.markdown_out:
-        output = Path(args.markdown_out)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(render_markdown(report), encoding="utf-8")
-
+    _write_outputs(args, report)
     print(json.dumps({"status": report["status"], "mismatches": len(mismatches)}, separators=(",", ":")))
     return 1 if mismatches else 0
 
