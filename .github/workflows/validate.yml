@@ -62,6 +62,12 @@ jobs:
           --policy ci/repository-governance-policy.json
           --validate-only
 
+      - name: Validate business capability ownership
+        run: python3 scripts/ci/capability_policy.py --policy ci/capabilities.json --repository-root .
+
+      - name: Validate database migration policy
+        run: python3 scripts/ci/db_migration_policy.py --policy ci/db-migration-policy.json --validate-policy
+
       - name: Render build matrix
         run: python3 scripts/ci/discover_matrix.py
 
