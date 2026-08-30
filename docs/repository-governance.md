@@ -1,23 +1,6 @@
 # 仓库治理基线与漂移审计
 
-CI 代码可以全部正确，但 GitHub Repository Settings 如果被手工改坏，生产保护仍然会失效。
-
-例如：
-
-```text
-代码没有变化
-        |
-        +-- Required Check 被删除
-        +-- CODEOWNERS 审批被关闭
-        +-- required review 数从 1 改成 0
-        +-- force-push 被允许
-        +-- branch deletion 被允许
-        |
-        v
-生产治理已经变弱
-```
-
-所以仓库治理不能只靠“设置过一次”，而要有：
+CI 代码正确并不代表 GitHub Repository Settings 一定正确。Required Check、PR 规则、force-push 和 deletion 都属于生产控制面，所以需要：
 
 ```text
 Versioned Policy
@@ -25,26 +8,31 @@ Versioned Policy
 Live Ruleset Audit
 ```
 
-## 1. 当前真实 main Ruleset
+## 1. 当前仓库采用单维护者治理模式
 
-当前仓库使用：
+当前仓库只有一个长期维护者，因此不使用“作者必须找另一位 Code Owner 审批自己 PR”的多人治理规则。
+
+目标 Ruleset：
 
 ```text
 main-production-governance
 ```
 
-它保护默认分支，并要求：
+单维护者模式要求：
 
-- 禁止删除默认分支；
-- 禁止 non-fast-forward / force-push；
-- 至少 1 个 approving review；
-- 新提交后旧审批失效；
-- Require review from Code Owners；
-- 合并前解决 Review Thread；
-- 未归属变更要求额外审批；
-- Required Status Checks 使用 strict policy。
+```text
+main 必须通过 PR                 = true
+required approving reviews      = 0
+require Code Owner review       = false
+resolve review threads          = true
+dismiss stale reviews on push   = true
+extra approval for unattributed = true
+branch deletion                 = forbidden
+non-fast-forward / force-push   = forbidden
+bypass actors                   = none
+```
 
-当前 Required Checks：
+Required Checks 继续强制：
 
 ```text
 Validate CI platform
@@ -52,74 +40,79 @@ Build gate
 Toolchain gate
 ```
 
-不要把 `Discover` 或动态 Matrix Job 配成 Required Check；它们成功不代表最终构建成功，而且名称会随目标变化。
+所以取消人工 Approval 并不等于允许直接修改 `main`。正常路径仍然是：
 
-## 2. 期望状态代码化
+```text
+feature branch
+      ↓
+Pull Request
+      ↓
+Validate CI platform
+      ↓
+Build gate
+      ↓
+Toolchain gate
+      ↓
+Review threads resolved
+      ↓
+Merge
+```
 
-仓库治理最低安全基线保存在：
+## 2. 为什么不是 approvals=1 + CODEOWNERS=true
+
+当前 `.github/CODEOWNERS` 的 owner 是仓库维护者本人。如果：
+
+```text
+PR 作者 = 唯一 Code Owner
+```
+
+同时 Ruleset 又要求：
+
+```text
+approval >= 1
+require Code Owner review = true
+```
+
+GitHub 不允许 PR 作者批准自己的 PR，于是会形成结构性死锁：CI 全绿也无法合并。
+
+因此当前阶段采用单维护者策略。未来如果仓库变成多人维护，可以再通过单独治理 PR 升级为：
+
+```text
+approvals >= 1
+require Code Owner review = true
+```
+
+但必须先确保存在至少两个真实维护身份。
+
+## 3. 期望状态代码化
+
+仓库治理策略保存在：
 
 ```text
 ci/repository-governance-policy.json
 ```
 
-当前策略要求：
+当前 schema v2 对 Pull Request 关键参数采用**显式期望值**，不是简单的“越严格越好”。原因是审批数量和 Code Owner Review 在单维护者仓库里过度收紧会让仓库不可操作。
 
-```text
-Ruleset name = main-production-governance
-target       = branch
-enforcement  = active
-include      = ~DEFAULT_BRANCH
+当前 Pull Request 期望：
 
-rules:
-├── deletion
-├── non_fast_forward
-├── pull_request
-└── required_status_checks
+```json
+{
+  "required_approving_review_count": 0,
+  "dismiss_stale_reviews_on_push": true,
+  "require_code_owner_review": false,
+  "required_review_thread_resolution": true,
+  "require_extra_approval_for_unattributed_changes": true
+}
 ```
 
-Pull Request 最低基线：
+Required Status Checks 仍按最小集合验证：以后可以新增 `Security gate`，但以下三个不能删除：
 
 ```text
-approving reviews >= 1
-dismiss stale reviews = true
-CODEOWNERS review = true
-review thread resolution = true
-extra approval for unattributed changes = true
+Validate CI platform
+Build gate
+Toolchain gate
 ```
-
-## 3. 为什么是“最低基线”而不是完全相等
-
-安全加强不应该被误报为 drift。
-
-例如策略要求：
-
-```text
-approvals >= 1
-```
-
-实际 Ruleset 改成：
-
-```text
-approvals = 2
-```
-
-这是更严格，不报错。
-
-同样，策略要求三个 Required Checks，如果以后新增：
-
-```text
-Security gate
-```
-
-也不应该因为多了一个 Gate 而失败。
-
-因此治理审计采用：
-
-```text
-minimum required subset
-```
-
-而不是对整个 Settings JSON 做脆弱的字符串完全比较。
 
 ## 4. 自动漂移审计
 
@@ -127,57 +120,39 @@ minimum required subset
 
 ```text
 .github/workflows/repository-governance.yml
-        |
-        v
+        ↓
 scripts/ci/repository_governance.py
-        |
-        v
+        ↓
 GitHub Rulesets API
-        |
-        v
+        ↓
 compare live state vs versioned policy
 ```
 
-`Repository Governance` 每天运行一次，也支持手工触发。
+`Repository Governance` 定时运行，也支持手工触发。
 
-流程：
+它会生成：
 
 ```text
-Checkout
-   |
-Validate versioned policy
-   |
-Fetch live Ruleset
-   |
-Evaluate drift
-   |
-Generate repository-governance.json
-   |
-Generate repository-governance.md
-   |
-Publish Job Summary
-   |
-Upload evidence / 30 days
-   |
-Final governance gate
+repository-governance.json
+repository-governance.md
 ```
 
-即使发现 drift，也会先尽量保存报告，再让最终 Gate 失败。
+并保留审计证据。
 
-## 5. 哪些漂移会直接失败
+## 5. 当前哪些漂移会失败
 
-包括但不限于：
+包括：
 
 ```text
-Ruleset 不存在
-Ruleset enforcement != active
+Ruleset 缺失或 inactive
 ~DEFAULT_BRANCH selector 被移除
 branch deletion 保护被删除
-non_fast_forward 保护被删除
-approving review 降到 0
-stale review invalidation 被关闭
-CODEOWNERS requirement 被关闭
+non-fast-forward 保护被删除
+approval count != 0
+require_code_owner_review != false
 review thread resolution 被关闭
+stale review invalidation 被关闭
+extra approval for unattributed changes 被关闭
 strict required status checks 被关闭
 Validate CI platform 被删除
 Build gate 被删除
@@ -185,134 +160,111 @@ Toolchain gate 被删除
 可见的 bypass actor 被增加
 ```
 
-这些都属于真正的生产治理退化。
-
-## 6. bypass actor 的 API 可见性边界
-
-GitHub Rulesets API 有一个重要权限限制：`bypass_actors` 只有调用身份对 Ruleset 具有足够写权限时，GitHub 才保证返回。
-
-但是日常治理审计的原则是：
+这里需要特别理解：
 
 ```text
-read-only
+approval 从 0 改成 1
 ```
 
-不能为了“看 bypass 配置”给 Workflow 一个能够修改 Ruleset 的管理权限。
+在团队仓库可能叫“加强”，但在当前单维护者仓库会重新制造合并死锁，所以被视为 governance drift。
 
-因此默认策略：
+## 6. CODEOWNERS 仍然保留
 
-```json
-"bypass_actors": {
-  "allow_when_visible": false,
-  "visibility_required": false
-}
-```
-
-行为是：
+`.github/CODEOWNERS` 仍用于声明关键目录的责任人，例如：
 
 ```text
-API 返回 bypass_actors
-        |
-        +-- []       -> 通过
-        |
-        `-- 非空     -> drift
-
-API 不返回 bypass_actors
-        |
-        `-- visibility warning
+/.github/workflows/
+/ci/
+/scripts/ci/
+/tests/
+/docker/toolchains/
 ```
 
-此时报告状态为：
+只是当前 Ruleset 不要求 Code Owner 必须执行 Approval。
+
+这样保留了：
+
+```text
+ownership metadata
+```
+
+但不会产生单人 Self-Approval 死锁。
+
+未来多人维护时可以重新启用强制 Code Owner Review。
+
+## 7. bypass actor 的可见性边界
+
+GitHub Rulesets API 并不保证普通只读审计身份一定能看到 `bypass_actors`。
+
+日常治理 Workflow 保持只读：
+
+```text
+contents: read
+```
+
+不会为了审计 Ruleset 而给自己管理写权限。
+
+如果 API 能返回 bypass actors：
+
+```text
+[]      -> 通过
+非空    -> drift
+```
+
+如果字段因为权限不可见：
 
 ```text
 healthy-with-limited-visibility
 ```
 
-它既不会误报为 drift，也不会假装“已经证明 bypass 为空”。
+报告会明确提示可见性不足，不会假装已经证明 bypass 为空。
 
-如果以后有专门的治理审计 GitHub App / 高权限身份，可以把：
+## 8. 最小权限仍保持
 
-```json
-"visibility_required": true
-```
+单维护者模式只取消“无意义的人工自审批”，不会放宽流水线执行权限。
 
-此时 bypass 不可见就 fail closed。
+仍要求：
 
-## 7. 为什么审计 Workflow 不能拥有管理写权限
-
-错误模型：
-
-```text
-为了审计 Ruleset
-      |
-给 Workflow Ruleset Admin/Write
-      |
-Workflow 被利用
-      |
-攻击者反而可以修改被审计规则
-```
-
-正确模型：
-
-```text
-日常自动审计
-  -> read-only
-
-高权限深度审计
-  -> 独立身份
-  -> 单独审批
-  -> 不和普通构建权限混用
-```
-
-审计工具不应该天然拥有被审计对象的修改权。
-
-## 8. CODEOWNERS 与权限模型
-
-`.github/CODEOWNERS` 声明关键目录责任人，真正强制 CODEOWNERS 审批则由 Ruleset 的 `Require review from Code Owners` 保证。
-
-业务 CI 默认只给最小权限；需要写入的 Job 单独提升：
-
-- Toolchain Publish：`packages: write`、`id-token: write`、`attestations: write`；
-- 业务制品来源证明：独立 Attestation Job 才拥有 `id-token: write`、`attestations: write`；
-- PR 验证任务不得拥有 packages 写权限；
+- PR 任务不拥有 package write；
 - 不可信 PR 不进入 Self-hosted SoC Runner；
-- 云发布使用 OIDC / Federated Identity（联合身份）短期凭据，不保存长期 Access Key。
+- Attestation 使用独立最小权限 Job；
+- Toolchain Publish 才拥有必要的 packages/id-token/attestations write；
+- 云发布使用 OIDC / Federated Identity，不保存长期 Access Key；
+- 无 Ruleset bypass actor；
+- 禁止 force-push 和 main deletion。
 
 ## 9. 紧急变更
 
-紧急事故也不应该通过关闭 Ruleset 来处理。
+紧急事故也不通过关闭 Ruleset 或 force-push 处理。
 
 推荐：
 
 ```text
 Incident
-  -> Emergency PR
-  -> 最小变更
-  -> Required CI
-  -> 指定审批人
-  -> Merge
-  -> 事后 Review / RCA
+  ↓
+Emergency PR
+  ↓
+最小变更
+  ↓
+Required CI
+  ↓
+Merge
+  ↓
+事后 Review / RCA
 ```
 
-如果企业未来确实设计 Break-glass（紧急破窗）身份，也必须：
+如果未来建立多人团队和 Break-glass 身份，需要独立授权、时间边界、事故编号和自动审计。
 
-- 独立授权；
-- 有时间边界；
-- 有事故编号；
-- 有操作者和原因；
-- 自动审计；
-- 事后恢复正常策略。
-
-## 10. 和 Platform Health 的区别
+## 10. 与 Platform Health 的区别
 
 ```text
 Platform Health
-    -> CI 运行得稳不稳？
+    -> CI 运行得稳不稳
     -> Success / Queue / Duration / Rerun
 
 Repository Governance
-    -> CI 的生产保护还在不在？
-    -> Ruleset / Review / Required Check / force-push
+    -> 生产控制面有没有被改坏
+    -> Ruleset / PR / Required Check / force-push / deletion
 ```
 
-一个是运行健康度，一个是控制面配置漂移；两者共同构成 CI 平台运维能力。
+两个能力共同构成 CI 平台的生产运维面。
