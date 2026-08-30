@@ -49,6 +49,9 @@ jobs:
       - name: Validate supply-chain dependency policy
         run: python3 scripts/ci/supply_chain_policy.py
 
+      - name: Validate platform health SLO policy
+        run: python3 scripts/ci/platform_health.py --policy ci/platform-slo.json --validate-policy
+
       - name: Render build matrix
         run: python3 scripts/ci/discover_matrix.py
 
