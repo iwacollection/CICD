@@ -1,18 +1,18 @@
-name: Promote Existing Artifact
+name: Promote Archived Artifact
 
 on:
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: "Workflow run ID that produced the artifact"
+        description: "Trusted main Build Matrix run ID that originally produced the artifact"
         required: true
         type: string
       artifact_name:
-        description: "Exact artifact name from the build run"
+        description: "Exact Artifact Contract v2 artifact name"
         required: true
         type: string
       expected_sha256:
-        description: "Expected SHA256 from the build summary/manifest"
+        description: "Exact archived bundle SHA256"
         required: true
         type: string
       target_environment:
@@ -29,6 +29,7 @@ permissions:
   actions: read
   attestations: read
   contents: read
+  deployments: write
 
 concurrency:
   group: promote-${{ inputs.target_environment }}
@@ -48,7 +49,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Validate inputs and source workflow run
+      - name: Validate source workflow run
         id: source
         shell: bash
         env:
@@ -63,16 +64,22 @@ jobs:
           --expected-sha256 "$EXPECTED_SHA256"
           --repository "$GITHUB_REPOSITORY"
 
-      - name: Download exact existing artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ${{ inputs.artifact_name }}
-          path: incoming
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
+      - name: Download from long-term immutable archive
+        id: archive
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/artifact_archive.py download \
+            --directory incoming \
+            --repository "$GITHUB_REPOSITORY" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --expected-sha256 "$EXPECTED_SHA256"
 
-      - name: Verify digest and manifest
+      - name: Verify archived bytes and manifest identity
         shell: bash
         env:
           EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
@@ -86,27 +93,43 @@ jobs:
           --expected-run-id "$SOURCE_RUN_ID"
           --expected-repository "$GITHUB_REPOSITORY"
 
-      - name: Verify GitHub build provenance
+      - name: Verify bundle and manifest provenance
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mapfile -d '' bundles < <(find incoming -type f -name '*.tar.gz' -print0)
-          if [[ "${#bundles[@]}" -ne 1 ]]; then
-            echo "Expected exactly one bundle for provenance verification, found ${#bundles[@]}" >&2
+          mapfile -t bundles < <(find incoming -type f -name '*.tar.gz' -print)
+          mapfile -t manifests < <(find incoming -type f -name '*.manifest.json' -print)
+          if [[ "${#bundles[@]}" -ne 1 || "${#manifests[@]}" -ne 1 ]]; then
+            echo "Expected exactly one bundle and one manifest in long-term archive" >&2
             exit 1
           fi
           gh attestation verify "${bundles[0]}" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify "${manifests[0]}" --repo "$GITHUB_REPOSITORY"
 
-      - name: Re-publish same bytes as promoted record
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: promoted-${{ inputs.target_environment }}-${{ inputs.artifact_name }}
-          path: incoming/**
-          if-no-files-found: error
-          retention-days: 90
-          compression-level: 0
+      - name: Move environment digest pointer
+        id: deployment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          RELEASE_TAG: ${{ steps.archive.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/deployment_pointer.py create \
+            --repository "$GITHUB_REPOSITORY" \
+            --environment "$TARGET_ENVIRONMENT" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --bundle-sha256 "$EXPECTED_SHA256" \
+            --source-sha "$SOURCE_SHA" \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --release-tag "$RELEASE_TAG" \
+            --reason promotion
 
       - name: Promotion summary
         env:
@@ -114,12 +137,16 @@ jobs:
           ARTIFACT_NAME: ${{ inputs.artifact_name }}
           TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
           EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          RELEASE_TAG: ${{ steps.archive.outputs.release_tag }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
         run: |
           {
             echo "### Artifact promotion"
             echo "- Source run: $SOURCE_RUN_ID"
             echo "- Artifact: $ARTIFACT_NAME"
+            echo "- Long-term release: $RELEASE_TAG"
             echo "- Target: $TARGET_ENVIRONMENT"
+            echo "- Deployment pointer: $DEPLOYMENT_ID"
             echo "- Verified SHA256: $EXPECTED_SHA256"
             echo "- Rebuild: NO"
           } >> "$GITHUB_STEP_SUMMARY"
