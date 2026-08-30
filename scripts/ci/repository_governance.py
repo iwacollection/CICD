@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def validate_policy(policy: object) -> list[str]:
@@ -45,17 +45,17 @@ def validate_policy(policy: object) -> list[str]:
     if not isinstance(pr_policy, dict):
         errors.append("pull_request must be an object")
     else:
-        approvals = pr_policy.get("required_approving_review_count_min")
-        if not isinstance(approvals, int) or isinstance(approvals, bool) or approvals < 1:
-            errors.append("pull_request.required_approving_review_count_min must be >= 1")
+        approvals = pr_policy.get("required_approving_review_count")
+        if not isinstance(approvals, int) or isinstance(approvals, bool) or approvals < 0:
+            errors.append("pull_request.required_approving_review_count must be >= 0")
         for key in (
             "dismiss_stale_reviews_on_push",
             "require_code_owner_review",
             "required_review_thread_resolution",
             "require_extra_approval_for_unattributed_changes",
         ):
-            if pr_policy.get(key) is not True:
-                errors.append(f"pull_request.{key} must be true")
+            if not isinstance(pr_policy.get(key), bool):
+                errors.append(f"pull_request.{key} must be boolean")
 
     status_policy = policy.get("required_status_checks")
     if not isinstance(status_policy, dict):
@@ -174,10 +174,11 @@ def evaluate_ruleset(ruleset: dict[str, Any], policy: dict[str, Any]) -> tuple[l
     pr_parameters = pull_request_rule.get("parameters", {}) if isinstance(pull_request_rule, dict) else {}
     expected_pr = policy["pull_request"]
     actual_approvals = pr_parameters.get("required_approving_review_count") if isinstance(pr_parameters, dict) else None
-    if not isinstance(actual_approvals, int) or actual_approvals < expected_pr["required_approving_review_count_min"]:
+    expected_approvals = expected_pr["required_approving_review_count"]
+    if not isinstance(actual_approvals, int) or actual_approvals != expected_approvals:
         violations.append(
-            "required approving review count is below policy minimum "
-            f"{expected_pr['required_approving_review_count_min']}"
+            "required approving review count must equal policy value "
+            f"{expected_approvals}"
         )
     for key in (
         "dismiss_stale_reviews_on_push",
@@ -185,8 +186,10 @@ def evaluate_ruleset(ruleset: dict[str, Any], policy: dict[str, Any]) -> tuple[l
         "required_review_thread_resolution",
         "require_extra_approval_for_unattributed_changes",
     ):
-        if not isinstance(pr_parameters, dict) or pr_parameters.get(key) is not True:
-            violations.append(f"pull request rule must keep {key}=true")
+        expected_value = expected_pr[key]
+        actual_value = pr_parameters.get(key) if isinstance(pr_parameters, dict) else None
+        if actual_value is not expected_value:
+            violations.append(f"pull request rule must keep {key}={str(expected_value).lower()}")
 
     status_rule = rules.get("required_status_checks", {})
     status_parameters = status_rule.get("parameters", {}) if isinstance(status_rule, dict) else {}
@@ -258,66 +261,57 @@ def render_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--policy", default="ci/repository-governance-policy.json")
-    parser.add_argument("--api-url", default=os.environ.get("GITHUB_API_URL", "https://api.github.com"))
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    subparsers.add_parser("validate")
-    audit = subparsers.add_parser("audit")
-    audit.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
-    audit.add_argument("--json-out", default="")
-    audit.add_argument("--markdown-out", default="")
-    audit.add_argument("--github-output", default="")
-    audit.add_argument("--fail-on-drift", action="store_true")
-
+    parser.add_argument("--repository", default=os.getenv("GITHUB_REPOSITORY", ""))
+    parser.add_argument("--token", default=os.getenv("GITHUB_TOKEN", ""))
+    parser.add_argument("--api-url", default=os.getenv("GITHUB_API_URL", "https://api.github.com"))
+    parser.add_argument("--ruleset-json", default="")
+    parser.add_argument("--json-out", default="")
+    parser.add_argument("--markdown-out", default="")
+    parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--fail-on-drift", action="store_true")
     args = parser.parse_args()
+
     try:
         policy = load_policy(Path(args.policy))
-        if args.command == "validate":
-            print(f"OK: repository governance policy validated for {policy['ruleset_name']}")
-            return 0
-
-        token = os.environ.get("GITHUB_TOKEN", "").strip()
-        if not args.repository:
-            raise ValueError("repository is required")
-        ruleset = fetch_ruleset(
-            repository=args.repository,
-            token=token,
-            api_url=args.api_url,
-            ruleset_name=policy["ruleset_name"],
-        )
-        report = build_report(ruleset, policy)
-    except (ValueError, RuntimeError) as exc:
+    except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
-    if args.json_out:
-        _write(Path(args.json_out), json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
-    if args.markdown_out:
-        _write(Path(args.markdown_out), render_markdown(report))
-    if args.github_output:
-        with open(args.github_output, "a", encoding="utf-8") as handle:
-            handle.write(f"status={report['status']}\n")
-            handle.write(f"violation_count={len(report['violations'])}\n")
-            handle.write(f"warning_count={len(report['warnings'])}\n")
+    if args.validate_only:
+        print(json.dumps({"status": "valid", "schema_version": SCHEMA_VERSION}, separators=(",", ":")))
+        return 0
 
-    print(
-        json.dumps(
-            {
-                "status": report["status"],
-                "violations": len(report["violations"]),
-                "warnings": len(report["warnings"]),
-            },
-            separators=(",", ":"),
-        )
-    )
+    try:
+        if args.ruleset_json:
+            ruleset = json.loads(Path(args.ruleset_json).read_text(encoding="utf-8"))
+            if not isinstance(ruleset, dict):
+                raise ValueError("ruleset JSON root must be an object")
+        else:
+            if not args.repository:
+                raise ValueError("--repository or GITHUB_REPOSITORY is required")
+            ruleset = fetch_ruleset(
+                repository=args.repository,
+                token=args.token,
+                api_url=args.api_url,
+                ruleset_name=policy["ruleset_name"],
+            )
+    except (ValueError, RuntimeError, OSError, json.JSONDecodeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    report = build_report(ruleset, policy)
+    if args.json_out:
+        output = Path(args.json_out)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.markdown_out:
+        output = Path(args.markdown_out)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(render_markdown(report), encoding="utf-8")
+    print(json.dumps({"status": report["status"], "violations": len(report["violations"]), "warnings": len(report["warnings"])}, separators=(",", ":")))
     if args.fail_on_drift and report["violations"]:
         return 1
     return 0
