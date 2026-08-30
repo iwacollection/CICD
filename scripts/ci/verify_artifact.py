@@ -5,8 +5,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import tarfile
 from pathlib import Path, PurePosixPath
+
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def sha256(path: Path) -> str:
@@ -36,6 +39,28 @@ def validate_manifest_identity(
                 f"manifest {field} mismatch: expected={expected} actual={manifest.get(field, '')}"
             )
     return errors
+
+
+def _valid_upstream_record(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    project = item.get("project")
+    artifact_name = item.get("artifact_name")
+    digest = item.get("bundle_sha256")
+    source_sha = item.get("source_sha")
+    target = item.get("target")
+    return (
+        isinstance(project, str)
+        and bool(project)
+        and isinstance(artifact_name, str)
+        and bool(artifact_name)
+        and isinstance(digest, str)
+        and bool(SHA256_RE.fullmatch(digest))
+        and isinstance(source_sha, str)
+        and bool(source_sha)
+        and isinstance(target, dict)
+        and all(isinstance(target.get(field), str) and target.get(field) for field in ("soc", "target_os", "arch"))
+    )
 
 
 def validate_manifest_contract(manifest: dict) -> list[str]:
@@ -104,6 +129,14 @@ def validate_manifest_contract(manifest: dict) -> list[str]:
         elif any(not _valid_file_record(item) for item in locks):
             errors.append("manifest dependencies.locks contains an invalid file record")
 
+        upstream = dependencies.get("upstream_artifacts", [])
+        if not isinstance(upstream, list):
+            errors.append("manifest dependencies.upstream_artifacts must be a list")
+        elif any(not _valid_upstream_record(item) for item in upstream):
+            errors.append("manifest dependencies.upstream_artifacts contains an invalid record")
+        elif len({item["project"] for item in upstream}) != len(upstream):
+            errors.append("manifest dependencies.upstream_artifacts contains duplicate projects")
+
     files = manifest.get("files")
     if not isinstance(files, list) or not files:
         errors.append("manifest.files must be a non-empty list")
@@ -125,8 +158,7 @@ def _valid_file_record(item: object) -> bool:
         isinstance(path, str)
         and bool(path)
         and isinstance(digest, str)
-        and len(digest) == 64
-        and all(char in "0123456789abcdef" for char in digest)
+        and bool(SHA256_RE.fullmatch(digest))
         and isinstance(size, int)
         and size >= 0
     )
@@ -251,6 +283,7 @@ def main() -> int:
                 "sha256": actual,
                 "target": manifest["target"],
                 "toolchain": manifest.get("toolchain", {}),
+                "upstream_artifacts": manifest.get("dependencies", {}).get("upstream_artifacts", []),
             },
             indent=2,
             ensure_ascii=False,
