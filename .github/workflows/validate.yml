@@ -25,11 +25,12 @@ jobs:
   validate:
     name: Validate CI platform
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Show runtime
@@ -69,3 +70,48 @@ jobs:
 
       - name: Compile-check Python
         run: python3 -m compileall -q scripts/ci tests
+
+      - name: Reproducibility gate
+        id: reproducibility
+        continue-on-error: true
+        run: >-
+          python3 scripts/ci/reproducibility_check.py
+          --project hello-lib
+          --soc generic
+          --target-os linux
+          --arch x86_64
+          --json-out reproducibility.json
+          --markdown-out reproducibility.md
+
+      - name: Publish reproducibility summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f reproducibility.md ]]; then
+            cat reproducibility.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "# Reproducibility Gate" >> "$GITHUB_STEP_SUMMARY"
+            echo "No reproducibility report was produced; inspect the gate step." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload reproducibility evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reproducibility-${{ github.run_id }}
+          path: |
+            reproducibility.json
+            reproducibility.md
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce reproducibility result
+        if: always()
+        env:
+          REPRO_OUTCOME: ${{ steps.reproducibility.outcome }}
+        run: |
+          if [[ "$REPRO_OUTCOME" != "success" ]]; then
+            echo "Reproducibility gate failed: two clean builds did not produce identical bytes or the check could not execute." >&2
+            exit 1
+          fi
+          echo "Reproducibility gate passed."
