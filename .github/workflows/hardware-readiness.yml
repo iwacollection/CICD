@@ -1,4 +1,4 @@
-name: Hardware Runner Readiness
+name: RK Hardware Runner Readiness
 
 on:
   workflow_dispatch:
@@ -7,12 +7,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: hardware-readiness-${{ github.ref }}
+  group: rk-hardware-readiness-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   discover:
-    name: Discover active hardware profiles
+    name: Discover active RK hardware profile
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -22,7 +22,7 @@ jobs:
       - name: Require main
         if: github.ref != 'refs/heads/main'
         run: |
-          echo "Hardware readiness may only run from refs/heads/main" >&2
+          echo "RK hardware readiness may only run from refs/heads/main" >&2
           exit 1
 
       - name: Checkout
@@ -30,27 +30,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate hardware catalog
+      - name: Validate RK-first rollout policy
         run: |
           python3 scripts/ci/hardware_catalog.py
           python3 scripts/ci/toolchain_catalog.py
           python3 scripts/ci/validate_config.py
 
-      - name: Render active hardware matrix
+      - name: Render active RK hardware matrix
         id: matrix
-        run: python3 scripts/ci/hardware_catalog.py --matrix --status active
+        run: python3 scripts/ci/hardware_catalog.py --matrix --status active --soc rk
 
-      - name: Require at least one active profile
+      - name: Require exactly one active RK profile
         env:
           ACTIVE_COUNT: ${{ steps.matrix.outputs.count }}
         run: |
-          if [[ "$ACTIVE_COUNT" == "0" ]]; then
-            echo "No active hardware profiles. Pin a real SDK identity before running readiness." >&2
+          if [[ "$ACTIVE_COUNT" != "1" ]]; then
+            echo "RK-first rollout requires exactly one active RK profile; found $ACTIVE_COUNT" >&2
             exit 1
           fi
 
   readiness:
-    name: ${{ matrix.profile }} / SDK + broker readiness
+    name: ${{ matrix.profile }} / RK SDK + HIL readiness
     needs: discover
     strategy:
       fail-fast: false
@@ -63,7 +63,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify Runner, SDK identity and resource broker configuration
+      - name: Verify RK Runner, SDK identity and HIL broker configuration
         env:
           RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: >-
