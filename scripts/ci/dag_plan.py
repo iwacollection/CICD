@@ -13,6 +13,19 @@ from toolchain_catalog import load_toolchain_catalog, validate_toolchain_catalog
 from validate_config import load_catalog, validate_catalog
 
 
+def _dag_cache_paths(raw: str) -> str:
+    """Prefix repository-relative cache paths for the DAG node's `source/` checkout."""
+    paths: list[str] = []
+    for line in raw.splitlines():
+        path = line.strip()
+        if not path:
+            continue
+        if path.startswith("/") or path == ".." or path.startswith("../"):
+            raise ValueError(f"unsafe DAG cache path: {path}")
+        paths.append(f"source/{path.removeprefix('./')}")
+    return "\n".join(paths)
+
+
 def render_dag(data: dict, toolchain_data: dict, selected: set[str], lane: str) -> dict:
     plan = build_plan(data, selected)
     levels: list[dict] = []
@@ -25,6 +38,8 @@ def render_dag(data: dict, toolchain_data: dict, selected: set[str], lane: str) 
             project_names=project_names,
             lane=lane,
         ) if project_names else {"include": []}
+        for target in matrix["include"]:
+            target["cache_paths"] = _dag_cache_paths(target.get("cache_paths", ""))
         count = len(matrix["include"])
         total_targets += count
         levels.append(
