@@ -71,8 +71,14 @@ def validate_policy(policy: object) -> list[str]:
         elif len(set(contexts)) != len(contexts):
             errors.append("required_status_checks.contexts must be unique")
 
-    if policy.get("allow_bypass_actors") is not False:
-        errors.append("allow_bypass_actors must be false")
+    bypass_policy = policy.get("bypass_actors")
+    if not isinstance(bypass_policy, dict):
+        errors.append("bypass_actors must be an object")
+    else:
+        if bypass_policy.get("allow_when_visible") is not False:
+            errors.append("bypass_actors.allow_when_visible must be false")
+        if not isinstance(bypass_policy.get("visibility_required"), bool):
+            errors.append("bypass_actors.visibility_required must be boolean")
     return errors
 
 
@@ -88,16 +94,14 @@ def load_policy(path: Path) -> dict[str, Any]:
 
 
 def _request(url: str, token: str) -> Any:
-    request = urllib.request.Request(
-        url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "User-Agent": "enterprise-ci-governance-audit/1",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-        method="GET",
-    )
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "enterprise-ci-governance-audit/1",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers, method="GET")
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             raw = response.read().decode("utf-8")
@@ -145,8 +149,9 @@ def _rule_by_type(ruleset: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return result
 
 
-def evaluate_ruleset(ruleset: dict[str, Any], policy: dict[str, Any]) -> list[str]:
+def evaluate_ruleset(ruleset: dict[str, Any], policy: dict[str, Any]) -> tuple[list[str], list[str]]:
     violations: list[str] = []
+    warnings: list[str] = []
     if ruleset.get("name") != policy["ruleset_name"]:
         violations.append(f"ruleset name mismatch: {ruleset.get('name')!r}")
     if ruleset.get("target") != policy["target"]:
@@ -197,23 +202,36 @@ def evaluate_ruleset(ruleset: dict[str, Any], policy: dict[str, Any]) -> list[st
         if expected_context not in actual_checks:
             violations.append(f"required status check is missing: {expected_context}")
 
+    bypass_policy = policy["bypass_actors"]
     bypass_actors = ruleset.get("bypass_actors")
-    if policy["allow_bypass_actors"] is False and isinstance(bypass_actors, list) and bypass_actors:
-        violations.append("ruleset bypass actors are not allowed")
-    elif policy["allow_bypass_actors"] is False and bypass_actors is None:
-        violations.append("ruleset response is missing bypass_actors; cannot prove no bypass exists")
-    return violations
+    if isinstance(bypass_actors, list):
+        if bypass_actors and bypass_policy["allow_when_visible"] is False:
+            violations.append("ruleset bypass actors are not allowed")
+    elif bypass_policy["visibility_required"]:
+        violations.append("ruleset bypass_actors visibility is required but unavailable")
+    else:
+        warnings.append(
+            "bypass_actors not visible to this audit identity; GitHub only guarantees this field to identities with ruleset write access"
+        )
+    return violations, warnings
 
 
 def build_report(ruleset: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
-    violations = evaluate_ruleset(ruleset, policy)
+    violations, warnings = evaluate_ruleset(ruleset, policy)
+    if violations:
+        status = "drifted"
+    elif warnings:
+        status = "healthy-with-limited-visibility"
+    else:
+        status = "healthy"
     return {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "status": "drifted" if violations else "healthy",
+        "status": status,
         "ruleset_id": str(ruleset.get("id", "")),
         "ruleset_name": str(ruleset.get("name", "")),
         "violations": violations,
+        "warnings": warnings,
     }
 
 
@@ -230,7 +248,12 @@ def render_markdown(report: dict[str, Any]) -> str:
     if report["violations"]:
         lines.extend(f"- {item}" for item in report["violations"])
     else:
-        lines.append("- None. Repository governance matches the versioned minimum policy.")
+        lines.append("- None in the observable Ruleset fields.")
+    lines.extend(["", "## Visibility warnings", ""])
+    if report["warnings"]:
+        lines.extend(f"- {item}" for item in report["warnings"])
+    else:
+        lines.append("- None.")
     lines.append("")
     return "\n".join(lines)
 
@@ -264,8 +287,6 @@ def main() -> int:
         token = os.environ.get("GITHUB_TOKEN", "").strip()
         if not args.repository:
             raise ValueError("repository is required")
-        if not token:
-            raise ValueError("GITHUB_TOKEN is required")
         ruleset = fetch_ruleset(
             repository=args.repository,
             token=token,
@@ -285,8 +306,18 @@ def main() -> int:
         with open(args.github_output, "a", encoding="utf-8") as handle:
             handle.write(f"status={report['status']}\n")
             handle.write(f"violation_count={len(report['violations'])}\n")
+            handle.write(f"warning_count={len(report['warnings'])}\n")
 
-    print(json.dumps({"status": report["status"], "violations": len(report["violations"])}, separators=(",", ":")))
+    print(
+        json.dumps(
+            {
+                "status": report["status"],
+                "violations": len(report["violations"]),
+                "warnings": len(report["warnings"]),
+            },
+            separators=(",", ":"),
+        )
+    )
     if args.fail_on_drift and report["violations"]:
         return 1
     return 0
