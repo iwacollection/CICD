@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 
+from hardware_catalog import validate_hardware_catalog
 from toolchain_catalog import (
     immutable_reference,
     index_toolchains,
@@ -89,6 +90,7 @@ def main() -> int:
     toolchain_data = load_toolchain_catalog(Path(args.toolchains))
     hardware_data = load_catalog(Path(args.hardware_profiles))
     errors = validate_toolchain_catalog(toolchain_data)
+    errors.extend(validate_hardware_catalog(hardware_data))
     errors.extend(validate_catalog(data, toolchain_data, hardware_data))
     if errors:
         raise SystemExit("invalid CI catalogs:\n" + "\n".join(errors))
