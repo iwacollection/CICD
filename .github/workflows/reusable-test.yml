@@ -1,0 +1,142 @@
+name: Reusable Test
+
+on:
+  workflow_call:
+    inputs:
+      project_name:
+        required: true
+        type: string
+      working_directory:
+        required: false
+        default: "."
+        type: string
+      setup_command:
+        required: false
+        default: ""
+        type: string
+      unit_command:
+        required: true
+        type: string
+      integration_command:
+        required: false
+        default: ""
+        type: string
+      e2e_command:
+        required: false
+        default: ""
+        type: string
+      platform_ref:
+        description: "Exact 40-character CICD platform commit SHA"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test / ${{ inputs.project_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout caller source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Require immutable platform revision
+        shell: bash
+        env:
+          CI_PLATFORM_REF: ${{ inputs.platform_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$CI_PLATFORM_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "platform_ref must be an exact 40-character SHA" >&2; exit 1; }
+
+      - name: Checkout capability helpers
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: iwacollection/CICD
+          ref: ${{ inputs.platform_ref }}
+          path: .ci-platform
+          persist-credentials: false
+          sparse-checkout: |
+            ci/capabilities.json
+            .github/workflows
+            scripts/ci/capability_policy.py
+            scripts/ci/capability_evidence.py
+          sparse-checkout-cone-mode: false
+
+      - name: Validate capability ownership
+        run: python3 .ci-platform/scripts/ci/capability_policy.py --policy .ci-platform/ci/capabilities.json --repository-root .ci-platform
+
+      - name: Prepare evidence
+        run: mkdir -p .ci-evidence/test
+
+      - name: Setup test dependencies
+        if: inputs.setup_command != ''
+        shell: bash
+        env:
+          CI_COMMAND: ${{ inputs.setup_command }}
+          CI_WORKDIR: ${{ inputs.working_directory }}
+          CI_EVIDENCE_DIR: ${{ github.workspace }}/.ci-evidence/test
+        run: |
+          set -euo pipefail
+          cd "source/$CI_WORKDIR"
+          bash -euo pipefail -c "$CI_COMMAND"
+
+      - name: Unit tests
+        shell: bash
+        env:
+          CI_COMMAND: ${{ inputs.unit_command }}
+          CI_WORKDIR: ${{ inputs.working_directory }}
+          CI_EVIDENCE_DIR: ${{ github.workspace }}/.ci-evidence/test
+        run: |
+          set -euo pipefail
+          [[ -n "$CI_COMMAND" ]] || { echo "unit_command must not be empty" >&2; exit 1; }
+          cd "source/$CI_WORKDIR"
+          bash -euo pipefail -c "$CI_COMMAND"
+
+      - name: Integration tests
+        if: inputs.integration_command != ''
+        shell: bash
+        env:
+          CI_COMMAND: ${{ inputs.integration_command }}
+          CI_WORKDIR: ${{ inputs.working_directory }}
+          CI_EVIDENCE_DIR: ${{ github.workspace }}/.ci-evidence/test
+        run: |
+          set -euo pipefail
+          cd "source/$CI_WORKDIR"
+          bash -euo pipefail -c "$CI_COMMAND"
+
+      - name: End-to-end tests
+        if: inputs.e2e_command != ''
+        shell: bash
+        env:
+          CI_COMMAND: ${{ inputs.e2e_command }}
+          CI_WORKDIR: ${{ inputs.working_directory }}
+          CI_EVIDENCE_DIR: ${{ github.workspace }}/.ci-evidence/test
+        run: |
+          set -euo pipefail
+          cd "source/$CI_WORKDIR"
+          bash -euo pipefail -c "$CI_COMMAND"
+
+      - name: Write test evidence metadata
+        if: always()
+        env:
+          CI_JOB_STATUS: ${{ job.status }}
+        run: >-
+          python3 .ci-platform/scripts/ci/capability_evidence.py
+          --capability test
+          --project '${{ inputs.project_name }}'
+          --status "$CI_JOB_STATUS"
+          --output .ci-evidence/test/capability.json
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-${{ inputs.project_name }}-${{ github.run_id }}
+          path: .ci-evidence/test
+          if-no-files-found: error
+          retention-days: 30
