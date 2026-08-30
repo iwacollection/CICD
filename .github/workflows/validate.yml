@@ -80,6 +80,7 @@ jobs:
           --soc generic
           --target-os linux
           --arch x86_64
+          --toolchain gcc-host-container-v1
           --json-out reproducibility.json
           --markdown-out reproducibility.md
 
