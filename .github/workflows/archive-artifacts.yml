@@ -9,6 +9,7 @@ permissions:
   actions: read
   attestations: read
   contents: write
+  id-token: write
 
 concurrency:
   group: archive-${{ github.event.workflow_run.id }}
@@ -16,7 +17,7 @@ concurrency:
 
 jobs:
   archive:
-    name: Archive v2 artifacts
+    name: Archive signed v2 artifacts
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
@@ -30,6 +31,11 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2 / cosign v3.0.6
+        with:
+          cosign-release: v3.0.6
+
       - name: Download all artifacts from trusted build
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -38,7 +44,7 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
 
-      - name: Verify provenance and archive immutable assets
+      - name: Verify, sign and archive immutable evidence set
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -64,6 +70,13 @@ jobs:
               echo "Expected exactly one manifest in $directory" >&2
               exit 1
             fi
+            mapfile -t bundles < <(find "$directory" -type f -name '*.tar.gz' -print)
+            mapfile -t scans < <(find "$directory" -type f -name 'security-scan.json' -print)
+            mapfile -t sboms < <(find "$directory" -type f -name 'security-sbom.cdx.json' -print)
+            if [[ "${#bundles[@]}" -ne 1 || "${#scans[@]}" -ne 1 || "${#sboms[@]}" -ne 1 ]]; then
+              echo "Archive requires exactly one bundle, scan report and SBOM in $directory" >&2
+              exit 1
+            fi
 
             python3 scripts/ci/verify_artifact.py \
               --directory "$directory" \
@@ -71,13 +84,22 @@ jobs:
               --expected-run-id "$SOURCE_RUN_ID" \
               --expected-repository "$GITHUB_REPOSITORY"
 
-            mapfile -t bundles < <(find "$directory" -type f -name '*.tar.gz' -print)
-            if [[ "${#bundles[@]}" -ne 1 ]]; then
-              echo "Expected exactly one bundle in $directory" >&2
-              exit 1
-            fi
+            python3 scripts/ci/supply_chain_policy.py \
+              --skip-dockerfiles \
+              --report "${scans[0]}" \
+              --sbom "${sboms[0]}"
+
             gh attestation verify "${bundles[0]}" --repo "$GITHUB_REPOSITORY"
             gh attestation verify "${manifests[0]}" --repo "$GITHUB_REPOSITORY"
+            gh attestation verify "${scans[0]}" --repo "$GITHUB_REPOSITORY"
+            gh attestation verify "${sboms[0]}" --repo "$GITHUB_REPOSITORY"
+
+            cosign sign-blob --yes \
+              --bundle "${bundles[0]}.sigstore.json" \
+              "${bundles[0]}"
+            cosign sign-blob --yes \
+              --bundle "${manifests[0]}.sigstore.json" \
+              "${manifests[0]}"
 
             python3 scripts/ci/artifact_archive.py archive \
               --directory "$directory" \
@@ -91,4 +113,4 @@ jobs:
             echo "No Artifact Contract v2 objects were found in the trusted build." >&2
             exit 1
           fi
-          echo "Archived $archived immutable artifact object(s)."
+          echo "Archived $archived signed immutable artifact object(s)."

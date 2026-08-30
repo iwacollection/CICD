@@ -41,6 +41,11 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2 / cosign v3.0.6
+        with:
+          cosign-release: v3.0.6
+
       - name: Resolve deployment to restore
         id: restore
         shell: bash
@@ -115,20 +120,48 @@ jobs:
           --expected-run-id "${{ steps.restore.outputs.source_run_id }}"
           --expected-repository "$GITHUB_REPOSITORY"
 
-      - name: Verify rollback provenance
+      - name: Enforce archived supply-chain policy
+        run: >-
+          python3 scripts/ci/supply_chain_policy.py
+          --skip-dockerfiles
+          --report incoming/security-scan.json
+          --sbom incoming/security-sbom.cdx.json
+
+      - name: Verify rollback attestations
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mapfile -t bundles < <(find incoming -type f -name '*.tar.gz' -print)
-          mapfile -t manifests < <(find incoming -type f -name '*.manifest.json' -print)
+          mapfile -t bundles < <(find incoming -maxdepth 1 -type f -name '*.tar.gz' -print)
+          mapfile -t manifests < <(find incoming -maxdepth 1 -type f -name '*.manifest.json' -print)
           if [[ "${#bundles[@]}" -ne 1 || "${#manifests[@]}" -ne 1 ]]; then
             echo "Expected exactly one bundle and one manifest" >&2
             exit 1
           fi
           gh attestation verify "${bundles[0]}" --repo "$GITHUB_REPOSITORY"
           gh attestation verify "${manifests[0]}" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify incoming/security-scan.json --repo "$GITHUB_REPOSITORY"
+          gh attestation verify incoming/security-sbom.cdx.json --repo "$GITHUB_REPOSITORY"
+
+      - name: Verify rollback Cosign signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t bundles < <(find incoming -maxdepth 1 -type f -name '*.tar.gz' -print)
+          mapfile -t manifests < <(find incoming -maxdepth 1 -type f -name '*.manifest.json' -print)
+          identity="^https://github.com/${GITHUB_REPOSITORY}/\\.github/workflows/archive-artifacts\\.yml@refs/heads/main$"
+          issuer="https://token.actions.githubusercontent.com"
+          cosign verify-blob \
+            --bundle "${bundles[0]}.sigstore.json" \
+            --certificate-identity-regexp "$identity" \
+            --certificate-oidc-issuer "$issuer" \
+            "${bundles[0]}"
+          cosign verify-blob \
+            --bundle "${manifests[0]}.sigstore.json" \
+            --certificate-identity-regexp "$identity" \
+            --certificate-oidc-issuer "$issuer" \
+            "${manifests[0]}"
 
       - name: Create new rollback environment pointer
         id: deployment
@@ -160,5 +193,7 @@ jobs:
             echo "- Artifact: ${{ steps.restore.outputs.artifact_name }}"
             echo "- SHA256: ${{ steps.restore.outputs.bundle_sha256 }}"
             echo "- Source run: ${{ steps.restore.outputs.source_run_id }}"
+            echo "- Supply-chain policy: PASSED"
+            echo "- Cosign archive signature: VERIFIED"
             echo "- Rebuild: NO"
           } >> "$GITHUB_STEP_SUMMARY"
