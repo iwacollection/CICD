@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
 from hardware_catalog import build_matrix as build_hardware_matrix  # noqa: E402
-from hardware_catalog import validate_hardware_catalog  # noqa: E402
+from hardware_catalog import validate_hardware_catalog, validate_rollout_policy  # noqa: E402
 from hardware_execute import _trusted_main_execution  # noqa: E402
 from resource_broker import BrokerError, acquire  # noqa: E402
 from toolchain_catalog import validate_toolchain_catalog  # noqa: E402
@@ -23,10 +23,12 @@ class HardwareIntegrationTests(unittest.TestCase):
         self.projects = load_catalog(ROOT / "ci" / "projects.json")
         self.toolchains = load_catalog(ROOT / "ci" / "toolchains.json")
         self.hardware = load_catalog(ROOT / "ci" / "hardware-profiles.json")
+        self.rollout = load_catalog(ROOT / "ci" / "hardware-rollout.json")
 
     def test_real_catalogs_cross_validate(self) -> None:
         self.assertEqual(validate_toolchain_catalog(self.toolchains), [])
         self.assertEqual(validate_hardware_catalog(self.hardware), [])
+        self.assertEqual(validate_rollout_policy(self.hardware, self.rollout), [])
         self.assertEqual(validate_catalog(self.projects, self.toolchains, self.hardware), [])
 
     def test_no_vendor_profile_is_accidentally_active(self) -> None:
@@ -35,6 +37,35 @@ class HardwareIntegrationTests(unittest.TestCase):
         self.assertEqual(statuses["rk-linux-arm64-lab"], "planned")
         self.assertEqual(statuses["qcom-android-arm64-lab"], "planned")
         self.assertEqual(statuses["mtk-android-arm64-lab"], "planned")
+
+    def test_rk_first_rollout_blocks_qcom_or_mtk_activation(self) -> None:
+        for soc in ("qualcomm", "mediatek"):
+            data = deepcopy(self.hardware)
+            profile = next(item for item in data["profiles"] if item["soc"] == soc)
+            profile["status"] = "active"
+            profile["sdk"]["expected_sha256"] = "sha256:" + "a" * 64
+            errors = validate_rollout_policy(data, self.rollout)
+            self.assertTrue(
+                any("outside allowed_active_socs" in error for error in errors),
+                msg=f"{soc} activation must be blocked during RK-first rollout",
+            )
+
+    def test_rk_first_rollout_allows_only_one_active_profile(self) -> None:
+        data = deepcopy(self.hardware)
+        rk = next(item for item in data["profiles"] if item["soc"] == "rk")
+        rk["status"] = "active"
+        rk["sdk"]["expected_sha256"] = "sha256:" + "a" * 64
+        duplicate = deepcopy(rk)
+        duplicate["id"] = "rk-linux-arm64-lab-2"
+        data["profiles"].append(duplicate)
+        errors = validate_rollout_policy(data, self.rollout)
+        self.assertTrue(any("at most 1 active profile" in error for error in errors))
+
+    def test_vendor_targets_are_independently_disabled_before_activation(self) -> None:
+        project = next(item for item in self.projects["projects"] if item["name"] == "embedded-firmware-template")
+        self.assertTrue(project["enabled"])
+        target_states = {target["soc"]: target["enabled"] for target in project["targets"]}
+        self.assertEqual(target_states, {"rk": False, "qualcomm": False, "mediatek": False})
 
     def test_active_profile_requires_pinned_sdk_identity(self) -> None:
         data = deepcopy(self.hardware)
@@ -84,6 +115,16 @@ class HardwareIntegrationTests(unittest.TestCase):
         self.assertTrue(profiles["qualcomm"]["license"]["required"])
         self.assertTrue(profiles["mediatek"]["license"]["required"])
         self.assertFalse(profiles["rk"]["license"]["required"])
+
+    def test_rk_readiness_and_enrollment_are_rk_only(self) -> None:
+        readiness = (ROOT / ".github" / "workflows" / "hardware-readiness.yml").read_text(encoding="utf-8")
+        enrollment = (ROOT / ".github" / "workflows" / "rk-sdk-enrollment.yml").read_text(encoding="utf-8")
+        self.assertIn("--status active --soc rk", readiness)
+        self.assertIn("Require exactly one active RK profile", readiness)
+        self.assertIn("--status planned --soc rk", enrollment)
+        self.assertIn("Require exactly one planned RK profile", enrollment)
+        self.assertNotIn("soc-qualcomm", readiness + enrollment)
+        self.assertNotIn("soc-mediatek", readiness + enrollment)
 
     def test_dag_node_keeps_hosted_pr_boundary_and_hardware_leases(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "dag-node.yml").read_text(encoding="utf-8")
