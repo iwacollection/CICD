@@ -444,7 +444,7 @@ jobs:
   attest:
     name: Attest trusted DAG artifacts
     needs: [discover, build_complete]
-    if: github.event_name != 'pull_request' && needs.build_complete.result == 'success' && needs.discover.outputs.total_targets != '0'
+    if: always() && github.event_name != 'pull_request' && needs.discover.result == 'success' && needs.build_complete.result == 'success' && needs.discover.outputs.total_targets != '0'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
