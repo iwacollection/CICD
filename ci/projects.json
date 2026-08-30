@@ -49,12 +49,12 @@
     },
     {
       "name": "embedded-firmware-template",
-      "enabled": false,
+      "enabled": true,
       "path": "firmware/product-a",
       "depends_on": [],
       "targets": [
         {
-          "enabled": true,
+          "enabled": false,
           "soc": "rk",
           "target_os": "linux",
           "arch": "arm64",
@@ -69,7 +69,7 @@
           "cache_key_files": ["deps.lock", "toolchain.lock"]
         },
         {
-          "enabled": true,
+          "enabled": false,
           "soc": "qualcomm",
           "target_os": "android",
           "arch": "arm64",
@@ -84,7 +84,7 @@
           "cache_key_files": ["deps.lock", "toolchain.lock"]
         },
         {
-          "enabled": true,
+          "enabled": false,
           "soc": "mediatek",
           "target_os": "android",
           "arch": "arm64",
