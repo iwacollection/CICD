@@ -1,131 +1,264 @@
 # Enterprise CI Build Platform
 
-企业级 **CI 构建、制品、供应链与发布治理平台**。
+企业级 **应用构建、嵌入式/多 SoC 固件、制品、供应链与发布治理平台**。
 
-这个仓库不是“给一个项目写一条 GitHub Actions”，而是把多个项目、多个工具链、内部依赖、多 SoC、制品归档、环境晋级和回滚放到同一套可验证规则里管理。
+这个仓库不是“给一个项目写一条 GitHub Actions”，而是把多个项目、内部依赖、多工具链、多 SoC、不同 Runner、不可变制品、供应链证据、环境晋级和回滚放到同一套可验证规则里管理。
 
-> 当前核心 Hosted 链路已经完成真实生产生命周期验收：`main Build -> Artifact v2 -> Attestation -> Archive -> dev -> staging -> production -> rollback`。真实 RK / Qualcomm / MediaTek 物理主机、厂商 SDK 和板卡仍属于外部资源边界，不会用模拟结果冒充真机验收。
+平台有两条一级业务主线：
+
+```text
+Enterprise CI Platform
+│
+├── 普通应用 / 多项目 CI
+│   ├── Linux C/C++
+│   ├── Hosted / Container Toolchain
+│   └── Dependency DAG
+│
+└── 嵌入式 / 多 SoC 固件 CI
+    ├── Rockchip / RK / 瑞芯微
+    ├── Qualcomm / 高通
+    ├── MediaTek / MTK / 联发科
+    ├── Linux / Android BSP
+    ├── Vendor SDK / License
+    ├── Self-hosted Runner
+    └── HIL 真机实验室
+```
+
+两条主线最终共用：
+
+```text
+Artifact Contract v2
+→ Supply-chain Policy
+→ Attestation
+→ Archive
+→ dev → staging → production
+→ Rollback
+```
+
+> 当前 Hosted 主链已经完成真实生产生命周期验收：`main Build -> Artifact v2 -> Attestation -> Archive -> dev -> staging -> production -> rollback`。多 SoC 管理模型和硬件执行契约已经实现，但真实 RK / Qualcomm / MediaTek 主机、厂商 SDK、License Server 和板卡仍属于外部资源边界，不会用模拟结果冒充真机验收。
 
 ---
 
 ## 1. 这个平台解决什么问题
 
-当 CI 从“一个仓库编译一下”扩大到企业场景，真正难的通常不是 YAML 语法，而是：
+当 CI 从“一个仓库编译一下”扩大到企业场景，真正困难的是：
 
 ```text
 哪些项目真的要构建？
-内部库应该按什么顺序构建？
-上游产物怎么可靠传给下游？
-工具链是不是同一版？
+内部库应该按什么顺序？
+上游产物怎么可靠交给下游？
+工具链/SDK 到底是哪一版？
 缓存会不会把旧依赖带进新构建？
-PR 能不能碰高权限 Self-hosted Runner？
 测试通过的 bytes 和生产 bytes 是不是同一份？
+PR 能不能碰高权限 Self-hosted Runner？
+RK / 高通 / 联发科三套 SDK、License、板卡怎么隔离？
 制品能不能长期保存、追溯、验签、回滚？
-CI 自己慢了、排队了、漂移了，谁知道？
+CI 自己慢了、排队了、治理漂移了，谁知道？
 ```
 
-这个仓库围绕这些问题建立一套统一平台。
+这个仓库围绕这些问题建立统一平台，而不是围绕某一家厂商命令写死流水线。
 
 ---
 
-## 2. 当前已经真实跑通的主链路
+## 2. 两条业务主线怎么汇合
+
+### 2.1 普通应用 / 多项目
+
+已经真实验证：
+
+```text
+hello-lib (L0)
+   ↓ Artifact Contract v2
+hello-cpp (L1)
+   ↓
+Supply Chain / SBOM
+   ↓
+Attestation
+   ↓
+Archive
+   ↓
+Promotion / Rollback
+```
+
+### 2.2 多 SoC / 固件
+
+平台管理模型：
+
+```text
+Product Target
+ci/projects.json
+      ↓
+Toolchain / SDK
+ci/toolchains.json
+      ↓
+Hardware Profile
+ci/hardware-profiles.json
+      ↓
+Rollout Policy
+ci/hardware-rollout.json
+      ↓
+Runner / SDK Identity / License / HIL / Vendor Adapter
+      ↓
+Firmware Artifact Contract v2
+      ↓
+同一套 Supply Chain / Archive / Promotion / Rollback
+```
+
+详细主线：**[多 SoC / 固件 CI 管理](docs/multi-soc-and-firmware.md)**
+
+---
+
+## 3. 当前已经真实跑通的 Hosted 生命周期
 
 ```text
 Pull Request
-     |
-     v
+     ↓
 Validate CI platform
-     |
-     +-- catalog / DAG / policy / governance
-     +-- reproducibility gate
-     |
-     v
+     ├── catalog / DAG / policy / governance
+     └── reproducibility gate
+     ↓
 Impact Analysis
-     |
-     v
+     ↓
 Dependency DAG
-     |
-     +-- L0 hello-lib
-     |      |
-     |      `-> Artifact Contract v2
-     |
-     `-- L1 hello-cpp
-            |
-            `-> verified upstream artifact handoff
-     |
-     v
+     ↓
 Build / Test
-     |
-     v
+     ↓
 Vulnerability / License / Secret / Misconfiguration
-     |
-     v
+     ↓
 CycloneDX SBOM
-     |
-     v
-Supply-chain Policy
-     |
-     v
+     ↓
 Artifact Contract v2
-     |
-     v
+     ↓
 GitHub Attestation
-     |
-     v
+     ↓
 Build gate
-     |
-     v
+     ↓
 Archive Trusted Artifacts
-     |
-     v
+     ↓
 GitHub Release + Cosign
-     |
-     v
- dev -> staging -> production
-     |
-     v
+     ↓
+dev → staging → production
+     ↓
 rollback to historical production digest
 ```
 
-完整真实验收证据见：
+完整 Run / Deployment / digest 证据：
 
 **[生产生命周期真实验收记录](docs/production-verification.md)**
 
 ---
 
-## 3. 能力状态
+## 4. 能力状态
+
+### 4.1 已真实验证
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| Hosted C/C++ 构建 | ✅ 已验证 | CMake + ccache + immutable toolchain image |
-| Fast Lane / 影响分析 | ✅ 已验证 | 只构建受影响项目，并补齐 prerequisite |
-| 真实依赖 DAG | ✅ 已验证 | L0-L7，同层并行，跨层 barrier |
-| 上游制品交接 | ✅ 已验证 | Artifact v2 下载、校验、staging、下游消费 |
-| 不可变工具链 | ✅ 已验证 | image digest + Ubuntu Snapshot |
-| Cache identity | ✅ 已验证 | project / target / toolchain / locks / upstream digest |
-| Reproducibility Gate | ✅ 已验证 | 两次 clean build 比较原始产物和 bundle bytes |
-| Artifact Contract v2 | ✅ 已验证 | manifest + member SHA256 + bundle SHA256 |
-| Supply-chain Scan | ✅ 已验证 | Trivy：vuln / license / secret / misconfig |
-| CycloneDX SBOM | ✅ 已验证 | 随制品长期保留 |
-| GitHub Attestation | ✅ 已验证 | trusted `main` provenance |
-| Cosign | ✅ 已验证 | 长期归档签名与 Promotion/Rollback 验签 |
-| 长期制品归档 | ✅ 已验证 | GitHub Releases，不依赖 Actions Artifact 生命周期 |
-| `dev -> staging -> production` | ✅ 已验证 | exact artifact identity 强制晋级 |
-| Production rollback | ✅ 已验证 | `A -> B -> A`，旧版本不重新构建 |
+| Hosted C/C++ 构建 | ✅ | CMake + ccache + immutable toolchain image |
+| Fast Lane / 影响分析 | ✅ | 只构建受影响项目并补齐 prerequisite |
+| 真实依赖 DAG | ✅ | L0-L7，同层并行、跨层 barrier |
+| 上游制品交接 | ✅ | Artifact v2 下载、校验、staging、下游消费 |
+| 不可变 Toolchain | ✅ | image digest + Ubuntu Snapshot |
+| Cache Identity | ✅ | project / target / toolchain / locks / upstream digest |
+| Reproducibility Gate | ✅ | 两次 clean build 比较原始产物和 bundle bytes |
+| Artifact Contract v2 | ✅ | manifest + member SHA256 + bundle SHA256 |
+| Supply-chain Scan | ✅ | vuln / license / secret / misconfiguration |
+| CycloneDX SBOM | ✅ | 随制品长期保留 |
+| GitHub Attestation | ✅ | trusted `main` provenance |
+| Cosign | ✅ | Archive 签名与 Promotion/Rollback 验签 |
+| 长期制品归档 | ✅ | 当前使用 GitHub Releases |
+| `dev -> staging -> production` | ✅ | exact artifact identity 强制晋级 |
+| Production Rollback | ✅ | `A -> B -> A`，旧版本不重新构建 |
+
+### 4.2 平台已实现
+
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
 | Repository Governance Drift | ✅ 已实现 | Ruleset 期望状态持续审计 |
 | Platform Health / SLO | ✅ 已实现 | Success / Queue P95 / Duration P95 / Rerun Rate |
-| RK 平台接入骨架 | ✅ 平台 Ready | x86_64 build host / arm64 target / SDK identity / HIL lease |
-| RK 真机 | ⏸ 外部资源阻塞 | 无真实主机、SDK、板卡 |
-| Qualcomm / MTK 真机 | ⏸ 暂停 | 保持 planned，不进入当前 rollout |
-| Nexus / S3 / MinIO / Artifactory | ⏳ 可选增强 | 当前长期库使用 GitHub Releases |
+| 多 SoC Catalog 管理 | ✅ 已实现 | Project → Toolchain → Hardware Profile → Rollout |
+| PR / Self-hosted 信任边界 | ✅ 已实现 | 不可信 PR 不进入厂商高权限 Runner |
+| SDK Identity 契约 | ✅ 已实现 | `sdk-identity.json` + SHA256 pin |
+| License Lease | ✅ 已实现 | Qualcomm/MTK 许可证池模型 |
+| HIL Lease | ✅ 已实现 | 真机独占租约与释放语义 |
+| Vendor Adapter | ✅ 已实现 | RK/Qcom/MTK build + HIL 适配层 |
+| RK 物理接入准备 | ✅ Ready | x86_64 build host → arm64 target |
+
+### 4.3 仍需真实外部资源
+
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
+| RK 真机闭环 | ⏸ | 缺真实主机、RK SDK/BSP、RK 板、USB/串口 |
+| Qualcomm 真机闭环 | ⏸ | `planned`，缺真实 SDK/License/Runner/HIL |
+| MediaTek/MTK 真机闭环 | ⏸ | `planned`，缺真实 SDK/License/Runner/HIL |
+| 企业依赖代理 | ⏳ | Nexus/Artifactory 架构已定义，未实际部署 |
+| 外部长期 Artifact Repository | ⏳ | 当前 GitHub Releases 已可用，规模化后再接 S3/MinIO/Nexus/Artifactory |
+| 生产厂商签名 KMS/HSM | ⏳ | 需要真实企业签名基础设施 |
 
 ---
 
-## 4. 最重要的设计原则
+## 5. 多 SoC 到底怎么管理
 
-### 4.1 Build once
+SoC（System on Chip）是大类：
 
-测试、预发、生产使用同一份已经构建好的 bytes：
+```text
+SoC
+├── Rockchip = 瑞芯微 = RK
+├── Qualcomm = 高通
+└── MediaTek = 联发科 = MTK
+```
+
+我们没有复制三套平台，而是：
+
+```text
+统一治理
+├── PR / main
+├── DAG
+├── Artifact
+├── Supply Chain
+├── Archive
+├── Promotion
+└── Rollback
+
+厂商隔离
+├── SDK/BSP
+├── Runner
+├── Host requirements
+├── License
+├── HIL board
+├── Flash mechanism
+└── Product recipe
+```
+
+当前 Hardware Profile：
+
+| SoC | Profile | Target | 当前 Runner | License | HIL | 状态 |
+| --- | --- | --- | --- | --- | --- | --- |
+| RK | `rk-linux-arm64-lab` | Linux arm64 | Linux x86_64 | 当前非必需 | 必需 | `planned` |
+| Qualcomm | `qcom-android-arm64-lab` | Android arm64 | Catalog 当前为 Linux arm64 | 必需 | 必需 | `planned` |
+| MediaTek | `mtk-android-arm64-lab` | Android arm64 | Catalog 当前为 Linux arm64 | 必需 | 必需 | `planned` |
+
+RK 已明确：
+
+```text
+Build Host = Linux x86_64
+      ↓ cross compile
+Target     = Linux arm64 firmware
+```
+
+Qualcomm / MTK 的 Host 架构仍要在拿到真实 SDK 后按厂商支持矩阵验证，不能把 target arch 当作 host arch。
+
+详见：
+
+- **[多 SoC / 固件 CI 管理主线](docs/multi-soc-and-firmware.md)**
+- **[Hardware Runner / SDK / License / HIL](docs/hardware-runner-integration.md)**
+- **[RK 真实物理接入手册](docs/rk-physical-bringup.md)**
+
+---
+
+## 6. 最重要的设计原则
+
+### 6.1 Build once
 
 ```text
 commit
@@ -141,29 +274,18 @@ staging
 production
 ```
 
-不能变成：
+测试与生产不能重新构建出另一份 bytes。
 
-```text
-dev build A
-production rebuild B
-```
+### 6.2 Cache 只负责加速
 
-否则“测试通过”并不能证明生产实际运行的是同一份制品。
-
-### 4.2 Cache 只负责加速
-
-Cache 可以 miss、删除、失效。
-
-它不能成为：
+Cache 可以删除、miss、失效，但不能成为：
 
 - 唯一依赖来源；
 - 上游项目交付方式；
 - 长期制品仓库；
 - 生产发布依据。
 
-### 4.3 DAG 必须真正执行
-
-依赖关系不是打印一张图，而是：
+### 6.3 DAG 必须真正执行
 
 ```text
 hello-lib
@@ -171,123 +293,102 @@ hello-lib
 hello-cpp
 ```
 
-下游只有拿到本次 Run 里刚构建、刚校验的上游 digest 才能继续。
+下游只接受本次 Run 中刚构建、刚校验的上游 digest。
 
-### 4.4 工具链必须有身份
+### 6.4 Toolchain / SDK 必须有身份
 
-平台不接受“Runner 上应该装了差不多版本”。
+普通 Container Toolchain 使用完整 `@sha256:` digest；厂商 Host SDK 使用 `sdk-identity.json` 和不可变 `host_identity`。
 
-Container toolchain 使用完整 `@sha256:` digest；厂商 Host SDK 使用显式 SDK identity。
+### 6.5 PR 和高权限 Runner 必须隔离
 
-### 4.5 PR 和高权限 Runner 必须隔离
+PR 不能访问 Vendor SDK、License、USB、HIL、内网等高权限能力，只允许 Hosted-safe `pr_validation_command`。
 
-不可信 PR 不能因为目标是硬件平台，就自动进入带 SDK、USB、许可证、内网权限的 Self-hosted Runner。
+### 6.6 Rollback 不是 checkout 老源码再 build
 
-### 4.6 Rollback 不是重新发布旧源码
-
-Rollback 恢复的是：
-
-```text
-某个环境曾经成功使用过的历史 immutable digest
-```
-
-不是 checkout 老 commit 再 build 一遍。
+Rollback 恢复的是同环境历史成功的 immutable digest。
 
 ---
 
-## 5. 仓库结构
+## 7. 仓库结构
 
 ```text
 CICD/
-├── .github/
-│   └── workflows/
-│       ├── validate.yml                 # 平台自检 / reproducibility
-│       ├── ci.yml                       # 主 DAG
-│       ├── dag-node.yml                 # 单 DAG 节点
-│       ├── toolchain-images.yml         # 工具链供应链
-│       ├── archive-artifacts.yml        # 长期归档
-│       ├── promote.yml                  # dev/staging/production
-│       ├── rollback.yml                 # 历史 digest rollback
-│       ├── platform-health.yml          # 平台 SLO
-│       ├── repository-governance.yml    # Ruleset drift
-│       ├── reusable-build.yml           # 通用业务仓库入口
-│       └── reusable-rk-*.yml            # RK 专用受信入口
+├── .github/workflows/
+│   ├── validate.yml                       # 平台自检 / reproducibility
+│   ├── ci.yml                             # 主 DAG
+│   ├── dag-node.yml                       # 单 DAG Node
+│   ├── toolchain-images.yml               # Toolchain Supply Chain
+│   ├── archive-artifacts.yml              # 长期归档
+│   ├── promote.yml                        # dev/staging/production
+│   ├── rollback.yml                       # 历史 digest rollback
+│   ├── platform-health.yml                # Platform SLO
+│   ├── repository-governance.yml          # Ruleset drift
+│   ├── reusable-build.yml                 # 通用业务仓库入口
+│   ├── reusable-rk-build.yml              # RK 产品构建入口
+│   ├── reusable-rk-enrollment.yml         # RK SDK 入籍
+│   └── reusable-rk-physical-readiness.yml # RK 物理 readiness
 │
 ├── ci/
-│   ├── projects.json                    # 项目 / target catalog
-│   ├── toolchains.json                  # 工具链 registry
-│   ├── hardware-profiles.json           # 硬件执行 profile
-│   ├── hardware-rollout.json            # 硬件 rollout policy
-│   ├── promotion-policy.json            # 环境晋级路径
-│   ├── supply-chain-policy.json         # 供应链策略
-│   ├── platform-slo.json                # CI SLO
+│   ├── projects.json                      # 项目 / target
+│   ├── toolchains.json                    # Toolchain / SDK Registry
+│   ├── hardware-profiles.json             # Runner/SDK/License/HIL Profile
+│   ├── hardware-rollout.json              # SoC rollout policy
+│   ├── supply-chain-policy.json
+│   ├── promotion-policy.json
+│   ├── platform-slo.json
 │   └── repository-governance-policy.json
 │
-├── scripts/ci/                           # 平台规则实现
-├── docker/toolchains/                    # 不可变工具链镜像
-├── ops/rk-runner/                        # RK 物理接入准备
-├── examples/                             # 真实两层 DAG 示例
-├── tests/                                # 契约 / 安全边界回归
-└── docs/                                 # 平台文档
+├── scripts/ci/                             # 平台规则实现
+├── scripts/vendor/                         # RK/Qcom/MTK 稳定 Adapter
+├── docker/toolchains/                      # 不可变 Toolchain Image
+├── ops/rk-runner/                          # RK 物理接入准备
+├── examples/                               # Hosted DAG 示例
+├── tests/                                  # 契约 / 安全边界回归
+└── docs/                                   # 平台文档
 ```
 
 完整导航：**[docs/README.md](docs/README.md)**
 
 ---
 
-## 6. 新项目怎么接入
+## 8. 新项目怎么接入
 
-### 方式 A：中央仓库内项目
+### 普通项目
 
-在 `ci/projects.json` 声明：
-
-```text
-项目名
-源码目录
-内部依赖
-目标 OS / CPU / SoC
-工具链
-Runner
-build / test command
-artifact paths
-cache identity inputs
-```
-
-然后由中央 DAG 自动规划。
-
-### 方式 B：独立业务仓库
-
-业务仓库调用：
+业务仓库固定中央平台完整 Commit SHA 调用：
 
 ```text
 .github/workflows/reusable-build.yml
 ```
 
-关键原则：
+业务负责源码与 build/test recipe，中央平台负责 Runner、Toolchain、Artifact、安全与发布规则。
+
+### RK 产品
+
+真实 RK 产品优先通过专用受信入口接入：
 
 ```text
-业务仓库提供源码和 build/test recipe
-中央 CICD 提供平台规则
-业务仓库固定 exact platform commit SHA
+reusable-rk-enrollment.yml
+reusable-rk-physical-readiness.yml
+reusable-rk-build.yml
 ```
 
-不要在每个业务仓库复制一整套中央 CI。
+真实 Self-hosted Runner 注册到私有产品仓库/受控 Runner Group，而不是公开 CICD 仓库。
 
 详细步骤：
 
 - [新项目接入手册](docs/onboarding.md)
 - [业务仓库调用中央 CI](docs/reusable-workflow.md)
+- [RK 真实物理接入](docs/rk-physical-bringup.md)
 
 ---
 
-## 7. 发布和回滚怎么工作
-
-构建成功并不直接等于 production 发布。
+## 9. 发布和回滚
 
 ```text
 main Build
    ↓
-trusted Attestation
+Trusted Attestation
    ↓
 Long-term Archive
    ↓
@@ -298,9 +399,9 @@ staging
 production
 ```
 
-Promotion 会重新验证：
+Promotion 重新验证：
 
-- 原始 trusted Build；
+- trusted Build；
 - Artifact Contract v2；
 - bundle SHA256；
 - Release identity；
@@ -309,15 +410,15 @@ Promotion 会重新验证：
 - Cosign；
 - 前置环境 successful Deployment。
 
-Rollback 只接受同环境历史 Deployment ID，并新建 rollback pointer。
+Rollback 只接受同环境历史 Deployment ID，并创建新的 rollback pointer，不重新构建旧版本。
 
-详细说明：**[制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)**
+详见：**[制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)**
 
 ---
 
-## 8. 平台怎么保护 `main`
+## 10. `main` 治理
 
-当前仓库采用单维护者治理模型，但仍保持生产保护：
+当前是单维护者治理模型，但仍保持：
 
 ```text
 必须 Pull Request
@@ -337,55 +438,13 @@ Build gate
 Toolchain gate
 ```
 
-这里取消的是“唯一维护者必须找自己审批”的死锁，不是取消 CI 安全门禁。
-
 详见：**[仓库治理基线与漂移审计](docs/repository-governance.md)**
 
 ---
 
-## 9. 硬件 / SoC 当前边界
+## 11. 平台自己怎么运维
 
-当前只保留 **RK-first** 物理接入设计，Qualcomm / MTK 不主动推进。
-
-RK 模型：
-
-```text
-Private Product Repository
-        ↓ pinned reusable workflow
-Linux x86_64 Build Host
-        ↓ cross compile
-RK Linux arm64 Firmware
-        ↓
-HIL Board
-```
-
-已准备：
-
-- Runner bootstrap；
-- SDK identity；
-- hardware profile；
-- rollout policy；
-- HIL lease/broker；
-- physical readiness；
-- vendor adapter interface。
-
-未真实验收：
-
-- 物理主机；
-- Rockchip SDK/BSP；
-- RK 板；
-- USB/串口；
-- 实际 flash/boot/smoke。
-
-详见：**[RK Physical Bring-up](docs/rk-physical-bringup.md)**
-
----
-
-## 10. 平台自己怎么运维
-
-CI 自己也是生产系统。
-
-平台当前跟踪：
+当前 SLO：
 
 ```text
 Success Rate
@@ -394,88 +453,54 @@ Duration P95
 Rerun Rate
 ```
 
-并持续审计：
+并持续审计 Ruleset / Required Checks / force-push / deletion protection。
 
-```text
-Ruleset
-Required Checks
-force-push / deletion protection
-review policy
-```
-
-稳定阶段维护原则见：
-
-**[CI 平台维护手册](docs/platform-maintenance.md)**
-
-故障处理见：
-
-**[故障排查手册](docs/troubleshooting.md)**
-
----
-
-## 11. 本地平台校验
-
-```bash
-python3 scripts/ci/toolchain_catalog.py
-python3 scripts/ci/hardware_catalog.py
-python3 scripts/ci/validate_config.py
-python3 scripts/ci/dependency_plan.py
-python3 scripts/ci/supply_chain_policy.py
-python3 scripts/ci/platform_health.py --policy ci/platform-slo.json --validate-policy
-python3 scripts/ci/discover_matrix.py
-python3 -m unittest discover -s tests -p 'test_*.py' -v
-```
-
-平台校验的重点不是 YAML 能不能解析，而是：
-
-```text
-catalog 是否一致
-DAG 是否有环
-target / toolchain / Runner binding 是否可信
-供应链策略是否合法
-治理策略是否合法
-最终到底会调度哪些任务
-```
+- [CI 平台维护手册](docs/platform-maintenance.md)
+- [平台健康度与 SLO](docs/platform-health-slo.md)
+- [故障排查手册](docs/troubleshooting.md)
 
 ---
 
 ## 12. 推荐阅读顺序
 
-第一次看这个仓库，推荐：
+### 普通应用 / Hosted 主线
 
 1. [总体架构](docs/architecture.md)
 2. [真实依赖 DAG](docs/dependency-dag-execution.md)
-3. [Artifact Contract v2](docs/artifact-contract-v2.md)
-4. [供应链策略](docs/supply-chain-policy.md)
-5. [制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)
-6. [生产生命周期真实验收记录](docs/production-verification.md)
-7. [业务仓库调用中央 CI](docs/reusable-workflow.md)
-8. [新项目接入手册](docs/onboarding.md)
-9. [平台健康度与 SLO](docs/platform-health-slo.md)
-10. [仓库治理](docs/repository-governance.md)
-11. [平台维护手册](docs/platform-maintenance.md)
-12. [故障排查](docs/troubleshooting.md)
+3. [构建、缓存与依赖](docs/build-cache-and-dependencies.md)
+4. [Artifact Contract v2](docs/artifact-contract-v2.md)
+5. [供应链策略](docs/supply-chain-policy.md)
+6. [制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)
+7. [生产生命周期真实验收记录](docs/production-verification.md)
+
+### RK / 高通 / 联发科主线
+
+1. [多 SoC / 固件 CI 管理主线](docs/multi-soc-and-firmware.md)
+2. [Hardware Runner / SDK / License / HIL](docs/hardware-runner-integration.md)
+3. [RK 真实物理接入手册](docs/rk-physical-bringup.md)
+4. [Runner 与供应链安全](docs/runner-security-and-supply-chain.md)
+5. [Artifact Contract v2](docs/artifact-contract-v2.md)
+6. [制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)
 
 ---
 
 ## 13. 当前阶段
 
-核心平台已经进入**稳定 / 文档 / 消费者接入阶段**。
+核心平台已进入 **稳定 / 文档 / 真实消费者接入阶段**。
 
-除非出现真实需求，否则不继续为了“功能更多”而增加抽象。
-
-后续优先事项是：
+当前优先级：
 
 ```text
-文档保持与代码一致
+文档与代码保持一致
 安全与依赖升级
 Platform SLO
 生命周期故障演练
 真实业务仓库消费 reusable workflow
 有硬件后恢复 RK physical bring-up
+拿到真实 Qualcomm/MTK SDK 后再验证 Host/License/HIL 设计
 规模需要时再引入 Nexus/S3/MinIO/Artifactory
 ```
 
 对于这个项目，成熟的标志不是 Workflow 数量越来越多，而是：
 
-> **相同输入能稳定产生可证明的制品，同一制品能安全晋级、可追溯、可回滚，平台自身也能被治理和运维。**
+> **普通应用和多 SoC 固件都能在统一治理下产生可证明的不可变制品；同一制品能够安全晋级、可追溯、可回滚，而厂商 SDK/Runner/License/HIL 又保持严格隔离。**
