@@ -1,0 +1,94 @@
+name: Archive Trusted Artifacts
+
+on:
+  workflow_run:
+    workflows: ["Build Matrix"]
+    types: [completed]
+
+permissions:
+  actions: read
+  attestations: read
+  contents: write
+
+concurrency:
+  group: archive-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    name: Archive v2 artifacts
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact trusted platform revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Download all artifacts from trusted build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: incoming
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Verify provenance and archive immutable assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          artifact_dirs=(incoming/*)
+          if [[ "${#artifact_dirs[@]}" -eq 0 ]]; then
+            echo "Trusted build produced no artifacts to archive."
+            exit 0
+          fi
+
+          archived=0
+          for directory in "${artifact_dirs[@]}"; do
+            [[ -d "$directory" ]] || continue
+            mapfile -t manifests < <(find "$directory" -type f -name '*.manifest.json' -print)
+            if [[ "${#manifests[@]}" -eq 0 ]]; then
+              continue
+            fi
+            if [[ "${#manifests[@]}" -ne 1 ]]; then
+              echo "Expected exactly one manifest in $directory" >&2
+              exit 1
+            fi
+
+            python3 scripts/ci/verify_artifact.py \
+              --directory "$directory" \
+              --expected-source-sha "$SOURCE_SHA" \
+              --expected-run-id "$SOURCE_RUN_ID" \
+              --expected-repository "$GITHUB_REPOSITORY"
+
+            mapfile -t bundles < <(find "$directory" -type f -name '*.tar.gz' -print)
+            if [[ "${#bundles[@]}" -ne 1 ]]; then
+              echo "Expected exactly one bundle in $directory" >&2
+              exit 1
+            fi
+            gh attestation verify "${bundles[0]}" --repo "$GITHUB_REPOSITORY"
+            gh attestation verify "${manifests[0]}" --repo "$GITHUB_REPOSITORY"
+
+            python3 scripts/ci/artifact_archive.py archive \
+              --directory "$directory" \
+              --repository "$GITHUB_REPOSITORY" \
+              --source-sha "$SOURCE_SHA" \
+              --run-id "$SOURCE_RUN_ID"
+            archived=$((archived + 1))
+          done
+
+          if [[ "$archived" -eq 0 ]]; then
+            echo "No Artifact Contract v2 objects were found in the trusted build." >&2
+            exit 1
+          fi
+          echo "Archived $archived immutable artifact object(s)."
