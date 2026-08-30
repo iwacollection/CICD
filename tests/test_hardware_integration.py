@@ -126,6 +126,18 @@ class HardwareIntegrationTests(unittest.TestCase):
         self.assertNotIn("soc-qualcomm", readiness + enrollment)
         self.assertNotIn("soc-mediatek", readiness + enrollment)
 
+    def test_reusable_rk_workflow_keeps_runner_and_toolchain_central(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "reusable-rk-build.yml").read_text(encoding="utf-8")
+        input_section = workflow.split("permissions:", 1)[0]
+        self.assertNotIn("runner_labels_json:", input_section)
+        self.assertNotIn("toolchain:", input_section)
+        self.assertNotIn("soc:", input_section)
+        self.assertIn("soc: rk", workflow)
+        self.assertIn("toolchain: rk-sdk-2026.08", workflow)
+        self.assertIn("runner_labels_json: ${{ needs.resolve.outputs.runner_labels }}", workflow)
+        self.assertIn("central rollout policy is not RK-first", workflow)
+        self.assertIn("trusted RK build requires active RK profile and toolchain", workflow)
+
     def test_dag_node_keeps_hosted_pr_boundary_and_hardware_leases(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "dag-node.yml").read_text(encoding="utf-8")
         self.assertIn("name: Hosted hardware PR validation", workflow)
