@@ -364,6 +364,7 @@ jobs:
             if [[ "${{ steps.trust.outputs.hardware_pr }}" == "true" ]]; then
               echo "- Execution: hosted-safe PR validation only"
             else
+              echo "- Artifact contract: v2"
               echo "- Artifact: dag-${{ steps.package.outputs.artifact_name }}"
               echo "- SHA256: ${{ steps.package.outputs.digest }}"
               echo "- Supply-chain policy: PASSED"
