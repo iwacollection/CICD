@@ -1,0 +1,81 @@
+name: Reusable RK SDK Enrollment
+
+on:
+  workflow_call:
+    inputs:
+      platform_ref:
+        description: "Exact 40-character CICD platform commit SHA"
+        required: true
+        type: string
+    outputs:
+      sdk_identity:
+        description: "Immutable SHA256 of the canonical RK SDK identity file"
+        value: ${{ jobs.enroll.outputs.sdk_identity }}
+      sdk_id:
+        description: "RK SDK logical ID"
+        value: ${{ jobs.enroll.outputs.sdk_id }}
+      sdk_version:
+        description: "RK SDK version"
+        value: ${{ jobs.enroll.outputs.sdk_version }}
+
+permissions:
+  contents: read
+
+jobs:
+  enroll:
+    name: Capture physical RK SDK identity
+    runs-on: [self-hosted, linux, x64, soc-rk]
+    timeout-minutes: 10
+    outputs:
+      sdk_identity: ${{ steps.sdk.outputs.sdk_identity }}
+      sdk_id: ${{ steps.sdk.outputs.sdk_id }}
+      sdk_version: ${{ steps.sdk.outputs.sdk_version }}
+    steps:
+      - name: Require trusted main caller
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]] || { echo "RK SDK enrollment requires the caller main branch" >&2; exit 1; }
+          [[ "${{ inputs.platform_ref }}" =~ ^[0-9a-f]{40}$ ]] || { echo "platform_ref must be an exact 40-character commit SHA" >&2; exit 1; }
+
+      - name: Checkout immutable central platform
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: iwacollection/CICD
+          ref: ${{ inputs.platform_ref }}
+          path: .ci-platform
+          persist-credentials: false
+
+      - name: Require physical x64 RK Runner and SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${RUNNER_ENVIRONMENT}" == "self-hosted" ]] || { echo "Enrollment requires self-hosted Runner" >&2; exit 1; }
+          [[ "$(uname -m)" == "x86_64" ]] || { echo "RK build host must be x86_64" >&2; exit 1; }
+          [[ -n "${RK_SDK_ROOT:-}" && -d "$RK_SDK_ROOT" ]] || { echo "RK_SDK_ROOT is missing" >&2; exit 1; }
+          for tool in bash python3 git ccache lsusb; do command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 1; }; done
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+
+      - name: Inspect canonical RK SDK identity
+        id: sdk
+        shell: bash
+        run: >-
+          python3 .ci-platform/scripts/ci/sdk_identity.py inspect
+          --sdk-root "$RK_SDK_ROOT"
+          --github-output "$GITHUB_OUTPUT"
+
+      - name: Enrollment summary
+        shell: bash
+        run: |
+          {
+            echo "### Physical RK SDK enrollment"
+            echo "- Caller repository: ${GITHUB_REPOSITORY}"
+            echo "- Runner: ${RUNNER_NAME}"
+            echo "- Host: $(uname -m)"
+            echo "- SDK ID: ${{ steps.sdk.outputs.sdk_id }}"
+            echo "- SDK version: ${{ steps.sdk.outputs.sdk_version }}"
+            echo "- SDK identity: ${{ steps.sdk.outputs.sdk_identity }}"
+            echo ""
+            echo "Pin this exact identity in the central RK hardware profile and RK toolchain before activation."
+          } >> "$GITHUB_STEP_SUMMARY"
