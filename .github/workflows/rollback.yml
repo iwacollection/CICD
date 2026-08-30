@@ -1,0 +1,149 @@
+name: Roll Back Environment Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: "Environment whose artifact pointer will be rolled back"
+        required: true
+        default: staging
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+      restore_deployment_id:
+        description: "Previous successful GitHub Deployment ID to restore"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  attestations: read
+  contents: read
+  deployments: write
+
+concurrency:
+  group: promote-${{ inputs.target_environment }}
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Roll back ${{ inputs.target_environment }}
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.target_environment }}
+    steps:
+      - name: Checkout platform verifier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Resolve deployment to restore
+        id: restore
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESTORE_DEPLOYMENT_ID: ${{ inputs.restore_deployment_id }}
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/deployment_pointer.py inspect \
+            --repository "$GITHUB_REPOSITORY" \
+            --deployment-id "$RESTORE_DEPLOYMENT_ID"
+          if [[ "${{ steps.restore.outputs.environment }}" != "$TARGET_ENVIRONMENT" ]]; then
+            echo "Rollback deployment belongs to a different environment." >&2
+            exit 1
+          fi
+
+      - name: Revalidate original trusted build
+        shell: bash
+        env:
+          SOURCE_RUN_ID: ${{ steps.restore.outputs.source_run_id }}
+          ARTIFACT_NAME: ${{ steps.restore.outputs.artifact_name }}
+          EXPECTED_SHA256: ${{ steps.restore.outputs.bundle_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/ci/validate_promotion_source.py
+          --run-id "$SOURCE_RUN_ID"
+          --artifact-name "$ARTIFACT_NAME"
+          --expected-sha256 "$EXPECTED_SHA256"
+          --repository "$GITHUB_REPOSITORY"
+
+      - name: Download exact archived artifact
+        id: archive
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: ${{ steps.restore.outputs.artifact_name }}
+          EXPECTED_SHA256: ${{ steps.restore.outputs.bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/artifact_archive.py download \
+            --directory incoming \
+            --repository "$GITHUB_REPOSITORY" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --expected-sha256 "$EXPECTED_SHA256"
+          if [[ "${{ steps.archive.outputs.release_tag }}" != "${{ steps.restore.outputs.release_tag }}" ]]; then
+            echo "Deployment pointer release tag does not match long-term archive." >&2
+            exit 1
+          fi
+
+      - name: Verify rollback bytes and manifest identity
+        run: >-
+          python3 scripts/ci/verify_artifact.py
+          --directory incoming
+          --expected-sha256 "${{ steps.restore.outputs.bundle_sha256 }}"
+          --expected-source-sha "${{ steps.restore.outputs.source_sha }}"
+          --expected-run-id "${{ steps.restore.outputs.source_run_id }}"
+          --expected-repository "$GITHUB_REPOSITORY"
+
+      - name: Verify rollback provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -t bundles < <(find incoming -type f -name '*.tar.gz' -print)
+          mapfile -t manifests < <(find incoming -type f -name '*.manifest.json' -print)
+          if [[ "${#bundles[@]}" -ne 1 || "${#manifests[@]}" -ne 1 ]]; then
+            echo "Expected exactly one bundle and one manifest" >&2
+            exit 1
+          fi
+          gh attestation verify "${bundles[0]}" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify "${manifests[0]}" --repo "$GITHUB_REPOSITORY"
+
+      - name: Create new rollback environment pointer
+        id: deployment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          RESTORE_DEPLOYMENT_ID: ${{ inputs.restore_deployment_id }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/deployment_pointer.py create \
+            --repository "$GITHUB_REPOSITORY" \
+            --environment "$TARGET_ENVIRONMENT" \
+            --artifact-name "${{ steps.restore.outputs.artifact_name }}" \
+            --bundle-sha256 "${{ steps.restore.outputs.bundle_sha256 }}" \
+            --source-sha "${{ steps.restore.outputs.source_sha }}" \
+            --source-run-id "${{ steps.restore.outputs.source_run_id }}" \
+            --release-tag "${{ steps.restore.outputs.release_tag }}" \
+            --reason rollback \
+            --restored-from-deployment-id "$RESTORE_DEPLOYMENT_ID"
+
+      - name: Rollback summary
+        run: |
+          {
+            echo "### Artifact rollback"
+            echo "- Environment: ${{ inputs.target_environment }}"
+            echo "- Restored deployment: ${{ inputs.restore_deployment_id }}"
+            echo "- New deployment pointer: ${{ steps.deployment.outputs.deployment_id }}"
+            echo "- Artifact: ${{ steps.restore.outputs.artifact_name }}"
+            echo "- SHA256: ${{ steps.restore.outputs.bundle_sha256 }}"
+            echo "- Source run: ${{ steps.restore.outputs.source_run_id }}"
+            echo "- Rebuild: NO"
+          } >> "$GITHUB_STEP_SUMMARY"
