@@ -55,11 +55,27 @@ def validate_toolchain_catalog(data: dict) -> list[str]:
             errors.append(f"{prefix}.execution_mode must be one of {sorted(ALLOWED_EXECUTION_MODES)}")
             continue
 
+        hardware_profile = item.get("hardware_profile", "")
+        if not isinstance(hardware_profile, str):
+            errors.append(f"{prefix}.hardware_profile must be a string")
+            hardware_profile = ""
+        host_identity = item.get("host_identity", "")
+        if not isinstance(host_identity, str):
+            errors.append(f"{prefix}.host_identity must be a string")
+            host_identity = ""
+        elif host_identity and not DIGEST_RE.fullmatch(host_identity):
+            errors.append(f"{prefix}.host_identity must be sha256 followed by 64 lowercase hex characters")
+
         if mode == "host":
             forbidden = [key for key in ("image", "digest", "dockerfile", "context") if item.get(key)]
             if forbidden:
                 errors.append(f"{prefix} host toolchain cannot define {', '.join(forbidden)}")
+            if status == "active" and hardware_profile and not DIGEST_RE.fullmatch(host_identity):
+                errors.append(f"{prefix} active hardware host toolchain requires immutable host_identity")
             continue
+
+        if host_identity:
+            errors.append(f"{prefix} container toolchain cannot define host_identity")
 
         image = item.get("image", "")
         digest = item.get("digest", "")
@@ -103,6 +119,12 @@ def immutable_reference(item: dict) -> str:
     if not image or not DIGEST_RE.fullmatch(digest):
         raise ValueError(f"toolchain {item.get('id')} does not have an immutable image digest")
     return f"{image}@{digest}"
+
+
+def toolchain_identity(item: dict) -> str:
+    if item.get("execution_mode") == "container":
+        return item.get("digest") or f"container:{item.get('id')}"
+    return item.get("host_identity") or f"host:{item.get('id')}"
 
 
 def build_publish_matrix(data: dict) -> dict:
