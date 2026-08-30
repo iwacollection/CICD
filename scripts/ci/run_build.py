@@ -44,6 +44,13 @@ def _container_env_args(workdir: Path) -> list[str]:
             ) from exc
         container_index = "/workspace/" + relative_index.as_posix()
         args.extend(["-e", f"CI_UPSTREAM_INDEX={container_index}"])
+
+    # Reproducibility controls are intentionally allow-listed rather than
+    # forwarding the Runner's complete environment into the toolchain image.
+    for key in ("SOURCE_DATE_EPOCH", "CCACHE_DISABLE"):
+        value = os.environ.get(key, "")
+        if value:
+            args.extend(["-e", f"{key}={value}"])
     return args
 
 
@@ -98,6 +105,8 @@ def main() -> int:
         print(f"CI container image : {args.container_image}")
     if os.environ.get("CI_UPSTREAM_ROOT"):
         print(f"CI upstream root   : {os.environ['CI_UPSTREAM_ROOT']}")
+    if os.environ.get("SOURCE_DATE_EPOCH"):
+        print(f"SOURCE_DATE_EPOCH  : {os.environ['SOURCE_DATE_EPOCH']}")
     print(f"CI build command   : {args.command}")
     print("=" * 72)
 
