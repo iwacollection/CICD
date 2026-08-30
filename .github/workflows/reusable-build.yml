@@ -120,7 +120,7 @@ jobs:
             exit 1
           fi
 
-      - name: Checkout CI platform scripts only
+      - name: Checkout immutable CI platform policy and scripts
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: iwacollection/CICD
@@ -130,7 +130,11 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/ci
+            ci
           sparse-checkout-cone-mode: true
+
+      - name: Validate central supply-chain policy
+        run: python3 .ci-platform/scripts/ci/supply_chain_policy.py --policy .ci-platform/ci/supply-chain-policy.json --skip-dockerfiles
 
       - name: Require immutable toolchain image
         if: inputs.container_image != ''
@@ -281,6 +285,39 @@ jobs:
           fi
           python3 .ci-platform/scripts/ci/run_build.py "${args[@]}"
 
+      - name: Prepare reusable supply-chain evidence
+        run: rm -rf reusable-security-evidence && mkdir -p reusable-security-evidence
+
+      - name: Scan caller vulnerabilities, licenses, secrets and misconfigurations
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: fs
+          scan-ref: source/${{ inputs.working_directory }}
+          scanners: vuln,license,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: reusable-security-evidence/security-scan.json
+          exit-code: "0"
+          version: v0.70.0
+
+      - name: Generate caller CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: fs
+          scan-ref: source/${{ inputs.working_directory }}
+          format: cyclonedx
+          output: reusable-security-evidence/security-sbom.cdx.json
+          version: v0.70.0
+
+      - name: Enforce caller supply-chain policy
+        run: >-
+          python3 .ci-platform/scripts/ci/supply_chain_policy.py
+          --policy .ci-platform/ci/supply-chain-policy.json
+          --skip-dockerfiles
+          --report reusable-security-evidence/security-scan.json
+          --sbom reusable-security-evidence/security-sbom.cdx.json
+
       - name: Collect build environment metadata
         if: steps.lane.outputs.hardware_pr != 'true'
         shell: bash
@@ -334,7 +371,7 @@ jobs:
           --directory dist
           --expected-sha256 "${{ steps.package.outputs.digest }}"
 
-      - name: Upload artifact
+      - name: Upload artifact and security evidence
         if: steps.lane.outputs.hardware_pr != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -343,6 +380,8 @@ jobs:
             ${{ steps.package.outputs.bundle }}
             ${{ steps.package.outputs.manifest }}
             ${{ steps.package.outputs.checksum }}
+            reusable-security-evidence/security-scan.json
+            reusable-security-evidence/security-sbom.cdx.json
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
@@ -364,6 +403,8 @@ jobs:
             echo "- Project: $PROJECT_NAME"
             echo "- Target: $SOC / $TARGET_OS / $ARCH"
             echo "- Toolchain: $TOOLCHAIN"
+            echo "- Supply-chain policy: PASSED"
+            echo "- SBOM: CycloneDX / Trivy v0.70.0"
             if [[ "$HARDWARE_PR" == "true" ]]; then
               echo "- Execution: hosted pull-request validation lane"
               echo "- Validation: hosted-safe command completed"
