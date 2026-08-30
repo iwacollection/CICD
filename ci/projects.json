@@ -59,7 +59,7 @@
           "target_os": "linux",
           "arch": "arm64",
           "toolchain": "rk-sdk-2026.08",
-          "runner_labels": ["self-hosted", "linux", "arm64", "soc-rk"],
+          "runner_labels": ["self-hosted", "linux", "x64", "soc-rk"],
           "build_command": "./ci/build.sh rk linux arm64",
           "test_command": "./ci/test-package.sh out/rk",
           "pr_validation_command": "./ci/pr-validate.sh rk linux arm64",
