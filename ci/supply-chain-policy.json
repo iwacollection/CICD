@@ -9,7 +9,13 @@
     "deny_severities": ["HIGH", "CRITICAL"]
   },
   "license": {
-    "deny_severities": ["HIGH", "CRITICAL"]
+    "deny_licenses": [
+      "AGPL-3.0-only",
+      "AGPL-3.0-or-later",
+      "BUSL-1.1",
+      "Commons-Clause",
+      "SSPL-1.0"
+    ]
   },
   "secret": {
     "deny_any_finding": true
