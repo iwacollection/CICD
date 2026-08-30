@@ -9,6 +9,7 @@ from pathlib import Path
 
 from dependency_plan import MAX_DAG_LEVELS, build_plan
 from discover_matrix import build_matrix
+from hardware_catalog import validate_hardware_catalog
 from toolchain_catalog import load_toolchain_catalog, validate_toolchain_catalog
 from validate_config import load_catalog, validate_catalog
 
@@ -94,6 +95,7 @@ def main() -> int:
     toolchain_data = load_toolchain_catalog(Path(args.toolchains))
     hardware_data = load_catalog(Path(args.hardware_profiles))
     errors = validate_toolchain_catalog(toolchain_data)
+    errors.extend(validate_hardware_catalog(hardware_data))
     errors.extend(validate_catalog(data, toolchain_data, hardware_data))
     if errors:
         raise SystemExit("invalid CI catalogs:\n" + "\n".join(errors))
