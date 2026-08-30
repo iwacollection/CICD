@@ -41,8 +41,10 @@
 6. [制品、晋级与回滚](artifacts-promotion-and-rollback.md)
    - 为什么测试到生产不能重新编译
    - 长期 Release Archive
+   - `dev -> staging -> production` Promotion Path Policy
    - GitHub Deployment 作为环境 digest pointer
-   - rollback 为什么只恢复历史 digest，不重新构建
+   - `promoted_from_deployment_id` 晋级审计链
+   - rollback 为什么只恢复同环境历史 digest，不重新构建
 
 7. [供应链策略](supply-chain-policy.md)
    - Action / Docker digest 固定
@@ -110,7 +112,15 @@
     - `healthy / breached / insufficient-data`
     - 定时健康报告与证据保留
 
-16. [故障排查手册](troubleshooting.md)
+16. [仓库治理基线与漂移审计](repository-governance.md)
+    - `main-production-governance` Ruleset
+    - PR / CODEOWNERS / Review Thread
+    - Required Checks
+    - 禁止 force-push / deletion
+    - Settings 漂移自动检测
+    - bypass actor API 可见性与最小权限边界
+
+17. [故障排查手册](troubleshooting.md)
     - Job 排队
     - 构建突然变慢
     - 缓存污染
@@ -121,13 +131,13 @@
 
 ## 第五层：硬件接入边界
 
-17. [Hardware Runner Integration](hardware-runner-integration.md)
+18. [Hardware Runner Integration](hardware-runner-integration.md)
     - SoC profile
     - SDK identity
     - HIL lease
     - PR 与 Self-hosted Runner 信任边界
 
-18. [RK Physical Bring-up](rk-physical-bringup.md)
+19. [RK Physical Bring-up](rk-physical-bringup.md)
     - x86_64 构建主机与 arm64 目标架构分离
     - 私有产品仓库拥有真实 Runner 授权域
     - Runner bootstrap
@@ -147,6 +157,8 @@
 工具链注册              -> ci/toolchains.json
 硬件 Profile            -> ci/hardware-profiles.json
 平台 SLO                -> ci/platform-slo.json
+晋级路径策略            -> ci/promotion-policy.json
+仓库治理策略            -> ci/repository-governance-policy.json
 供应链策略              -> ci/supply-chain-policy.json
 
 依赖 DAG                -> scripts/ci/dependency_plan.py / dag_plan.py
@@ -157,9 +169,11 @@ Artifact v2 打包         -> scripts/ci/package_artifact.py
 Artifact 校验            -> scripts/ci/verify_artifact.py
 长期归档                 -> scripts/ci/artifact_archive.py
 环境指针 / rollback      -> scripts/ci/deployment_pointer.py
+Promotion 路径校验       -> scripts/ci/promotion_policy.py
 上游制品解析             -> scripts/ci/resolve_upstream_artifacts.py
 供应链 Gate              -> scripts/ci/supply_chain_policy.py
 平台健康度               -> scripts/ci/platform_health.py
+仓库治理漂移             -> scripts/ci/repository_governance.py
 硬件执行                 -> scripts/ci/hardware_execute.py
 
 平台自检                 -> .github/workflows/validate.yml
@@ -170,6 +184,7 @@ Artifact 校验            -> scripts/ci/verify_artifact.py
 Promotion                -> .github/workflows/promote.yml
 Rollback                 -> .github/workflows/rollback.yml
 平台健康                 -> .github/workflows/platform-health.yml
+仓库治理审计             -> .github/workflows/repository-governance.yml
 外部仓库通用接入         -> .github/workflows/reusable-build.yml
 RK 产品接入              -> .github/workflows/reusable-rk-build.yml
 ```
@@ -179,13 +194,13 @@ RK 产品接入              -> .github/workflows/reusable-rk-build.yml
 不要回答“我会写 GitHub Actions”。更完整的表达是：
 
 ```text
-我会把 CI 拆成代码触发、影响分析、依赖 DAG、构建调度、Runner 隔离、工具链、缓存、质量门禁、供应链安全、不可变制品、长期归档、晋级回滚和平台 SLO。
+我会把 CI 拆成代码触发、影响分析、依赖 DAG、构建调度、Runner 隔离、工具链、缓存、质量门禁、供应链安全、不可变制品、长期归档、分环境晋级、回滚、平台 SLO 和仓库治理漂移。
 
 普通构建环境优先容器化；必须依赖厂商 SDK、USB、许可证或真机时，再进入受信 Self-hosted Runner。目标固件是 arm64，不代表构建主机也必须是 arm64。
 
-多平台场景下治理统一，但 SDK/工具链/Runner 隔离；同一个 Artifact Contract v2 制品从归档晋级到生产，不在生产阶段重新构建。
+多平台场景下治理统一，但 SDK/工具链/Runner 隔离；同一个 Artifact Contract v2 制品严格按 dev -> staging -> production 晋级，不在生产阶段重新构建。
 
-如果构建变慢，我先拆 Queue、Dependency、Compile、Test、Scan、Package、Upload；如果 Queue 高而执行时间正常，则优先看 Runner 容量，而不是盲目优化编译。
+如果构建变慢，我先拆 Queue、Dependency、Compile、Test、Scan、Package、Upload；如果 Queue 高而执行时间正常，则优先看 Runner 容量。仓库 Ruleset 本身也做持续漂移检测，避免 Settings 被手工改弱却无人发现。
 ```
 
 能把这些说清楚，比背 `matrix`、`needs`、`cache` 语法更接近生产 DevOps/SRE。
