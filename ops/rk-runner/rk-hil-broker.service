@@ -1,0 +1,22 @@
+[Unit]
+Description=RK HIL Resource Broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gh-rk-runner
+Group=gh-rk-runner
+EnvironmentFile=/etc/rk-hil-broker.env
+ExecStart=/usr/bin/python3 /opt/rk-ci/local_hil_broker.py --inventory /etc/rk-hil-inventory.json --state /var/lib/rk-hil-broker/state.json --bind 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/rk-hil-broker
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
