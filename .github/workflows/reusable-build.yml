@@ -248,7 +248,7 @@ jobs:
 
       - name: Restore build cache
         if: steps.lane.outputs.hardware_pr != 'true' && inputs.cache_paths != ''
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ inputs.cache_paths }}
           key: reusable-ci-v4-${{ inputs.project_name }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain }}-${{ inputs.cache_key_extra }}-${{ steps.cache.outputs.fingerprint }}
