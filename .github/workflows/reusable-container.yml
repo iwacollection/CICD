@@ -1,0 +1,182 @@
+name: Reusable Container
+
+on:
+  workflow_call:
+    inputs:
+      project_name:
+        required: true
+        type: string
+      working_directory:
+        required: false
+        default: "."
+        type: string
+      dockerfile:
+        required: false
+        default: "Dockerfile"
+        type: string
+      context:
+        required: false
+        default: "."
+        type: string
+      smoke_command:
+        description: "Trusted smoke command. CI_IMAGE_TAG is exported. This capability never pushes the image."
+        required: true
+        type: string
+      allow_root_user:
+        required: false
+        default: false
+        type: boolean
+      platform_ref:
+        description: "Exact 40-character CICD platform commit SHA"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  container:
+    name: Container / ${{ inputs.project_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout caller source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Require immutable platform revision
+        shell: bash
+        env:
+          CI_PLATFORM_REF: ${{ inputs.platform_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$CI_PLATFORM_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "platform_ref must be an exact 40-character SHA" >&2; exit 1; }
+
+      - name: Checkout capability and supply-chain policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: iwacollection/CICD
+          ref: ${{ inputs.platform_ref }}
+          path: .ci-platform
+          persist-credentials: false
+          sparse-checkout: |
+            ci/capabilities.json
+            ci/supply-chain-policy.json
+            .github/workflows
+            scripts/ci/capability_policy.py
+            scripts/ci/capability_evidence.py
+            scripts/ci/supply_chain_policy.py
+          sparse-checkout-cone-mode: false
+
+      - name: Validate capability ownership
+        run: python3 .ci-platform/scripts/ci/capability_policy.py --policy .ci-platform/ci/capabilities.json --repository-root .ci-platform
+
+      - name: Validate Dockerfile policy
+        shell: bash
+        env:
+          CI_WORKDIR: ${{ inputs.working_directory }}
+          CI_DOCKERFILE: ${{ inputs.dockerfile }}
+        run: >-
+          python3 .ci-platform/scripts/ci/supply_chain_policy.py
+          --policy .ci-platform/ci/supply-chain-policy.json
+          --dockerfiles "source/$CI_WORKDIR/$CI_DOCKERFILE"
+
+      - name: Build ephemeral image
+        id: image
+        shell: bash
+        env:
+          CI_WORKDIR: ${{ inputs.working_directory }}
+          CI_DOCKERFILE: ${{ inputs.dockerfile }}
+          CI_CONTEXT: ${{ inputs.context }}
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-evidence/container
+          tag="ci-capability-${GITHUB_RUN_ID}:${GITHUB_SHA:0:12}"
+          docker build \
+            --file "source/$CI_WORKDIR/$CI_DOCKERFILE" \
+            --tag "$tag" \
+            "source/$CI_WORKDIR/$CI_CONTEXT"
+          image_id="$(docker image inspect "$tag" --format '{{.Id}}')"
+          docker image inspect "$tag" > .ci-evidence/container/image-inspect.json
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "image_id=$image_id" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce non-root runtime user
+        if: inputs.allow_root_user == false
+        shell: bash
+        env:
+          CI_IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          set -euo pipefail
+          user="$(docker image inspect "$CI_IMAGE_TAG" --format '{{.Config.User}}')"
+          if [[ -z "$user" || "$user" == "0" || "$user" == "root" ]]; then
+            echo "Container image runs as root. Set a non-root USER or explicitly allow the exception." >&2
+            exit 1
+          fi
+
+      - name: Scan built image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.image.outputs.tag }}
+          scanners: vuln,license,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: json
+          output: .ci-evidence/container/image-scan.json
+          exit-code: "0"
+          version: v0.70.0
+
+      - name: Generate image CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.image.outputs.tag }}
+          format: cyclonedx
+          output: .ci-evidence/container/image-sbom.cdx.json
+          exit-code: "0"
+          version: v0.70.0
+
+      - name: Enforce central image supply-chain policy
+        run: >-
+          python3 .ci-platform/scripts/ci/supply_chain_policy.py
+          --policy .ci-platform/ci/supply-chain-policy.json
+          --skip-dockerfiles
+          --report .ci-evidence/container/image-scan.json
+          --sbom .ci-evidence/container/image-sbom.cdx.json
+
+      - name: Container smoke test
+        shell: bash
+        env:
+          CI_COMMAND: ${{ inputs.smoke_command }}
+          CI_IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          CI_IMAGE_ID: ${{ steps.image.outputs.image_id }}
+          CI_EVIDENCE_DIR: ${{ github.workspace }}/.ci-evidence/container
+          CI_WORKDIR: ${{ inputs.working_directory }}
+        run: |
+          set -euo pipefail
+          [[ -n "$CI_COMMAND" ]] || { echo "smoke_command must not be empty" >&2; exit 1; }
+          cd "source/$CI_WORKDIR"
+          bash -euo pipefail -c "$CI_COMMAND"
+
+      - name: Write container evidence metadata
+        if: always()
+        env:
+          CI_JOB_STATUS: ${{ job.status }}
+        run: >-
+          python3 .ci-platform/scripts/ci/capability_evidence.py
+          --capability container
+          --project '${{ inputs.project_name }}'
+          --status "$CI_JOB_STATUS"
+          --output .ci-evidence/container/capability.json
+
+      - name: Upload container evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: container-${{ inputs.project_name }}-${{ github.run_id }}
+          path: .ci-evidence/container
+          if-no-files-found: error
+          retention-days: 30

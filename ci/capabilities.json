@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "core_owned": [
+    "impact_analysis",
+    "dependency_dag",
+    "trusted_build",
+    "runner_trust_boundary",
+    "toolchain_identity",
+    "cache_identity",
+    "artifact_contract_v2",
+    "artifact_supply_chain",
+    "attestation",
+    "archive",
+    "promotion",
+    "rollback"
+  ],
+  "capabilities": {
+    "quality": {
+      "workflow": ".github/workflows/reusable-quality.yml",
+      "runner_class": "hosted-only",
+      "responsibilities": ["format", "lint", "static_analysis", "coverage_command", "quality_evidence"],
+      "may_publish_release": false,
+      "may_deploy": false,
+      "may_use_self_hosted": false
+    },
+    "test": {
+      "workflow": ".github/workflows/reusable-test.yml",
+      "runner_class": "hosted-only",
+      "responsibilities": ["unit", "integration", "e2e", "test_evidence"],
+      "may_publish_release": false,
+      "may_deploy": false,
+      "may_use_self_hosted": false
+    },
+    "container": {
+      "workflow": ".github/workflows/reusable-container.yml",
+      "runner_class": "hosted-only",
+      "responsibilities": ["ephemeral_image_build", "dockerfile_policy", "image_scan", "image_sbom", "smoke_test", "image_evidence"],
+      "may_publish_release": false,
+      "may_deploy": false,
+      "may_use_self_hosted": false
+    },
+    "db_migration": {
+      "workflow": ".github/workflows/reusable-db-migration.yml",
+      "runner_class": "hosted-only",
+      "responsibilities": ["sql_policy", "ephemeral_postgres", "migration_test", "rollback_test", "compatibility_test", "schema_evidence"],
+      "may_publish_release": false,
+      "may_deploy": false,
+      "may_use_self_hosted": false
+    }
+  },
+  "profiles": {
+    "backend-service": ["quality", "test", "container", "db_migration"],
+    "container-service": ["quality", "test", "container"],
+    "native-library": ["quality", "test"],
+    "firmware": ["quality", "test"]
+  }
+}
