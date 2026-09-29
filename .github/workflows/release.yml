@@ -1,0 +1,203 @@
+name: Progressive Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "plan renders the current step; scenario walks every step with synthetic analysis and is not production evidence"
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - scenario
+      strategy:
+        description: "canary and blue_green are routing; multi_cluster is exact cluster membership"
+        required: true
+        default: multi_cluster
+        type: choice
+        options:
+          - canary
+          - blue_green
+          - multi_cluster
+      environment:
+        description: "Promotion environment whose current pointer digest is the only legal candidate"
+        required: true
+        default: production
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+      service:
+        description: "DNS-1123 service name"
+        required: true
+        type: string
+      artifact_name:
+        description: "Exact Artifact Contract v2 artifact name"
+        required: true
+        type: string
+      bundle_sha256:
+        description: "Candidate bundle SHA256; must equal the current environment pointer"
+        required: true
+        type: string
+      source_sha:
+        description: "Source commit recorded on the artifact"
+        required: true
+        type: string
+      source_run_id:
+        description: "Trusted build run id recorded on the artifact"
+        required: true
+        type: string
+      release_tag:
+        description: "artifact-v2 archive tag"
+        required: true
+        type: string
+      baseline_digest:
+        description: "Digest currently serving traffic; must differ from the candidate"
+        required: true
+        type: string
+      accept_excluded:
+        description: "Acknowledge same-environment clusters that cannot take this traffic strategy"
+        required: true
+        default: false
+        type: boolean
+      allow_clusters:
+        description: "Optional comma-separated cluster ids; every id must be selected"
+        required: false
+        default: ""
+        type: string
+      deny_clusters:
+        description: "Optional comma-separated cluster ids to remove"
+        required: false
+        default: ""
+        type: string
+      active_slot:
+        description: "Blue-green slot that is serving the baseline"
+        required: true
+        default: blue
+        type: choice
+        options:
+          - blue
+          - green
+
+permissions:
+  contents: read
+  deployments: read
+
+concurrency:
+  group: release-${{ inputs.environment }}-${{ inputs.service }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Plan ${{ inputs.strategy }} for ${{ inputs.service }}
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout platform verifier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate progressive release policy
+        run: python3 scripts/ci/release_strategy.py validate
+
+      - name: Read current environment pointer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/deployment_pointer.py current \
+            --repository "$GITHUB_REPOSITORY" \
+            --environment "$ENVIRONMENT" > pointer.json
+
+      - name: Require candidate to match the environment pointer
+        shell: bash
+        env:
+          BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/release_strategy.py check-pointer \
+            --pointer-json pointer.json \
+            --bundle-sha256 "$BUNDLE_SHA256" \
+            --environment "$ENVIRONMENT"
+
+      - name: Plan or walk the release
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          STRATEGY: ${{ inputs.strategy }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          SERVICE: ${{ inputs.service }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          BASELINE_DIGEST: ${{ inputs.baseline_digest }}
+          ACCEPT_EXCLUDED: ${{ inputs.accept_excluded }}
+          ALLOW_CLUSTERS: ${{ inputs.allow_clusters }}
+          DENY_CLUSTERS: ${{ inputs.deny_clusters }}
+          ACTIVE_SLOT: ${{ inputs.active_slot }}
+        run: |
+          set -euo pipefail
+          args=(
+            --strategy "$STRATEGY"
+            --environment "$ENVIRONMENT"
+            --service "$SERVICE"
+            --artifact-name "$ARTIFACT_NAME"
+            --bundle-sha256 "$BUNDLE_SHA256"
+            --source-sha "$SOURCE_SHA"
+            --source-run-id "$SOURCE_RUN_ID"
+            --release-tag "$RELEASE_TAG"
+            --baseline-digest "$BASELINE_DIGEST"
+            --environment-pointer-digest "$BUNDLE_SHA256"
+            --allow "$ALLOW_CLUSTERS"
+            --deny "$DENY_CLUSTERS"
+            --active-slot "$ACTIVE_SLOT"
+            --out release-state.json
+            --out-dir rendered
+          )
+          if [[ "$ACCEPT_EXCLUDED" == "true" ]]; then
+            args+=(--accept-excluded)
+          fi
+          if [[ "$ACTION" == "scenario" ]]; then
+            echo "synthetic analysis is not production evidence" | tee -a "$GITHUB_STEP_SUMMARY"
+            python3 scripts/ci/release_strategy.py scenario "${args[@]}"
+          else
+            python3 scripts/ci/release_strategy.py plan "${args[@]}"
+          fi
+
+      - name: Publish release decision
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          state = json.load(open("release-state.json", encoding="utf-8"))
+          print("# Progressive release decision")
+          print("")
+          print(f"- strategy: `{state['strategy']}`")
+          print(f"- method: `{state['method']}`")
+          print(f"- tool: `{state['tool']}`")
+          print(f"- status: `{state['status']}`")
+          print(f"- candidate: `{state['candidate_digest']}`")
+          print("")
+          print("This job writes the desired state. It does not apply manifests to a live cluster.")
+          PY
+
+      - name: Upload release state and manifests
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: progressive-release-${{ github.run_id }}
+          path: |
+            release-state.json
+            rendered/
+          if-no-files-found: error
+          retention-days: 30

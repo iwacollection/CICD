@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "description": "灰度走路由权重，蓝绿走路由原子切换，多集群精准走钉死的集群名单。流量策略不能扩大集群名单。",
+  "artifact_contract": 2,
+  "namespace": "apps",
+  "gateway_name": "platform-gateway",
+  "service_port": 80,
+  "preview_header": "x-release-preview",
+  "preview_header_value": "true",
+  "strategies": {
+    "canary": {
+      "kind": "traffic",
+      "method": "routing",
+      "routing": {
+        "api": "gateway.networking.k8s.io/v1",
+        "kind": "HTTPRoute",
+        "backends": ["stable", "canary"]
+      },
+      "required_cluster_labels": {
+        "traffic": "gateway"
+      },
+      "steps": [
+        {"name": "1pct", "canary_weight": 1, "analysis": ["smoke", "error_rate", "latency_p95"]},
+        {"name": "5pct", "canary_weight": 5, "analysis": ["error_rate", "latency_p95"]},
+        {"name": "25pct", "canary_weight": 25, "analysis": ["error_rate", "latency_p95"]},
+        {"name": "50pct", "canary_weight": 50, "analysis": ["error_rate", "latency_p95"]},
+        {"name": "100pct", "canary_weight": 100, "analysis": ["error_rate"]}
+      ],
+      "analysis_thresholds": {
+        "error_rate_max": 0.01,
+        "latency_p95_max_ms": 300,
+        "min_requests": 50
+      },
+      "abort": "shift_all_weight_to_baseline"
+    },
+    "blue_green": {
+      "kind": "traffic",
+      "method": "routing",
+      "routing": {
+        "api": "gateway.networking.k8s.io/v1",
+        "kind": "HTTPRoute",
+        "switch": "atomic",
+        "slots": ["blue", "green"]
+      },
+      "required_cluster_labels": {
+        "traffic": "gateway"
+      },
+      "steps": [
+        {"name": "deploy_inactive", "traffic": "hold", "analysis": ["readiness"]},
+        {"name": "preview", "traffic": "preview", "analysis": ["smoke"]},
+        {"name": "cutover", "traffic": "switch", "analysis": ["error_rate", "latency_p95"]},
+        {"name": "confirm", "traffic": "active", "analysis": []}
+      ],
+      "analysis_thresholds": {
+        "error_rate_max": 0.01,
+        "latency_p95_max_ms": 300,
+        "min_requests": 50
+      },
+      "abort": "restore_baseline_slot"
+    },
+    "multi_cluster": {
+      "kind": "placement",
+      "method": "cluster_management",
+      "cluster_management": {
+        "placement_api": "cluster.open-cluster-management.io/v1beta1",
+        "placement_kind": "Placement",
+        "decision_kind": "PlacementDecision",
+        "delivery_api": "argoproj.io/v1alpha1",
+        "delivery_kind": "ApplicationSet"
+      },
+      "deny_unmatched": true,
+      "pin_exact_cluster_ids": true,
+      "waves": [
+        {
+          "name": "canary-clusters",
+          "selector": {"environment": "production", "role": "canary"},
+          "strategy": "canary"
+        },
+        {
+          "name": "cn-east",
+          "selector": {"environment": "production", "region": "cn-east"},
+          "strategy": "blue_green"
+        },
+        {
+          "name": "production-gateway",
+          "selector": {"environment": "production", "traffic": "gateway"},
+          "strategy": "blue_green"
+        }
+      ]
+    }
+  }
+}

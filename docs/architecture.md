@@ -168,7 +168,13 @@ examples/              可跑通的最小示例
  docs/                  架构、缓存、制品、安全、排障文档
 ```
 
-## 9. 后续生产化扩展
+## 10. 环境内发布策略
+
+晋级把同一个 digest 授权到 `dev`、`staging` 或 `production`。授权之后，流量怎么切、集群名单怎么定，由 [灰度、蓝绿与多集群精准发布](progressive-delivery.md) 决定。
+
+灰度和平绿调整的是 Gateway API HTTPRoute。多集群精准部署调整的是 Open Cluster Management PlacementDecision 和 Argo CD ApplicationSet 里的集群 ID。路由对象不能把制品送到名单之外的集群。
+
+## 11. 后续生产化扩展
 
 本仓库预留以下方向：
 

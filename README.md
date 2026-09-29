@@ -169,6 +169,7 @@ rollback to historical production digest
 | 长期制品归档 | ✅ | 当前使用 GitHub Releases |
 | `dev -> staging -> production` | ✅ | exact artifact identity 强制晋级 |
 | Production Rollback | ✅ | `A -> B -> A`，旧版本不重新构建 |
+| 灰度 / 蓝绿 / 多集群发布控制面 | ✅ | 同一 digest 上做路由或精确集群名单；见下文 |
 
 ### 4.2 平台已实现
 
@@ -183,6 +184,9 @@ rollback to historical production digest
 | HIL Lease | ✅ 已实现 | 真机独占租约与释放语义 |
 | Vendor Adapter | ✅ 已实现 | RK/Qcom/MTK build + HIL 适配层 |
 | RK 物理接入准备 | ✅ Ready | x86_64 build host → arm64 target |
+| 灰度发布 | ✅ 控制面 | Gateway API HTTPRoute 权重，逐步 1→5→25→50→100 |
+| 蓝绿发布 | ✅ 控制面 | HTTPRoute 原子切换，预览流量不进入生产权重 |
+| 多集群精准部署 | ✅ 控制面 | PlacementDecision + ApplicationSet 钉死集群 ID |
 
 ### 4.3 仍需真实外部资源
 
@@ -194,6 +198,7 @@ rollback to historical production digest
 | 企业依赖代理 | ⏳ | Nexus/Artifactory 架构已定义，未实际部署 |
 | 外部长期 Artifact Repository | ⏳ | 当前 GitHub Releases 已可用，规模化后再接 S3/MinIO/Nexus/Artifactory |
 | 生产厂商签名 KMS/HSM | ⏳ | 需要真实企业签名基础设施 |
+| 真实集群 apply | ⏸ | 控制面已产出钉死的名单和路由；下发需要外部 OCM / Argo / Gateway，仓库不把本地推演当成已上线 |
 
 ---
 
@@ -320,6 +325,7 @@ CICD/
 │   ├── toolchain-images.yml               # Toolchain Supply Chain
 │   ├── archive-artifacts.yml              # 长期归档
 │   ├── promote.yml                        # dev/staging/production
+│   ├── release.yml                        # 灰度 / 蓝绿 / 多集群期望状态
 │   ├── rollback.yml                       # 历史 digest rollback
 │   ├── platform-health.yml                # Platform SLO
 │   ├── repository-governance.yml          # Ruleset drift
@@ -335,6 +341,8 @@ CICD/
 │   ├── hardware-rollout.json              # SoC rollout policy
 │   ├── supply-chain-policy.json
 │   ├── promotion-policy.json
+│   ├── release-strategies.json            # 灰度 / 蓝绿 / 多集群波次
+│   ├── clusters.json                      # 集群目录与流量能力
 │   ├── platform-slo.json
 │   └── repository-governance-policy.json
 │
@@ -414,6 +422,24 @@ Rollback 只接受同环境历史 Deployment ID，并创建新的 rollback point
 
 详见：**[制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)**
 
+环境指针只表示“这个 digest 可以出现在该环境”。指针本身不决定流量百分比，也不决定哪些集群收到新版本。这两件事由发布策略控制面完成，而且仍然使用同一份已晋级制品，不重新构建。
+
+### 9.1 灰度、蓝绿、多集群分别用什么方法
+
+| 问题 | 方法 | 本仓库钉死的工具 |
+| --- | --- | --- |
+| 同一服务的请求如何在旧版本和新版本之间按比例分配 | 路由 | Gateway API `HTTPRoute` 后端权重 |
+| 新旧版本如何各占一个槽位，验证后一次切完生产流量 | 路由，而且必须是原子切换 | Gateway API `HTTPRoute`，预览走独立 header |
+| 这份制品允许进入哪些集群 | 集群管理 | OCM `PlacementDecision` 精确名单 + Argo CD `ApplicationSet` list generator |
+
+灰度如果只用“先发一个集群”，得到的是集群波次，不是 1% 请求。蓝绿如果用权重从 0 爬到 100，中间态就不再是蓝绿。多集群如果只用一个全局 Ingress 权重，未选中的集群仍会接到新 digest。所以路由和集群管理都要，而且路由不能扩大集群名单。
+
+参考目录里的 `prod-edge-offline` 没有 Gateway 流量能力。对 production 做灰度时，计划会失败，直到操作者显式确认这些集群被排除；排除之后它们的 digest 保持基线。多集群波次则按选择器把集群分到最早的一波，后面的波次不再重复领取，没有命中的集群完全不出现在渲染结果里。
+
+`release.yml` 先读取该环境当前的 Deployment pointer，候选 digest 不一致就停止。`scenario` 会用合成分析证据走完所有步骤，只用来渲染最终期望状态；**synthetic analysis is not production evidence**。真实推进用 `advance`，并提交错误率和延迟证据。这个 Job 没有集群凭据，也不会写入 Deployment。
+
+操作手册：**[灰度、蓝绿与多集群精准发布](docs/progressive-delivery.md)**
+
 ---
 
 ## 10. `main` 治理
@@ -471,7 +497,8 @@ Rerun Rate
 4. [Artifact Contract v2](docs/artifact-contract-v2.md)
 5. [供应链策略](docs/supply-chain-policy.md)
 6. [制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)
-7. [生产生命周期真实验收记录](docs/production-verification.md)
+7. [灰度、蓝绿与多集群精准发布](docs/progressive-delivery.md)
+8. [生产生命周期真实验收记录](docs/production-verification.md)
 
 ### RK / 高通 / 联发科主线
 
@@ -481,6 +508,7 @@ Rerun Rate
 4. [Runner 与供应链安全](docs/runner-security-and-supply-chain.md)
 5. [Artifact Contract v2](docs/artifact-contract-v2.md)
 6. [制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)
+7. [灰度、蓝绿与多集群精准发布](docs/progressive-delivery.md)
 
 ---
 

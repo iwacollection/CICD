@@ -29,6 +29,7 @@ Artifact Contract v2
 → Attestation
 → Archive
 → dev → staging → production
+→ 灰度 / 蓝绿 / 多集群精准发布
 → Rollback
 ```
 
@@ -48,7 +49,8 @@ Artifact Contract v2
 4. [Artifact Contract v2](artifact-contract-v2.md)
 5. [供应链策略](supply-chain-policy.md)
 6. [制品、晋级与回滚](artifacts-promotion-and-rollback.md)
-7. [生产生命周期真实验收记录](production-verification.md)
+7. [灰度、蓝绿与多集群精准发布](progressive-delivery.md)
+8. [生产生命周期真实验收记录](production-verification.md)
 
 ### 如果你主要看 RK / 高通 / 联发科固件 CI
 
@@ -60,12 +62,13 @@ Artifact Contract v2
 4. [Runner 与供应链安全](runner-security-and-supply-chain.md)
 5. [Artifact Contract v2](artifact-contract-v2.md)
 6. [制品、晋级与回滚](artifacts-promotion-and-rollback.md)
+7. [灰度、蓝绿与多集群精准发布](progressive-delivery.md)
 
 ---
 
 ## 2. 平台快速主线
 
-不区分业务类型时，先理解这 8 个核心概念：
+不区分业务类型时，先理解这 9 个核心概念：
 
 1. [总体架构](architecture.md)
    - 配置面、执行面、制品面、治理面；
@@ -96,11 +99,16 @@ Artifact Contract v2
    - `dev -> staging -> production`；
    - rollback 恢复历史 digest，不重新构建。
 
-7. [生产生命周期真实验收记录](production-verification.md)
+7. [灰度、蓝绿与多集群精准发布](progressive-delivery.md)
+   - 灰度和平绿用 HTTPRoute；
+   - 多集群用 PlacementDecision 与 ApplicationSet 钉死集群 ID；
+   - 候选 digest 必须已经是环境指针。
+
+8. [生产生命周期真实验收记录](production-verification.md)
    - 2026-08-30 实际跑过的 Build / Archive / Promotion / Rollback；
    - v1 -> v2 -> rollback v1 的真实证据。
 
-8. [平台维护手册](platform-maintenance.md)
+9. [平台维护手册](platform-maintenance.md)
    - 稳定以后什么能改；
    - 哪类变更必须重新做 lifecycle drill。
 
@@ -294,6 +302,17 @@ MediaTek / MTK          ⏸ planned
 - OIDC / KMS / HSM；
 - 依赖混淆与签名。
 
+## [灰度、蓝绿与多集群精准发布](progressive-delivery.md)
+
+重点：
+
+- 灰度是路由问题：Gateway API HTTPRoute 权重；
+- 蓝绿是路由问题：生产流量一次切完，预览不进入生产权重；
+- 多集群精准是集群管理问题：PlacementDecision 与 ApplicationSet 钉死集群 ID；
+- 路由清单不能扩大集群名单；
+- 候选 digest 必须等于该环境当前指针；
+- 真实集群 apply 仍由外部控制器执行。
+
 ## [制品、晋级与回滚](artifacts-promotion-and-rollback.md)
 
 重点：
@@ -413,6 +432,8 @@ Hardware Profile          -> ci/hardware-profiles.json
 Hardware Rollout          -> ci/hardware-rollout.json
 Supply-chain Policy       -> ci/supply-chain-policy.json
 Promotion Policy          -> ci/promotion-policy.json
+Release Strategy          -> ci/release-strategies.json
+Cluster Inventory         -> ci/clusters.json
 Platform SLO              -> ci/platform-slo.json
 Repository Governance     -> ci/repository-governance-policy.json
 
@@ -426,6 +447,7 @@ Artifact v2 打包          -> scripts/ci/package_artifact.py
 Artifact 校验             -> scripts/ci/verify_artifact.py
 长期归档                  -> scripts/ci/artifact_archive.py
 Promotion Path            -> scripts/ci/promotion_policy.py
+Progressive Release       -> scripts/ci/release_strategy.py
 Environment Pointer       -> scripts/ci/deployment_pointer.py
 Supply-chain Gate         -> scripts/ci/supply_chain_policy.py
 Reproducibility           -> scripts/ci/reproducibility_check.py
@@ -446,6 +468,7 @@ Workflow：
 Toolchain Supply Chain    -> .github/workflows/toolchain-images.yml
 长期归档                  -> .github/workflows/archive-artifacts.yml
 Promotion                 -> .github/workflows/promote.yml
+Progressive Release       -> .github/workflows/release.yml
 Rollback                  -> .github/workflows/rollback.yml
 Platform Health           -> .github/workflows/platform-health.yml
 Governance Audit          -> .github/workflows/repository-governance.yml

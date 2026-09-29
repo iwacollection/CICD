@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "description": "参考集群目录。这些记录是发布控制面的成员清单，不代表仓库已经连上真实集群。",
+  "clusters": [
+    {
+      "id": "dev-cn-east-a",
+      "environment": "dev",
+      "region": "cn-east",
+      "role": "stable",
+      "labels": {
+        "traffic": "gateway",
+        "tier": "app"
+      }
+    },
+    {
+      "id": "staging-cn-east-a",
+      "environment": "staging",
+      "region": "cn-east",
+      "role": "stable",
+      "labels": {
+        "traffic": "gateway",
+        "tier": "app"
+      }
+    },
+    {
+      "id": "prod-cn-east-canary",
+      "environment": "production",
+      "region": "cn-east",
+      "role": "canary",
+      "labels": {
+        "traffic": "gateway",
+        "tier": "app"
+      }
+    },
+    {
+      "id": "prod-cn-east-a",
+      "environment": "production",
+      "region": "cn-east",
+      "role": "stable",
+      "labels": {
+        "traffic": "gateway",
+        "tier": "app"
+      }
+    },
+    {
+      "id": "prod-cn-east-b",
+      "environment": "production",
+      "region": "cn-east",
+      "role": "stable",
+      "labels": {
+        "traffic": "gateway",
+        "tier": "app"
+      }
+    },
+    {
+      "id": "prod-cn-north-a",
+      "environment": "production",
+      "region": "cn-north",
+      "role": "stable",
+      "labels": {
+        "traffic": "gateway",
+        "tier": "app"
+      }
+    },
+    {
+      "id": "prod-edge-offline",
+      "environment": "production",
+      "region": "cn-edge",
+      "role": "stable",
+      "labels": {
+        "traffic": "none",
+        "tier": "edge"
+      }
+    }
+  ]
+}

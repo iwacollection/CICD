@@ -217,7 +217,27 @@ make -j4
 
 关键制品必须已经落到独立制品仓库。控制面恢复后可以继续编排，但历史生产包不能跟着 Jenkins Workspace 一起丢。
 
-## 15. 事故处理模板
+## 15. 灰度或蓝绿没有按预期切流
+
+先看发布状态，不要直接改生产 Ingress。
+
+```text
+release-state.json 的 status
+→ 当前 wave 的 step_name / canary_weight / active_slot
+→ 分析证据是被拒绝，还是步骤根本没 advance
+→ ClusterPin.clusterIds 里有没有目标集群
+→ HTTPRoute 是否只渲染了这些集群
+```
+
+常见原因：
+
+- 候选 digest 和环境当前 pointer 不一致。先晋级，再发布。
+- 同环境里有 `traffic=none` 的集群，灰度计划会要求 `accept_excluded`。没有确认就失败，是为了避免假装全环境都切了流量。
+- `scenario` 的分析证据是合成的。synthetic analysis is not production evidence。
+- 多集群波次还停在前面的 canary 集群，后面的区域不会提前出现在渲染结果里。
+- 已 confirm 的蓝绿不能用发布 abort，要走同环境 rollback。
+
+## 16. 事故处理模板
 
 ```text
 现象
