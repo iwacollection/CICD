@@ -4,8 +4,15 @@
 Environment canary and blue-green change traffic on one chosen cluster set
 (Gateway API HTTPRoute). Cross-region canary (`multi_cluster_canary`) keeps
 that same weight schedule, but opens one region at a time. Clusters in the
-open region share the step weight. Later regions stay at 0% canary until
-they open, and they stay on canary weights instead of switching to blue-green.
+open region share the step weight. Later regions stay at the baseline until
+the previous region confirms, and they stay on canary weights.
+
+The weight ladder stays 1, 5, 25, 50, 100. The 100 percent step leaves all
+traffic on the canary backend and keeps the stable digest at the baseline,
+with the wave still in progress. The following confirm step, checked with
+error_rate, promotes the candidate onto the stable backend, clears the
+canary digest, and completes the wave. Abort before confirm returns started
+waves to the baseline.
 
 Cross-region blue-green (`multi_cluster_blue_green`) uses the same region
 order and exact cluster pin, but never ramps weights. Clusters in the open
@@ -67,7 +74,7 @@ METHOD_DECISION = {
         "tool": "Gateway API HTTPRoute",
     },
     "multi_cluster_canary": {
-        "question": "多个区域里的多个集群如何按同一套灰度权重推进，后开区域在打开前保持 0%",
+        "question": "多个区域里的多个集群如何按同一套灰度权重推进，后开区域要等前一区域 confirm 才打开",
         "method": "cluster_management",
         "tool": "PlacementDecision + ApplicationSet + HTTPRoute",
     },
@@ -351,6 +358,8 @@ def _validate_canary(canary: dict[str, Any]) -> list[str]:
     steps = canary.get("steps")
     if not isinstance(steps, list) or not steps:
         return errors + ["strategies.canary.steps must be a non-empty array"]
+    if not isinstance(steps[-1], dict) or steps[-1].get("name") != "confirm":
+        errors.append("the last canary step must be confirm")
     weights: list[int] = []
     names: set[str] = set()
     for index, step in enumerate(steps):
@@ -358,7 +367,9 @@ def _validate_canary(canary: dict[str, Any]) -> list[str]:
         if not isinstance(step, dict):
             errors.append(f"{prefix} must be an object")
             continue
-        errors.extend(_reject_unknown(step, {"name", "canary_weight", "analysis"}, prefix))
+        is_confirm = step.get("name") == "confirm"
+        allowed = {"name", "analysis"} if is_confirm else {"name", "canary_weight", "analysis"}
+        errors.extend(_reject_unknown(step, allowed, prefix))
         name_error = _dns1123(step.get("name"), f"{prefix}.name")
         if name_error:
             errors.append(name_error)
@@ -366,16 +377,23 @@ def _validate_canary(canary: dict[str, Any]) -> list[str]:
             errors.append(f"duplicate canary step name: {step['name']}")
         else:
             names.add(step["name"])
+        if is_confirm:
+            if index != len(steps) - 1:
+                errors.append(f"{prefix} confirm must be the last canary step")
+            if step.get("analysis") != ["error_rate"]:
+                errors.append(f"{prefix}.analysis must be error_rate")
+            errors.extend(_validate_analysis_list(step.get("analysis"), f"{prefix}.analysis", allow_empty=False))
+            continue
         weight = step.get("canary_weight")
         if isinstance(weight, bool) or not isinstance(weight, int) or not 1 <= weight <= 100:
             errors.append(f"{prefix}.canary_weight must be an integer from 1 to 100")
         else:
             weights.append(weight)
         errors.extend(_validate_analysis_list(step.get("analysis"), f"{prefix}.analysis", allow_empty=False))
-    if weights and weights != sorted(set(weights)):
+    if weights != sorted(set(weights)):
         errors.append("canary weights must be strictly increasing")
-    if weights and weights[-1] != 100:
-        errors.append("the last canary step must send 100 percent")
+    if not weights or weights[-1] != 100:
+        errors.append("the canary weight before confirm must send 100 percent")
     return errors
 
 
@@ -1018,17 +1036,18 @@ def _apply_next_step(wave: dict[str, Any], evidence: dict[str, Any], strategies:
     wave["step_name"] = step["name"]
     wave["status"] = "in_progress"
     if wave["strategy"] == "canary":
-        weight = step["canary_weight"]
-        wave["canary_weight"] = weight
-        wave["stable_weight"] = 100 - weight
-        wave["canary_digest"] = wave["candidate_digest"]
-        wave["stable_digest"] = wave["baseline_digest"]
-        if next_index == len(steps) - 1:
+        if step["name"] == "confirm":
             wave["stable_digest"] = wave["candidate_digest"]
             wave["stable_weight"] = 100
             wave["canary_weight"] = 0
             wave["canary_digest"] = ""
             wave["status"] = "completed"
+            return
+        weight = step["canary_weight"]
+        wave["canary_weight"] = weight
+        wave["stable_weight"] = 100 - weight
+        wave["canary_digest"] = wave["candidate_digest"]
+        wave["stable_digest"] = wave["baseline_digest"]
         return
 
     traffic = step["traffic"]

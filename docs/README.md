@@ -100,7 +100,7 @@ Artifact Contract v2
    - rollback 恢复历史 digest，不重新构建。
 
 7. [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md)
-   - 多集群灰度是 `multi_cluster_canary`：cn-east 然后 cn-north，区域内同权，后开区域打开前为 0%；
+   - 多集群灰度是 `multi_cluster_canary`：cn-east 然后 cn-north，区域内同权，后开区域要等前一区域 confirm 才打开；
    - 多集群蓝绿是 `multi_cluster_blue_green`：同一区域顺序，区域内共用槽位，预览 header 不改变生产权重；
    - 名单用 PlacementDecision 与 ApplicationSet 钉死，流量用 HTTPRoute；同一状态再渲染 Istio VirtualService；
    - 候选 digest 必须已经是环境指针。
@@ -310,7 +310,7 @@ MediaTek / MTK          ⏸ planned
 重点：
 
 - 先选方法：环境内 `canary` / `blue_green`，或跨区域 `multi_cluster_canary` / `multi_cluster_blue_green`；
-- 多集群灰度是 `multi_cluster_canary`：cn-east 然后 cn-north，区域内同权，后开区域打开前为 0% 且不渲染，打开后仍然是 canary；
+- 多集群灰度是 `multi_cluster_canary`：cn-east 然后 cn-north，区域内同权，100% 留在 canary 后端直到 `confirm`，后开区域要等前一区域 confirm 才打开且打开前不渲染，打开后仍然是 canary；
 - 多集群蓝绿是 `multi_cluster_blue_green`：同一区域顺序，区域内共用槽位，预览 header 不改变生产权重，切换不是权重爬坡；
 - 集群名单由 PlacementDecision 与 ApplicationSet list generator 钉死，HTTPRoute 和 VirtualService 不能超出名单；
 - Istio VirtualService 从同一份状态渲染，不是第二份策略；

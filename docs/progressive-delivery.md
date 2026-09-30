@@ -173,7 +173,7 @@ requests >= 50
 | `smoke` | 值不是 `pass` |
 | `readiness` | 值不是 `pass` |
 | `error_rate` 或 `latency_p95` | `requests` 缺失、不是整数、或小于 50；对应指标缺失或超过阈值 |
-| 无（仅 `confirm`） | 不要求分析。JSON 对象 `{}` 可以通过 |
+| 无（仅蓝绿 `confirm`） | 不要求分析。JSON 对象 `{}` 可以通过 |
 
 `requests` 必须是整数。布尔值在 Python 里是 `int` 的子类，引擎仍把它当成缺证据，不会当成通过。分析根节点如果不是 JSON 对象，也会失败。
 
@@ -196,7 +196,8 @@ analysis latency_p95 exceeds threshold
 | --- | --- |
 | `1pct` | `smoke=pass`，以及 `error_rate`、`latency_p95_ms`、`requests` |
 | `5pct`、`25pct`、`50pct` | `error_rate`、`latency_p95_ms`、`requests`。不看 smoke |
-| `100pct` | `error_rate` 和 `requests`。不看延迟，也不看 smoke |
+| `100pct` | `error_rate` 和 `requests`。不看延迟，也不看 smoke。通过后流量留在 canary 后端 |
+| `confirm` | `error_rate` 和 `requests`。通过后才把候选写到 stable |
 
 蓝绿每一步：
 
@@ -207,7 +208,7 @@ analysis latency_p95 exceeds threshold
 | `cutover` | `error_rate`、`latency_p95_ms`、`requests` |
 | `confirm` | `{}` |
 
-不能跳步。`advance` 每次只进入当前区域的下一步。当前区域的最后一步成功后，引擎在同一次 advance 里打开下一个未开始的区域。后开区域打开时不消耗分析。
+不能跳步。`advance` 每次只进入当前区域的下一步。灰度的 `100pct` 只把 canary 权重放到 100，状态保持 `in_progress`，不会打开下一区域。当前区域的 `confirm` 成功后，引擎在同一次 advance 里打开下一个未开始的区域。后开区域打开时不消耗分析。蓝绿的最后一步也叫 `confirm`，它不要求分析，行为见第 8 节。
 
 `scenario` 子命令会自行构造一份全通过的证据，把状态机走到 `completed`，用来检查最终期望状态。它在 workflow 摘要里对应的句子是：
 
@@ -224,24 +225,29 @@ synthetic analysis is not production evidence
 后端只有两个：
 
 ```text
-<service>-stable   基线 digest，直到最后一步收口
-<service>-canary   候选 digest，收口后清空
+<service>-stable   基线 digest，直到 confirm 才换成候选
+<service>-canary   候选 digest，confirm 之后清空
 ```
 
 策略文件里的权重：
 
-| 步骤 | 配置的 canary 权重 | stable 权重 | 进入这一步前要通过的分析 |
+| 步骤 | 读到的 canary 权重 | stable 权重 | 进入这一步前要通过的分析 |
 | --- | --- | --- | --- |
 | 打开波次，还没有 advance | 0 | 100 | 无。候选已经装到 canary 后端，但权重是 0 |
 | `1pct` | 1 | 99 | smoke、error_rate、latency_p95 |
 | `5pct` | 5 | 95 | error_rate、latency_p95 |
 | `25pct` | 25 | 75 | error_rate、latency_p95 |
 | `50pct` | 50 | 50 | error_rate、latency_p95 |
-| `100pct` | 配置值是 100，成功后立刻收口 | 100 在 stable | error_rate |
+| `100pct` | 100 | 0 | error_rate。流量全在 canary 后端，stable digest 仍是基线，状态保持 `in_progress` |
+| `confirm` | 0 | 100 | error_rate。候选写到 stable，canary digest 清空，这一波 `completed` |
 
-`100pct` 成功之后，同一次状态更新把候选 digest 写到 stable 后端，canary 权重回到 0，canary digest 清空。因此成功之后读到的 HTTPRoute 是 stable 权重 100、后端 digest 为候选，不是一条长期挂着的 100% canary 后端。这样下一次发布仍有明确的基线。
+`100pct` 成功之后，HTTPRoute 和 VirtualService 都是 canary 权重 100、stable 权重 0。候选 digest 仍在 canary 后端，stable digest 保持基线。发布和这一波的状态都是 `in_progress`。这时 `abort` 把流量收回基线，stable 权重回到 100，并清空 canary digest。
 
-分析失败不改变权重。`abort` 把已开始的灰度收成 stable 权重 100、基线 digest，canary 不再接流量。`completed` 之后不能 abort，要走环境 rollback，见第 11 节。
+下一次 `advance` 的步骤名是 `confirm`，分析仍是 `error_rate`。通过之后，候选 digest 写到 stable 后端，canary 权重回到 0，canary digest 清空，这一波变为 `completed`。环境内灰度这时整个发布也是 `completed`。此后 `abort` 被拒绝，句子是 `completed release cannot be aborted; use environment rollback`。
+
+权重梯子仍是 1、5、25、50、100。`confirm` 把已经承接全部流量的候选收成下一次发布的基线。这一步没有蓝绿槽位。
+
+分析失败不改变权重。`100pct` 之前的 `abort`，以及停在 `100pct` 时的 `abort`，都把已开始的灰度收成 stable 权重 100、基线 digest。`confirm` 之后要走环境 rollback，见第 11 节。
 
 production 上的环境内灰度必须看到排除列表。确认边缘集群保持基线后，cn-east 和 cn-north 的全部 gateway 集群使用同一步权重：
 
@@ -279,9 +285,9 @@ traffic_strategy = canary
 abort = shift_all_weight_to_baseline
 ```
 
-权重仍是 1、5、25、50、100。分析阈值和失败行为与第 5、6 节相同。分析失败不改变任何区域的权重。后开区域仍然按 canary 权重推进，不会改成蓝绿。
+权重仍是 1、5、25、50、100，每区域最后多一步 `confirm`。分析阈值和失败行为与第 5、6 节相同。分析失败不改变任何区域的权重。后开区域仍然按 canary 权重推进，不会改成蓝绿。
 
-展开方式。下表是每一次成功 advance 之后读到的状态，不是策略文件里那个随即被收口的配置值 100：
+展开方式。下表是每一次成功 advance 之后读到的状态：
 
 | 时刻 | cn-east 三个集群 | cn-north |
 | --- | --- | --- |
@@ -290,15 +296,17 @@ abort = shift_all_weight_to_baseline
 | 华东 `5pct` | 三个集群都是 5 / 95 | 仍未打开 |
 | 华东 `25pct` | 三个集群都是 25 / 75 | 仍未打开 |
 | 华东 `50pct` | 三个集群都是 50 / 50 | 仍未打开 |
-| 华东 `100pct` 这一次 advance | stable 收成候选，canary 权重回到 0 | 同一次 advance 才打开，canary 权重 0，策略仍是 canary |
+| 华东 `100pct` | canary 权重 100、stable 权重 0，stable digest 仍是基线，状态 `in_progress` | 仍未打开 |
+| 华东 `confirm` | stable 收成候选，canary 权重回到 0，这一波 `completed` | 同一次 advance 才打开，canary 权重 0，策略仍是 canary |
 | 华北 `1pct` | stable 保持候选 | 1 / 99 |
 | 华北 `5pct` | stable 保持候选 | 5 / 95 |
 | 华北 `25pct`、`50pct` | stable 保持候选 | 分别是 25 / 75、50 / 50 |
-| 华北 `100pct` | stable 保持候选 | stable 收成候选，发布 `completed` |
+| 华北 `100pct` | stable 保持候选 | canary 权重 100，stable digest 仍是基线，发布仍是 `in_progress` |
+| 华北 `confirm` | stable 保持候选 | stable 收成候选，发布 `completed` |
 
-同一区域内的集群永远使用这一步的同一个 canary 权重。不同区域在展开过程中可以处于不同权重：华东已经是候选稳定版本时，华北仍然可以停在 5%。从 `plan` 到 `completed` 一共 10 次成功的 advance：华东 5 次，华北 5 次。
+同一区域内的集群永远使用这一步的同一个 canary 权重。不同区域在展开过程中可以处于不同权重：华东已经 confirm、stable 是候选时，华北仍然可以停在 5%。华东停在 `100pct` 时华北不会打开。从 `plan` 到 `completed` 一共 12 次成功的 advance：华东 6 次，华北 6 次。
 
-`abort` 把每一个已经打开的区域收成 stable 权重 100、基线 digest。华东已经完成、华北停在 5% 时中止，两个区域都回到基线，不能留下“华东已经是新版本、华北失败了但华东继续接新流量”。未打开的区域本来就不在渲染结果里。`completed` 之后不能 abort。
+`abort` 把每一个已经打开的区域收成 stable 权重 100、基线 digest，并清空 canary digest。华东已经 confirm、华北停在 5% 时中止，两个区域都回到基线，不能留下“华东已经是新版本、华北失败了但华东继续接新流量”。华东还停在 `100pct`、华北未打开时中止，只把华东收回基线。未打开的区域本来就不在渲染结果里。整个发布 `completed` 之后不能 abort。
 
 进行中的渲染只包含已经打开的波次。华东还在 25% 时，华北的 Placement、ApplicationSet、HTTPRoute 和 VirtualService 都不存在。同一个 `--out-dir` 再次渲染时，这次没有写出的清单会被删掉，所以目录里也不会留下上一次的预览文件或尚未打开的区域。
 
@@ -470,8 +478,8 @@ VirtualService http[0].route
 多集群灰度进行中时，ApplicationSet 元素同时带着：
 
 ```text
-stableDigest = 基线（本区域尚未收口）或候选（本区域 100% 已收口）
-canaryDigest = 候选；收口后清空
+stableDigest = 基线（本区域尚未 confirm）或候选（本区域 confirm 之后）
+canaryDigest = 候选；confirm 后清空。100pct 时 canaryWeight 是 100，stableDigest 仍是基线
 stableWeight / canaryWeight = 当前区域的这一步
 ```
 
@@ -774,9 +782,11 @@ synthetic analysis is not production evidence
 
 `tests/test_progressive_delivery.py` 锁定这些行为：
 
-- 环境内灰度必须按 1、5、25、50、100 前进，分析失败不改变状态；
+- 环境内灰度必须按 1、5、25、50、100 前进，然后 `confirm`，分析失败不改变状态；
+- `100pct` 之后流量 100% 在 canary 后端，stable digest 仍是基线，状态保持 `in_progress`，这时 abort 回到基线；
+- `confirm` 通过 `error_rate` 后才把候选写到 stable，canary 权重回到 0，并完成这一波；
 - 环境内灰度把 cn-east 和 cn-north 放到同一步权重；
-- 灰度完成后 stable 后端是候选 digest，canary 权重为 0；
+- 灰度 `confirm` 之后 stable 后端是候选 digest，canary 权重为 0，再 abort 会被拒绝；
 - abort 把已开始的流量收回到基线；
 - dev 灰度不改变 staging 和 production；
 - 蓝绿预览时生产流量仍是基线，cutover 的生产权重是 100；
@@ -784,7 +794,7 @@ synthetic analysis is not production evidence
 - confirm 后旧槽仍保留基线 digest，且不能再 abort；
 - `multi_cluster_canary` 的区域顺序是 cn-east 然后 cn-north，两波都是 canary；
 - 华东三个 gateway 集群共享同一步权重，华北在打开前是 0% 且不出现在渲染结果里；
-- 华东收口后华北打开时权重为 0，下一步才是 1%，策略仍是 canary；
+- 华东 `100pct` 时华北仍未打开；华东 `confirm` 后华北才打开，打开时权重为 0，下一步才是 1%，策略仍是 canary；
 - 华东已是候选、华北停在 5% 时，两个区域权重不同；
 - 分析失败不改变已打开区域的权重；
 - abort 把每一个已打开区域回到基线，包括已经收口的华东；

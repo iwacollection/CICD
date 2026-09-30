@@ -77,8 +77,12 @@ class ProgressiveDeliveryTests(unittest.TestCase):
             ["blue_green", "blue_green"],
         )
         self.assertNotIn("multi_cluster", self.strategies["strategies"])
-        weights = [step["canary_weight"] for step in self.strategies["strategies"]["canary"]["steps"]]
+        steps = self.strategies["strategies"]["canary"]["steps"]
+        weights = [step["canary_weight"] for step in steps if "canary_weight" in step]
         self.assertEqual(weights, [1, 5, 25, 50, 100])
+        self.assertEqual([step["name"] for step in steps], ["1pct", "5pct", "25pct", "50pct", "100pct", "confirm"])
+        self.assertEqual(steps[-1]["analysis"], ["error_rate"])
+        self.assertNotIn("canary_weight", steps[-1])
 
     def test_policy_rejects_loose_cluster_selection(self) -> None:
         broken = copy.deepcopy(self.strategies)
@@ -166,6 +170,7 @@ class ProgressiveDeliveryTests(unittest.TestCase):
             "25pct",
             "50pct",
             "100pct",
+            "confirm",
         ])
         view = project_release(final, self.clusters)["prod-cn-east-canary"]
         self.assertEqual(view["serving_digests"], [CANDIDATE])
@@ -174,6 +179,80 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertEqual(project_release(final, self.clusters)["prod-edge-offline"]["serving_digests"], [BASELINE])
         with self.assertRaisesRegex(ValueError, "environment rollback"):
             abort_release(final)
+
+    def test_canary_100pct_stays_on_the_canary_backend_until_confirm(self) -> None:
+        state = self._plan("canary", accept_excluded=True)
+        for _ in range(5):
+            state = advance_release(state, self._pass(), self.strategies)
+        wave = state["waves"][0]
+        self.assertEqual(wave["step_name"], "100pct")
+        self.assertEqual(wave["status"], "in_progress")
+        self.assertEqual(state["status"], "in_progress")
+        self.assertEqual(wave["canary_weight"], 100)
+        self.assertEqual(wave["stable_weight"], 0)
+        self.assertEqual(wave["stable_digest"], BASELINE)
+        self.assertEqual(wave["canary_digest"], CANDIDATE)
+        view = project_release(state, self.clusters)["prod-cn-east-a"]
+        self.assertEqual(view["serving_digests"], [CANDIDATE])
+        self.assertEqual(view["stable_digest"], BASELINE)
+        self.assertEqual(view["canary_weight"], 100)
+        documents = render_documents(state, self.strategies, "operator")
+        route = next(
+            doc
+            for _, doc in documents
+            if doc["kind"] == "HTTPRoute" and doc["metadata"]["labels"]["cicd.platform/cluster-id"] == "prod-cn-east-a"
+        )
+        self.assertEqual(
+            route["spec"]["rules"][0]["backendRefs"],
+            [
+                {"name": "checkout-stable", "port": 80, "weight": 0},
+                {"name": "checkout-canary", "port": 80, "weight": 100},
+            ],
+        )
+        service = next(
+            doc
+            for _, doc in documents
+            if doc["kind"] == "VirtualService" and doc["metadata"]["annotations"]["cicd.platform/cluster"] == "prod-cn-east-a"
+        )
+        self.assertEqual(
+            [item["weight"] for item in service["spec"]["http"][0]["route"]],
+            [0, 100],
+        )
+        held = copy.deepcopy(state)
+        with self.assertRaisesRegex(ValueError, "error_rate exceeds"):
+            advance_release(state, {"error_rate": 0.5, "requests": 100}, self.strategies)
+        self.assertEqual(state, held)
+
+        aborted = abort_release(state)
+        after = project_release(aborted, self.clusters)["prod-cn-east-a"]
+        self.assertEqual(after["serving_digests"], [BASELINE])
+        self.assertEqual(after["stable_digest"], BASELINE)
+        self.assertEqual(after["canary_digest"], "")
+        self.assertEqual(after["canary_weight"], 0)
+        self.assertEqual(aborted["waves"][0]["canary_digest"], "")
+
+        confirmed = advance_release(state, self._pass(), self.strategies)
+        self.assertEqual(confirmed["status"], "completed")
+        self.assertEqual(confirmed["waves"][0]["step_name"], "confirm")
+        self.assertEqual(confirmed["waves"][0]["status"], "completed")
+        self.assertEqual(confirmed["waves"][0]["stable_digest"], CANDIDATE)
+        self.assertEqual(confirmed["waves"][0]["stable_weight"], 100)
+        self.assertEqual(confirmed["waves"][0]["canary_weight"], 0)
+        self.assertEqual(confirmed["waves"][0]["canary_digest"], "")
+        promoted = project_release(confirmed, self.clusters)["prod-cn-east-a"]
+        self.assertEqual(promoted["serving_digests"], [CANDIDATE])
+        self.assertEqual(promoted["stable_digest"], CANDIDATE)
+        self.assertEqual(promoted["canary_weight"], 0)
+        with self.assertRaisesRegex(ValueError, "environment rollback"):
+            abort_release(confirmed)
+
+    def test_canary_policy_rejects_promotion_inside_the_100pct_step(self) -> None:
+        missing = copy.deepcopy(self.strategies)
+        missing["strategies"]["canary"]["steps"] = [
+            step for step in missing["strategies"]["canary"]["steps"] if step["name"] != "confirm"
+        ]
+        errors = validate_release_policy(missing, self.clusters, self.promotion)
+        self.assertTrue(any("must be confirm" in item for item in errors))
 
     def test_dev_canary_does_not_touch_other_environments(self) -> None:
         final = run_scenario(
@@ -413,9 +492,47 @@ class ProgressiveDeliveryTests(unittest.TestCase):
 
         for _ in range(2):
             state = advance_release(state, self._pass(), self.strategies)
+        self.assertEqual(state["waves"][0]["step_name"], "100pct")
+        self.assertEqual(state["waves"][0]["status"], "in_progress")
+        self.assertEqual(state["status"], "in_progress")
+        self.assertEqual(state["waves"][0]["canary_weight"], 100)
+        self.assertEqual(state["waves"][0]["stable_weight"], 0)
+        self.assertEqual(state["waves"][0]["stable_digest"], BASELINE)
+        self.assertEqual(state["waves"][0]["canary_digest"], CANDIDATE)
+        self.assertFalse(state["waves"][1]["started"])
+        at_full = project_release(state, self.clusters)
+        self.assertEqual({at_full[cluster_id]["canary_weight"] for cluster_id in east}, {100})
+        self.assertEqual({at_full[cluster_id]["stable_digest"] for cluster_id in east}, {BASELINE})
+        self.assertEqual({tuple(at_full[cluster_id]["serving_digests"]) for cluster_id in east}, {(CANDIDATE,)})
+        self.assertFalse(at_full["prod-cn-north-a"]["targeted"])
+        full_docs = render_documents(state, self.strategies, "operator")
+        self.assertNotIn("prod-cn-north-a", json.dumps([doc for _, doc in full_docs]))
+        full_route = next(
+            doc
+            for _, doc in full_docs
+            if doc["kind"] == "HTTPRoute" and doc["metadata"]["labels"]["cicd.platform/cluster-id"] == "prod-cn-east-a"
+        )
+        self.assertEqual(
+            [backend["weight"] for backend in full_route["spec"]["rules"][0]["backendRefs"]],
+            [0, 100],
+        )
+        baked = copy.deepcopy(state)
+        aborted_full = abort_release(baked)
+        restored = project_release(aborted_full, self.clusters)
+        for cluster_id in east:
+            self.assertEqual(restored[cluster_id]["serving_digests"], [BASELINE], cluster_id)
+            self.assertEqual(restored[cluster_id]["canary_weight"], 0, cluster_id)
+            self.assertEqual(restored[cluster_id]["canary_digest"], "", cluster_id)
+        self.assertEqual(aborted_full["waves"][0]["stable_digest"], BASELINE)
+        self.assertEqual(aborted_full["waves"][0]["canary_digest"], "")
+        self.assertFalse(aborted_full["waves"][1]["started"])
+
+        state = advance_release(state, self._pass(), self.strategies)
+        self.assertEqual(state["waves"][0]["step_name"], "confirm")
         self.assertEqual(state["waves"][0]["status"], "completed")
         self.assertEqual(state["waves"][0]["stable_digest"], CANDIDATE)
         self.assertEqual(state["waves"][0]["canary_weight"], 0)
+        self.assertEqual(state["waves"][0]["canary_digest"], "")
         self.assertTrue(state["waves"][1]["started"])
         self.assertEqual(state["waves"][1]["strategy"], "canary")
         self.assertEqual(state["waves"][1]["canary_weight"], 0)
@@ -495,7 +612,20 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         )
         self.assertEqual(
             [item["step"] for item in final["history"] if item["action"] == "advance"],
-            ["1pct", "5pct", "25pct", "50pct", "100pct", "1pct", "5pct", "25pct", "50pct", "100pct"],
+            [
+                "1pct",
+                "5pct",
+                "25pct",
+                "50pct",
+                "100pct",
+                "confirm",
+                "1pct",
+                "5pct",
+                "25pct",
+                "50pct",
+                "100pct",
+                "confirm",
+            ],
         )
         self.assertIn({"action": "open_wave", "wave": "cn-north"}, final["history"])
         projected = project_release(final, self.clusters)
@@ -573,7 +703,7 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertNotIn("prod-edge-offline", json.dumps([doc for _, doc in render_documents(aborted, self.strategies, "operator")]))
 
         state = self._plan("multi_cluster_canary")
-        for _ in range(7):
+        for _ in range(8):
             state = advance_release(state, self._pass(), self.strategies)
         self.assertEqual(state["waves"][0]["status"], "completed")
         self.assertEqual(state["waves"][0]["stable_digest"], CANDIDATE)
