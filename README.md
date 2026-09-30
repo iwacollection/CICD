@@ -169,6 +169,7 @@ rollback to historical production digest
 | 长期制品归档 | ✅ | 当前使用 GitHub Releases |
 | `dev -> staging -> production` | ✅ | exact artifact identity 强制晋级 |
 | Production Rollback | ✅ | `A -> B -> A`，旧版本不重新构建 |
+| 灰度 / 蓝绿 / 跨集群跨区域灰度 | ✅ | 同一 digest 上做路由；多集群灰度按区域展开并钉死集群名单；见下文 |
 
 ### 4.2 平台已实现
 
@@ -183,6 +184,9 @@ rollback to historical production digest
 | HIL Lease | ✅ 已实现 | 真机独占租约与释放语义 |
 | Vendor Adapter | ✅ 已实现 | RK/Qcom/MTK build + HIL 适配层 |
 | RK 物理接入准备 | ✅ Ready | x86_64 build host → arm64 target |
+| 环境内灰度 | ✅ 控制面 | Gateway API HTTPRoute 权重，逐步 1→5→25→50→100；同一环境的 gateway 集群同步同一步 |
+| 多集群灰度 | ✅ 控制面 | `multi_cluster_canary`：cn-east 然后 cn-north，区域内集群同权，后开区域打开前保持 0%，名单用 PlacementDecision + ApplicationSet 钉死 |
+| 蓝绿发布 | ✅ 控制面 | HTTPRoute 原子切换，预览流量不进入生产权重；不作为多集群灰度的后半段 |
 
 ### 4.3 仍需真实外部资源
 
@@ -194,6 +198,7 @@ rollback to historical production digest
 | 企业依赖代理 | ⏳ | Nexus/Artifactory 架构已定义，未实际部署 |
 | 外部长期 Artifact Repository | ⏳ | 当前 GitHub Releases 已可用，规模化后再接 S3/MinIO/Nexus/Artifactory |
 | 生产厂商签名 KMS/HSM | ⏳ | 需要真实企业签名基础设施 |
+| 真实集群 apply | ⏸ | 控制面已产出钉死的名单和路由；下发需要外部 OCM / Argo / Gateway，仓库不把本地推演当成已上线 |
 
 ---
 
@@ -320,6 +325,7 @@ CICD/
 │   ├── toolchain-images.yml               # Toolchain Supply Chain
 │   ├── archive-artifacts.yml              # 长期归档
 │   ├── promote.yml                        # dev/staging/production
+│   ├── release.yml                        # 环境内灰度 / 蓝绿 / 跨区域灰度期望状态
 │   ├── rollback.yml                       # 历史 digest rollback
 │   ├── platform-health.yml                # Platform SLO
 │   ├── repository-governance.yml          # Ruleset drift
@@ -335,6 +341,8 @@ CICD/
 │   ├── hardware-rollout.json              # SoC rollout policy
 │   ├── supply-chain-policy.json
 │   ├── promotion-policy.json
+│   ├── release-strategies.json            # 环境内灰度 / 蓝绿 / 跨区域灰度
+│   ├── clusters.json                      # 集群目录与流量能力
 │   ├── platform-slo.json
 │   └── repository-governance-policy.json
 │
@@ -414,6 +422,42 @@ Rollback 只接受同环境历史 Deployment ID，并创建新的 rollback point
 
 详见：**[制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)**
 
+环境指针只表示“这个 digest 可以出现在该环境”。指针本身不决定流量百分比，也不决定哪些集群收到新版本。这两件事由发布策略控制面完成，而且仍然使用同一份已晋级制品，不重新构建。
+
+### 9.1 多集群灰度：跨集群、跨区域
+
+生产上要做多集群灰度，用 `multi_cluster_canary`。参考目录先打开 cn-east，再打开 cn-north。cn-east 里的 `prod-cn-east-a`、`prod-cn-east-b`、`prod-cn-east-canary` 共享同一步 HTTPRoute 权重。cn-north 在自己的区域打开之前保持 0% canary，不出现在渲染结果里。华北打开之后仍然按 1、5、25、50、100 推进，不会改成蓝绿。
+
+| 问题 | 方法 | 本仓库钉死的工具 |
+| --- | --- | --- |
+| 多个区域里的多个集群如何按灰度比例展开 | 先钉死集群名单，再只改名单内的权重 | OCM `PlacementDecision` + Argo CD `ApplicationSet` list generator，加上 Gateway API `HTTPRoute` |
+| 同一环境里所有 gateway 集群如何用同一步权重分配请求 | 路由 | Gateway API `HTTPRoute` 后端权重。策略名是 `canary`。cn-east 和 cn-north 会一起变化 |
+| 新旧版本如何各占一个槽位，验证后一次切完生产流量 | 路由，而且必须是原子切换 | Gateway API `HTTPRoute`，预览走独立 header。策略名是 `blue_green` |
+
+只给 `role=canary` 的 `prod-cn-east-canary` 做权重，再把后面的区域改成蓝绿，得到的不是跨区域灰度。环境内 `canary` 会让华东和华北使用同一步权重，也做不到“当前区域加权重，后开区域保持 0%”。路由如果没有精确名单，未选中的集群仍会接到新 digest。所以多集群灰度同时要名单和权重，而且路由不能扩大名单。
+
+`prod-edge-offline` 没有 Gateway。多集群灰度默认不选它，它保持基线 digest，也不出现在渲染结果里。若用 `--allow` 明确点名它，计划失败关闭，不会把它写进 `ClusterPin`。分析失败不改变权重。`abort` 把每一个已经打开的区域收回基线。
+
+候选 bundle SHA256 必须等于该环境当前指针，发布不重新构建。`release.yml` 先读取 Deployment pointer，不一致就停止。`scenario` 会用合成分析证据走完所有步骤，只用来渲染最终期望状态；**synthetic analysis is not production evidence**。真实推进用 `advance`，并提交错误率和延迟证据。这个 Job 没有集群凭据，也不会写入 Deployment。
+
+```bash
+python3 scripts/ci/release_strategy.py plan \
+  --strategy multi_cluster_canary \
+  --environment production \
+  --service checkout \
+  --artifact-name <artifact-name> \
+  --bundle-sha256 <candidate-64-hex> \
+  --source-sha <source-40-hex> \
+  --source-run-id <run-id> \
+  --release-tag <artifact-v2-tag> \
+  --baseline-digest <serving-64-hex> \
+  --environment-pointer-digest <candidate-64-hex> \
+  --out release-state.json \
+  --out-dir rendered
+```
+
+操作手册：**[灰度、蓝绿与跨集群跨区域灰度](docs/progressive-delivery.md)**
+
 ---
 
 ## 10. `main` 治理
@@ -471,7 +515,8 @@ Rerun Rate
 4. [Artifact Contract v2](docs/artifact-contract-v2.md)
 5. [供应链策略](docs/supply-chain-policy.md)
 6. [制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)
-7. [生产生命周期真实验收记录](docs/production-verification.md)
+7. [灰度、蓝绿与跨集群跨区域灰度](docs/progressive-delivery.md)
+8. [生产生命周期真实验收记录](docs/production-verification.md)
 
 ### RK / 高通 / 联发科主线
 
@@ -481,6 +526,7 @@ Rerun Rate
 4. [Runner 与供应链安全](docs/runner-security-and-supply-chain.md)
 5. [Artifact Contract v2](docs/artifact-contract-v2.md)
 6. [制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)
+7. [灰度、蓝绿与跨集群跨区域灰度](docs/progressive-delivery.md)
 
 ---
 

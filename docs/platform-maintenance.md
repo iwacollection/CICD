@@ -456,6 +456,9 @@ platform-ready != hardware-verified
 真实 Runner queue 持续超 SLO
 → 做 autoscaling / runner pool
 
+真实 Gateway / OCM / Argo 控制器接入
+→ 消费 release render 的 ClusterPin，不要把 kubeconfig 放进 GitHub Actions
+
 真实 RK 产品接入
 → 恢复 physical bring-up
 
