@@ -12,14 +12,14 @@ on:
           - plan
           - scenario
       strategy:
-        description: "canary and blue_green are routing; multi_cluster is exact cluster membership"
+        description: "canary is one weight for every gateway cluster; blue_green is an atomic slot switch; multi_cluster_canary is cross-cluster cross-region canary on an exact pin"
         required: true
-        default: multi_cluster
+        default: multi_cluster_canary
         type: choice
         options:
           - canary
           - blue_green
-          - multi_cluster
+          - multi_cluster_canary
       environment:
         description: "Promotion environment whose current pointer digest is the only legal candidate"
         required: true

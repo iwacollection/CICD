@@ -51,14 +51,41 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         )
         self.assertEqual(self.strategies["strategies"]["canary"]["method"], "routing")
         self.assertEqual(self.strategies["strategies"]["blue_green"]["method"], "routing")
-        self.assertEqual(self.strategies["strategies"]["multi_cluster"]["method"], "cluster_management")
-        self.assertTrue(self.strategies["strategies"]["multi_cluster"]["pin_exact_cluster_ids"])
+        multi = self.strategies["strategies"]["multi_cluster_canary"]
+        self.assertEqual(multi["method"], "cluster_management")
+        self.assertEqual(multi["traffic_strategy"], "canary")
+        self.assertEqual(multi["region_order"], ["cn-east", "cn-north"])
+        self.assertTrue(multi["pin_exact_cluster_ids"])
+        self.assertEqual(
+            [wave["strategy"] for wave in multi["waves"]],
+            ["canary", "canary"],
+        )
+        self.assertEqual(
+            [wave["selector"]["region"] for wave in multi["waves"]],
+            ["cn-east", "cn-north"],
+        )
+        self.assertNotIn("multi_cluster", self.strategies["strategies"])
+        weights = [step["canary_weight"] for step in self.strategies["strategies"]["canary"]["steps"]]
+        self.assertEqual(weights, [1, 5, 25, 50, 100])
 
     def test_policy_rejects_loose_cluster_selection(self) -> None:
         broken = copy.deepcopy(self.strategies)
-        broken["strategies"]["multi_cluster"]["pin_exact_cluster_ids"] = False
+        broken["strategies"]["multi_cluster_canary"]["pin_exact_cluster_ids"] = False
         errors = validate_release_policy(broken, self.clusters, self.promotion)
         self.assertTrue(any("pin_exact_cluster_ids" in item for item in errors))
+
+    def test_policy_rejects_blue_green_regions_and_a_single_region(self) -> None:
+        blue_region = copy.deepcopy(self.strategies)
+        blue_region["strategies"]["multi_cluster_canary"]["waves"][1]["strategy"] = "blue_green"
+        errors = validate_release_policy(blue_region, self.clusters, self.promotion)
+        self.assertTrue(any("must be canary" in item for item in errors))
+
+        one_region = copy.deepcopy(self.strategies)
+        body = one_region["strategies"]["multi_cluster_canary"]
+        body["region_order"] = ["cn-east"]
+        body["waves"] = [body["waves"][0]]
+        errors = validate_release_policy(one_region, self.clusters, self.promotion)
+        self.assertTrue(any("more than one region" in item or "at least two regions" in item for item in errors))
 
     def test_canary_requires_ack_for_clusters_that_cannot_take_traffic(self) -> None:
         with self.assertRaisesRegex(ValueError, "prod-edge-offline"):
@@ -207,73 +234,189 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertEqual(wave["slot_digests"]["blue"], BASELINE)
         self.assertFalse(any(name.endswith("-preview.json") for name, _ in render_documents(final, self.strategies, "operator")))
 
-    def test_multi_cluster_pins_exact_ids_and_leaves_unselected_clusters_unchanged(self) -> None:
-        state = self._plan("multi_cluster")
+    def test_environment_canary_moves_every_region_to_the_same_weight(self) -> None:
+        state = self._plan("canary", accept_excluded=True)
+        state = advance_release(state, self._pass(), self.strategies)
+        projected = project_release(state, self.clusters)
+        self.assertEqual(projected["prod-cn-east-a"]["canary_weight"], 1)
+        self.assertEqual(projected["prod-cn-north-a"]["canary_weight"], 1)
+        self.assertEqual(state["region_order"], [])
+
+    def test_cross_region_canary_shares_weight_inside_a_region_and_holds_the_next_region(self) -> None:
+        east = ["prod-cn-east-a", "prod-cn-east-b", "prod-cn-east-canary"]
+        state = self._plan("multi_cluster_canary")
+        self.assertEqual(state["strategy"], "multi_cluster_canary")
         self.assertEqual(state["method"], "cluster_management")
-        self.assertEqual(state["waves"][0]["cluster_ids"], ["prod-cn-east-canary"])
-        self.assertEqual(state["waves"][1]["cluster_ids"], ["prod-cn-east-a", "prod-cn-east-b"])
-        self.assertEqual(state["waves"][2]["cluster_ids"], ["prod-cn-north-a"])
+        self.assertEqual(state["region_order"], ["cn-east", "cn-north"])
+        self.assertEqual(state["waves"][0]["strategy"], "canary")
+        self.assertEqual(state["waves"][0]["region"], "cn-east")
+        self.assertEqual(state["waves"][0]["cluster_ids"], east)
+        self.assertEqual(state["waves"][1]["strategy"], "canary")
+        self.assertEqual(state["waves"][1]["region"], "cn-north")
+        self.assertEqual(state["waves"][1]["cluster_ids"], ["prod-cn-north-a"])
+        self.assertFalse(state["waves"][1]["started"])
         self.assertIn({"id": "prod-edge-offline", "reason": "not_in_wave"}, state["unselected"])
         self.assertIn({"id": "dev-cn-east-a", "reason": "not_in_wave"}, state["unselected"])
+        self.assertIn({"id": "staging-cn-east-a", "reason": "not_in_wave"}, state["unselected"])
+
+        opened = project_release(state, self.clusters)
+        for cluster_id in east:
+            self.assertEqual(opened[cluster_id]["canary_weight"], 0, cluster_id)
+            self.assertEqual(opened[cluster_id]["serving_digests"], [BASELINE], cluster_id)
+            self.assertTrue(opened[cluster_id]["targeted"], cluster_id)
+        self.assertFalse(opened["prod-cn-north-a"]["targeted"])
+        self.assertEqual(opened["prod-cn-north-a"]["canary_weight"], 0)
+        self.assertEqual(opened["prod-cn-north-a"]["serving_digests"], [BASELINE])
+        self.assertEqual(opened["prod-edge-offline"]["serving_digests"], [BASELINE])
+        self.assertFalse(opened["prod-edge-offline"]["targeted"])
 
         initial = render_documents(state, self.strategies, "unverified")
-        self._assert_exact_clusters(initial, {"prod-cn-east-canary"})
+        self._assert_exact_clusters(initial, set(east))
+        self._assert_route_clusters_match_pin(initial)
         pinned = self._pins(initial)
-        self.assertEqual(pinned[0]["spec"]["clusterIds"], ["prod-cn-east-canary"])
+        self.assertEqual(pinned[0]["spec"]["clusterIds"], east)
+        self.assertEqual(pinned[0]["spec"]["region"], "cn-east")
         self.assertEqual(pinned[0]["spec"]["method"], "cluster_management")
+        self.assertEqual(pinned[0]["spec"]["trafficStrategy"], "canary")
         decisions = [doc for _, doc in initial if doc["kind"] == "PlacementDecision"]
-        self.assertEqual(decisions[0]["status"]["decisions"], [{"clusterName": "prod-cn-east-canary"}])
+        self.assertEqual(
+            decisions[0]["status"]["decisions"],
+            [{"clusterName": cluster_id} for cluster_id in east],
+        )
         appsets = [doc for _, doc in initial if doc["kind"] == "ApplicationSet"]
         self.assertEqual(list(appsets[0]["spec"]["generators"][0]), ["list"])
         self.assertNotIn("clusters", appsets[0]["spec"]["generators"][0])
-        element = appsets[0]["spec"]["generators"][0]["list"]["elements"][0]
-        self.assertEqual(element["stableDigest"], BASELINE)
-        self.assertEqual(element["canaryDigest"], CANDIDATE)
-        self.assertEqual(element["canaryWeight"], "0")
+        elements = appsets[0]["spec"]["generators"][0]["list"]["elements"]
+        self.assertEqual([item["cluster"] for item in elements], east)
+        self.assertTrue(all(item["stableDigest"] == BASELINE for item in elements))
+        self.assertTrue(all(item["canaryDigest"] == CANDIDATE for item in elements))
+        self.assertTrue(all(item["canaryWeight"] == "0" for item in elements))
+        self.assertNotIn("prod-cn-north-a", json.dumps([doc for _, doc in initial]))
+
+        untouched = copy.deepcopy(state)
+        with self.assertRaisesRegex(ValueError, "error_rate exceeds"):
+            advance_release(state, {"smoke": "pass", "error_rate": 0.5, "latency_p95_ms": 10, "requests": 100}, self.strategies)
+        self.assertEqual(state, untouched)
 
         state = advance_release(state, self._pass(), self.strategies)
+        self.assertEqual(state["waves"][0]["step_name"], "1pct")
+        self.assertEqual(state["waves"][0]["canary_weight"], 1)
+        self.assertEqual(state["waves"][1]["canary_weight"], 0)
+        self.assertFalse(state["waves"][1]["started"])
+        at_one = project_release(state, self.clusters)
+        self.assertEqual({at_one[cluster_id]["canary_weight"] for cluster_id in east}, {1})
+        self.assertEqual({at_one[cluster_id]["stable_digest"] for cluster_id in east}, {BASELINE})
+        self.assertEqual({at_one[cluster_id]["canary_digest"] for cluster_id in east}, {CANDIDATE})
+        self.assertEqual(at_one["prod-cn-north-a"]["canary_weight"], 0)
+        self.assertEqual(at_one["prod-cn-north-a"]["serving_digests"], [BASELINE])
         stepped = render_documents(state, self.strategies, "operator")
-        route = next(
-            doc
-            for _, doc in stepped
-            if doc["kind"] == "HTTPRoute" and doc["metadata"]["labels"]["cicd.platform/cluster-id"] == "prod-cn-east-canary"
+        self._assert_exact_clusters(stepped, set(east))
+        self._assert_route_clusters_match_pin(stepped)
+        east_weights = []
+        for _, doc in stepped:
+            if doc["kind"] != "HTTPRoute":
+                continue
+            weights = [backend["weight"] for backend in doc["spec"]["rules"][0]["backendRefs"]]
+            east_weights.append(weights)
+            self.assertEqual(sum(weights), 100)
+        self.assertEqual(east_weights, [[99, 1], [99, 1], [99, 1]])
+
+        for _ in range(2):
+            state = advance_release(state, self._pass(), self.strategies)
+        self.assertEqual(state["waves"][0]["step_name"], "25pct")
+        at_twenty_five = project_release(state, self.clusters)
+        self.assertEqual({at_twenty_five[cluster_id]["canary_weight"] for cluster_id in east}, {25})
+        self.assertEqual(at_twenty_five["prod-cn-north-a"]["canary_weight"], 0)
+        self.assertNotIn(
+            "prod-cn-north-a",
+            json.dumps([doc for _, doc in render_documents(state, self.strategies, "operator")]),
         )
-        weights = [backend["weight"] for backend in route["spec"]["rules"][0]["backendRefs"]]
-        self.assertEqual(weights, [99, 1])
-        self.assertEqual(sum(weights), 100)
-        self._assert_exact_clusters(stepped, {"prod-cn-east-canary"})
-        self.assertNotIn(CANDIDATE, project_release(state, self.clusters)["prod-cn-north-a"]["serving_digests"])
+
+        for _ in range(2):
+            state = advance_release(state, self._pass(), self.strategies)
+        self.assertEqual(state["waves"][0]["status"], "completed")
+        self.assertEqual(state["waves"][0]["stable_digest"], CANDIDATE)
+        self.assertEqual(state["waves"][0]["canary_weight"], 0)
+        self.assertTrue(state["waves"][1]["started"])
+        self.assertEqual(state["waves"][1]["strategy"], "canary")
+        self.assertEqual(state["waves"][1]["canary_weight"], 0)
+        self.assertEqual(state["waves"][1]["canary_digest"], CANDIDATE)
+        self.assertNotEqual(state["waves"][1]["strategy"], "blue_green")
+        opened_north = project_release(state, self.clusters)
+        self.assertEqual(opened_north["prod-cn-east-a"]["serving_digests"], [CANDIDATE])
+        self.assertEqual(opened_north["prod-cn-north-a"]["canary_weight"], 0)
+        self.assertEqual(opened_north["prod-cn-north-a"]["stable_digest"], BASELINE)
+        self.assertTrue(opened_north["prod-cn-north-a"]["targeted"])
+
+        state = advance_release(state, self._pass(), self.strategies)
+        state = advance_release(state, self._pass(), self.strategies)
+        self.assertEqual(state["waves"][1]["step_name"], "5pct")
+        split = project_release(state, self.clusters)
+        self.assertTrue(all(split[cluster_id]["serving_digests"] == [CANDIDATE] for cluster_id in east))
+        self.assertEqual(split["prod-cn-east-b"]["canary_weight"], 0)
+        self.assertEqual(split["prod-cn-north-a"]["canary_weight"], 5)
+        self.assertEqual(split["prod-cn-north-a"]["stable_digest"], BASELINE)
+        self.assertEqual(split["prod-cn-north-a"]["canary_digest"], CANDIDATE)
+        both = render_documents(state, self.strategies, "operator")
+        self._assert_exact_clusters(both, set(east + ["prod-cn-north-a"]))
+        self._assert_route_clusters_match_pin(both)
+        north_route = next(
+            doc
+            for _, doc in both
+            if doc["kind"] == "HTTPRoute" and doc["metadata"]["labels"]["cicd.platform/cluster-id"] == "prod-cn-north-a"
+        )
+        self.assertEqual(
+            [backend["weight"] for backend in north_route["spec"]["rules"][0]["backendRefs"]],
+            [95, 5],
+        )
+        self.assertEqual(split["prod-edge-offline"]["serving_digests"], [BASELINE])
+        self.assertEqual(split["dev-cn-east-a"]["serving_digests"], [BASELINE])
+
+        held = copy.deepcopy(state)
+        with self.assertRaisesRegex(ValueError, "error_rate exceeds"):
+            advance_release(
+                state,
+                {"error_rate": 0.2, "latency_p95_ms": 10, "requests": 100},
+                self.strategies,
+            )
+        self.assertEqual(state["waves"][1]["canary_weight"], held["waves"][1]["canary_weight"])
+        self.assertEqual(state, held)
 
         final = run_scenario(
             strategies=self.strategies,
             clusters=self.clusters,
             promotion=self.promotion,
-            strategy="multi_cluster",
+            strategy="multi_cluster_canary",
             environment="production",
             service="checkout",
             identity=_identity(),
             baseline_digest=BASELINE,
             environment_pointer_digest=CANDIDATE,
         )
+        self.assertEqual(
+            [item["step"] for item in final["history"] if item["action"] == "advance"],
+            ["1pct", "5pct", "25pct", "50pct", "100pct", "1pct", "5pct", "25pct", "50pct", "100pct"],
+        )
+        self.assertIn({"action": "open_wave", "wave": "cn-north"}, final["history"])
         projected = project_release(final, self.clusters)
-        for cluster_id in ("prod-cn-east-canary", "prod-cn-east-a", "prod-cn-east-b", "prod-cn-north-a"):
+        for cluster_id in east + ["prod-cn-north-a"]:
             self.assertEqual(projected[cluster_id]["serving_digests"], [CANDIDATE], cluster_id)
+            self.assertEqual(projected[cluster_id]["canary_weight"], 0, cluster_id)
         for cluster_id in ("prod-edge-offline", "dev-cn-east-a", "staging-cn-east-a"):
             self.assertEqual(projected[cluster_id]["serving_digests"], [BASELINE], cluster_id)
             self.assertFalse(projected[cluster_id]["targeted"], cluster_id)
         rendered = render_documents(final, self.strategies, "synthetic")
-        self._assert_exact_clusters(
-            rendered,
-            {"prod-cn-east-canary", "prod-cn-east-a", "prod-cn-east-b", "prod-cn-north-a"},
-        )
+        self._assert_exact_clusters(rendered, set(east + ["prod-cn-north-a"]))
         self.assertTrue(all(doc["metadata"]["annotations"]["cicd.platform/evidence"] == "synthetic" for _, doc in rendered))
 
     def test_allowlist_cannot_add_clusters_and_denylist_cannot_leave_an_empty_wave(self) -> None:
         with self.assertRaisesRegex(ValueError, "empty wave"):
-            self._plan("multi_cluster", allow=["prod-cn-north-a"])
-        with self.assertRaisesRegex(ValueError, "not selected"):
+            self._plan("multi_cluster_canary", allow=["prod-cn-north-a"])
+        with self.assertRaisesRegex(ValueError, "lack gateway"):
+            self._plan("multi_cluster_canary", allow=["prod-edge-offline"])
+        with self.assertRaisesRegex(ValueError, "lack gateway"):
             self._plan(
-                "multi_cluster",
+                "multi_cluster_canary",
                 allow=[
                     "prod-cn-east-canary",
                     "prod-cn-east-a",
@@ -283,7 +426,10 @@ class ProgressiveDeliveryTests(unittest.TestCase):
                 ],
             )
         with self.assertRaisesRegex(ValueError, "empty wave"):
-            self._plan("multi_cluster", deny=["prod-cn-east-canary"])
+            self._plan(
+                "multi_cluster_canary",
+                deny=["prod-cn-east-canary", "prod-cn-east-a", "prod-cn-east-b"],
+            )
         with self.assertRaisesRegex(ValueError, "outside the target environment"):
             self._plan("canary", allow=["dev-cn-east-a"], accept_excluded=True)
         with self.assertRaisesRegex(ValueError, "environment pointer"):
@@ -291,7 +437,7 @@ class ProgressiveDeliveryTests(unittest.TestCase):
                 strategies=self.strategies,
                 clusters=self.clusters,
                 promotion=self.promotion,
-                strategy="multi_cluster",
+                strategy="multi_cluster_canary",
                 environment="production",
                 service="checkout",
                 identity=_identity(),
@@ -303,7 +449,7 @@ class ProgressiveDeliveryTests(unittest.TestCase):
                 strategies=self.strategies,
                 clusters=self.clusters,
                 promotion=self.promotion,
-                strategy="multi_cluster",
+                strategy="multi_cluster_canary",
                 environment="production",
                 service="checkout",
                 identity=_identity(BASELINE),
@@ -311,16 +457,37 @@ class ProgressiveDeliveryTests(unittest.TestCase):
                 environment_pointer_digest=BASELINE,
             )
 
-    def test_failed_wave_aborts_the_whole_release_back_to_baseline(self) -> None:
-        state = self._plan("multi_cluster")
-        for _ in range(5):
+    def test_abort_returns_every_started_region_to_baseline(self) -> None:
+        east = ["prod-cn-east-a", "prod-cn-east-b", "prod-cn-east-canary"]
+        state = self._plan("multi_cluster_canary")
+        for _ in range(3):
             state = advance_release(state, self._pass(), self.strategies)
-        self.assertEqual(state["waves"][0]["status"], "completed")
-        self.assertEqual(project_release(state, self.clusters)["prod-cn-east-canary"]["serving_digests"], [CANDIDATE])
+        self.assertEqual(state["waves"][0]["canary_weight"], 25)
+        self.assertFalse(state["waves"][1]["started"])
         aborted = abort_release(state)
         projected = project_release(aborted, self.clusters)
         for cluster_id, view in projected.items():
             self.assertEqual(view["serving_digests"], [BASELINE], cluster_id)
+            self.assertEqual(view["canary_weight"], 0, cluster_id)
+        self.assertNotIn("prod-cn-north-a", json.dumps([doc for _, doc in render_documents(aborted, self.strategies, "operator")]))
+        self.assertNotIn("prod-edge-offline", json.dumps([doc for _, doc in render_documents(aborted, self.strategies, "operator")]))
+
+        state = self._plan("multi_cluster_canary")
+        for _ in range(7):
+            state = advance_release(state, self._pass(), self.strategies)
+        self.assertEqual(state["waves"][0]["status"], "completed")
+        self.assertEqual(state["waves"][0]["stable_digest"], CANDIDATE)
+        self.assertEqual(state["waves"][1]["step_name"], "5pct")
+        self.assertEqual(project_release(state, self.clusters)["prod-cn-north-a"]["canary_weight"], 5)
+        aborted = abort_release(state)
+        projected = project_release(aborted, self.clusters)
+        for cluster_id in east + ["prod-cn-north-a", "prod-edge-offline", "dev-cn-east-a"]:
+            self.assertEqual(projected[cluster_id]["serving_digests"], [BASELINE], cluster_id)
+            self.assertEqual(projected[cluster_id]["canary_weight"], 0, cluster_id)
+        for wave in aborted["waves"]:
+            self.assertEqual(wave["stable_digest"], BASELINE)
+            self.assertEqual(wave["canary_digest"], "")
+            self.assertEqual(wave["status"], "aborted")
 
     def test_cli_validate_and_docs_describe_the_same_controls(self) -> None:
         result = subprocess.run(
@@ -342,6 +509,13 @@ class ProgressiveDeliveryTests(unittest.TestCase):
             self.assertIn("HTTPRoute", text)
             self.assertIn("PlacementDecision", text)
             self.assertIn("ApplicationSet", text)
+            self.assertIn("multi_cluster_canary", text)
+            self.assertIn("cn-east", text)
+            self.assertIn("cn-north", text)
+        self.assertIn("后开区域仍然按 canary 权重推进，不会改成蓝绿", guide)
+        self.assertIn("--strategy multi_cluster_canary", guide)
+        self.assertNotIn("canary-clusters", guide)
+        self.assertNotIn("production-gateway", guide)
         self.assertIn("docs/progressive-delivery.md", readme)
         self.assertIn("progressive-delivery.md", index)
         self.assertIn("release_strategy.py validate", validate)
@@ -381,6 +555,21 @@ class ProgressiveDeliveryTests(unittest.TestCase):
 
     def _pins(self, documents: list[tuple[str, dict]]) -> list[dict]:
         return [doc for _, doc in documents if doc["kind"] == "ClusterPin"]
+
+    def _assert_route_clusters_match_pin(self, documents: list[tuple[str, dict]]) -> None:
+        pins = [doc["spec"]["clusterIds"] for _, doc in documents if doc["kind"] == "ClusterPin"]
+        self.assertTrue(pins)
+        allowed = {cluster_id for pin in pins for cluster_id in pin}
+        for _, doc in documents:
+            if doc["kind"] == "PlacementDecision":
+                decided = [item["clusterName"] for item in doc["status"]["decisions"]]
+                self.assertIn(decided, pins)
+            if doc["kind"] == "HTTPRoute":
+                cluster_id = doc["metadata"]["labels"]["cicd.platform/cluster-id"]
+                self.assertIn(cluster_id, allowed)
+            if doc["kind"] == "ApplicationSet":
+                clusters = [item["cluster"] for item in doc["spec"]["generators"][0]["list"]["elements"]]
+                self.assertIn(clusters, pins)
 
     def _assert_exact_clusters(self, documents: list[tuple[str, dict]], expected: set[str]) -> None:
         seen: set[str] = set()

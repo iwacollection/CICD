@@ -489,6 +489,6 @@ Deployment pointer 回答的是“这个环境被授权使用哪一份 digest”
 哪些集群可以收到新版本？
 ```
 
-第一个问题用路由，第二个问题用集群管理。规则、状态机和渲染结果见 [灰度、蓝绿与多集群精准发布](progressive-delivery.md)。
+第一个问题用路由，第二个问题用集群管理。跨集群、跨区域灰度同时用这两层。规则、状态机和渲染结果见 [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md)。
 
 发布策略仍然消费这里的 exact artifact identity。候选 bundle SHA256 必须等于该环境当前 successful pointer。策略引擎不重新构建，也不改写旧的 Deployment。确认切流之后如果要回到旧 digest，继续使用同环境 rollback。

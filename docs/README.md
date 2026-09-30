@@ -29,7 +29,7 @@ Artifact Contract v2
 → Attestation
 → Archive
 → dev → staging → production
-→ 灰度 / 蓝绿 / 多集群精准发布
+→ 灰度 / 蓝绿 / 跨集群跨区域灰度
 → Rollback
 ```
 
@@ -49,7 +49,7 @@ Artifact Contract v2
 4. [Artifact Contract v2](artifact-contract-v2.md)
 5. [供应链策略](supply-chain-policy.md)
 6. [制品、晋级与回滚](artifacts-promotion-and-rollback.md)
-7. [灰度、蓝绿与多集群精准发布](progressive-delivery.md)
+7. [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md)
 8. [生产生命周期真实验收记录](production-verification.md)
 
 ### 如果你主要看 RK / 高通 / 联发科固件 CI
@@ -62,7 +62,7 @@ Artifact Contract v2
 4. [Runner 与供应链安全](runner-security-and-supply-chain.md)
 5. [Artifact Contract v2](artifact-contract-v2.md)
 6. [制品、晋级与回滚](artifacts-promotion-and-rollback.md)
-7. [灰度、蓝绿与多集群精准发布](progressive-delivery.md)
+7. [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md)
 
 ---
 
@@ -99,9 +99,9 @@ Artifact Contract v2
    - `dev -> staging -> production`；
    - rollback 恢复历史 digest，不重新构建。
 
-7. [灰度、蓝绿与多集群精准发布](progressive-delivery.md)
-   - 灰度和平绿用 HTTPRoute；
-   - 多集群用 PlacementDecision 与 ApplicationSet 钉死集群 ID；
+7. [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md)
+   - 多集群灰度是 `multi_cluster_canary`：cn-east 然后 cn-north，区域内同权，后开区域打开前为 0%；
+   - 名单用 PlacementDecision 与 ApplicationSet 钉死，权重用 HTTPRoute；
    - 候选 digest 必须已经是环境指针。
 
 8. [生产生命周期真实验收记录](production-verification.md)
@@ -302,14 +302,14 @@ MediaTek / MTK          ⏸ planned
 - OIDC / KMS / HSM；
 - 依赖混淆与签名。
 
-## [灰度、蓝绿与多集群精准发布](progressive-delivery.md)
+## [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md)
 
 重点：
 
-- 灰度是路由问题：Gateway API HTTPRoute 权重；
-- 蓝绿是路由问题：生产流量一次切完，预览不进入生产权重；
-- 多集群精准是集群管理问题：PlacementDecision 与 ApplicationSet 钉死集群 ID；
-- 路由清单不能扩大集群名单；
+- 多集群灰度是 `multi_cluster_canary`：跨集群、跨区域的 HTTPRoute 权重；
+- cn-east 内的集群共享同一步权重，cn-north 打开前保持 0%，打开后仍然是 canary；
+- 集群名单由 PlacementDecision 与 ApplicationSet 钉死，路由不能超出名单；
+- 蓝绿仍是独立策略：生产流量一次切完，预览不进入生产权重；
 - 候选 digest 必须等于该环境当前指针；
 - 真实集群 apply 仍由外部控制器执行。
 

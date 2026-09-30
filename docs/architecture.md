@@ -170,9 +170,9 @@ examples/              可跑通的最小示例
 
 ## 10. 环境内发布策略
 
-晋级把同一个 digest 授权到 `dev`、`staging` 或 `production`。授权之后，流量怎么切、集群名单怎么定，由 [灰度、蓝绿与多集群精准发布](progressive-delivery.md) 决定。
+晋级把同一个 digest 授权到 `dev`、`staging` 或 `production`。授权之后，流量怎么切、集群名单怎么定，由 [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md) 决定。
 
-灰度和平绿调整的是 Gateway API HTTPRoute。多集群精准部署调整的是 Open Cluster Management PlacementDecision 和 Argo CD ApplicationSet 里的集群 ID。路由对象不能把制品送到名单之外的集群。
+环境内灰度和蓝绿调整的是 Gateway API HTTPRoute。多集群灰度 `multi_cluster_canary` 先用 Open Cluster Management PlacementDecision 和 Argo CD ApplicationSet 钉死集群 ID，再只在这份名单里调整 HTTPRoute 权重；后开区域在打开前保持 0%。路由对象不能把制品送到名单之外的集群。
 
 ## 11. 后续生产化扩展
 

@@ -234,7 +234,7 @@ release-state.json 的 status
 - 候选 digest 和环境当前 pointer 不一致。先晋级，再发布。
 - 同环境里有 `traffic=none` 的集群，灰度计划会要求 `accept_excluded`。没有确认就失败，是为了避免假装全环境都切了流量。
 - `scenario` 的分析证据是合成的。synthetic analysis is not production evidence。
-- 多集群波次还停在前面的 canary 集群，后面的区域不会提前出现在渲染结果里。
+- 多集群灰度还停在当前区域时，后开区域保持 0%，并且不会出现在渲染结果里。后开区域打开后仍然按 canary 权重推进，不会变成蓝绿。
 - 已 confirm 的蓝绿不能用发布 abort，要走同环境 rollback。
 
 ## 16. 事故处理模板

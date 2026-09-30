@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "灰度走路由权重，蓝绿走路由原子切换，多集群精准走钉死的集群名单。流量策略不能扩大集群名单。",
+  "description": "环境内灰度走同一套 HTTPRoute 权重。多集群灰度按区域顺序走同一套权重，区域内集群同权，后开区域在打开前保持 0%，并且仍然是灰度而不是蓝绿。集群名单用 PlacementDecision 和 ApplicationSet 钉死。蓝绿仍是独立的原子切换策略。",
   "artifact_contract": 2,
   "namespace": "apps",
   "gateway_name": "platform-gateway",
@@ -58,9 +58,11 @@
       },
       "abort": "restore_baseline_slot"
     },
-    "multi_cluster": {
+    "multi_cluster_canary": {
       "kind": "placement",
       "method": "cluster_management",
+      "traffic_strategy": "canary",
+      "region_order": ["cn-east", "cn-north"],
       "cluster_management": {
         "placement_api": "cluster.open-cluster-management.io/v1beta1",
         "placement_kind": "Placement",
@@ -70,21 +72,20 @@
       },
       "deny_unmatched": true,
       "pin_exact_cluster_ids": true,
+      "required_cluster_labels": {
+        "traffic": "gateway"
+      },
+      "abort": "shift_all_weight_to_baseline",
       "waves": [
-        {
-          "name": "canary-clusters",
-          "selector": {"environment": "production", "role": "canary"},
-          "strategy": "canary"
-        },
         {
           "name": "cn-east",
           "selector": {"environment": "production", "region": "cn-east"},
-          "strategy": "blue_green"
+          "strategy": "canary"
         },
         {
-          "name": "production-gateway",
-          "selector": {"environment": "production", "traffic": "gateway"},
-          "strategy": "blue_green"
+          "name": "cn-north",
+          "selector": {"environment": "production", "region": "cn-north"},
+          "strategy": "canary"
         }
       ]
     }
