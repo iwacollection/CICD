@@ -189,7 +189,8 @@ rollback to historical production digest
 | 蓝绿发布 | ✅ 控制面 | HTTPRoute 原子切换，预览流量不进入生产权重；同一环境的 gateway 集群在同一步切槽；VirtualService 把 100% 生产流量送到当前槽 |
 | 多集群蓝绿 | ✅ 控制面 | `multi_cluster_blue_green`：cn-east 然后 cn-north，区域内集群共用槽位，后开区域打开前不渲染，预览 header 不改变生产权重，切换不是权重爬坡 |
 | Istio 数据面适配 | ✅ 控制面渲染 | 同一 release state 再渲染 VirtualService。灰度权重与 HTTPRoute 相同且和为 100。这不是第二份策略 |
-| Jenkins 调用方 | ✅ 调用方 | `ops/Jenkinsfile` 检出固定平台 SHA，只跑 validate、plan、advance、render；不写权重、不保存 kubeconfig、不执行 kubectl apply |
+| GitHub Actions 灰度 / 蓝绿 | ✅ 控制面 | `release.yml` 的 `workflow_dispatch`：`plan`、`advance`、`abort`、`scenario`。先核对环境指针，再调用同一 CLI，然后同时渲染 HTTPRoute 和 VirtualService。`advance` 读取操作者提供的分析 JSON，不用合成通过证据 |
+| Jenkins 调用方 | ✅ 可选 | `ops/Jenkinsfile` 可选，检出固定平台 SHA 后只调用同一条 CLI；不写权重、不保存 kubeconfig、不执行 kubectl apply |
 
 ### 4.3 仍需真实外部资源
 
@@ -328,7 +329,7 @@ CICD/
 │   ├── toolchain-images.yml               # Toolchain Supply Chain
 │   ├── archive-artifacts.yml              # 长期归档
 │   ├── promote.yml                        # dev/staging/production
-│   ├── release.yml                        # 同一次 dispatch 渲染 HTTPRoute 与 Istio VirtualService
+│   ├── release.yml                        # 指针核对后 plan / advance / abort / scenario，同时渲染 HTTPRoute 与 VirtualService
 │   ├── rollback.yml                       # 历史 digest rollback
 │   ├── platform-health.yml                # Platform SLO
 │   ├── repository-governance.yml          # Ruleset drift
@@ -352,7 +353,7 @@ CICD/
 ├── scripts/ci/                             # 平台规则实现
 ├── scripts/vendor/                         # RK/Qcom/MTK 稳定 Adapter
 ├── docker/toolchains/                      # 不可变 Toolchain Image
-├── ops/Jenkinsfile                         # 只调用 release_strategy.py，不保存 kubeconfig
+├── ops/Jenkinsfile                         # 可选调用方，只调用 release_strategy.py
 ├── ops/rk-runner/                          # RK 物理接入准备
 ├── examples/                               # Hosted DAG 示例
 ├── tests/                                  # 契约 / 安全边界回归
@@ -444,9 +445,9 @@ Rollback 只接受同环境历史 Deployment ID，并创建新的 rollback point
 
 `prod-edge-offline` 没有 Gateway。多集群灰度默认不选它，它保持基线 digest，也不出现在渲染结果里。若用 `--allow` 明确点名它，计划失败关闭，不会把它写进 `ClusterPin`。分析失败不改变权重。`abort` 把每一个已经打开的区域收回基线。
 
-候选 bundle SHA256 必须等于该环境当前指针，发布不重新构建。`release.yml` 先读取 Deployment pointer，不一致就停止。`scenario` 会用合成分析证据走完所有步骤，只用来渲染最终期望状态；**synthetic analysis is not production evidence**。真实推进用 `advance`，并提交错误率和延迟证据。这个 Job 没有集群凭据，也不会写入 Deployment。同一次 dispatch 会从同一份 release state 写出 HTTPRoute 和 Istio VirtualService。
+候选 bundle SHA256 必须等于该环境当前指针，发布不重新构建。GitHub Actions 的顺序见 9.3：先核对环境指针，再 `plan` 或 `advance`，然后从同一份状态渲染 HTTPRoute 和 VirtualService。`scenario` 会用合成分析证据走完所有步骤，只用来渲染最终期望状态；**synthetic analysis is not production evidence**。真实推进用 `advance`，并提交错误率和延迟证据。这个 Job 没有集群凭据，也不会写入 Deployment。
 
-Jenkins 如果要触发同一条流水线，用 `ops/Jenkinsfile`。它先检出参数 `PLATFORM_SHA` 指向的平台提交，再调用 `scripts/ci/release_strategy.py` 的 `validate`、`plan`、`advance` 或 `render`。Jenkinsfile 不写权重，不写集群名单，不保存 kubeconfig，也不执行 `kubectl apply`。这不是第二份策略。
+Jenkins 可选。要用的话走 `ops/Jenkinsfile`，它只调用同一条 CLI，不是第二份策略。
 
 ```bash
 python3 scripts/ci/release_strategy.py plan \
@@ -487,6 +488,51 @@ python3 scripts/ci/release_strategy.py plan \
   --out release-state.json \
   --out-dir rendered
 ```
+
+### 9.3 GitHub Actions：同一条 CLI
+
+`.github/workflows/release.yml` 在 `main` 上手工触发。它不是第二份策略引擎。灰度和蓝绿都走下面的顺序：
+
+```text
+validate
+→ deployment_pointer.py current
+→ check-pointer
+→ plan、advance、abort 或 scenario
+→ 同一份 release state 渲染 Gateway API HTTPRoute 和 Istio VirtualService
+→ 缺任何一种 kind 则 Job 失败
+→ 上传 release-state.json 与 rendered/
+```
+
+权限是 `contents: read` 和 `deployments: read`。没有 `deployments: write`。Job 不读取 kubeconfig，也不执行 `kubectl apply`。
+
+`workflow_dispatch` 输入：
+
+| 输入 | 类型 | 作用 |
+| --- | --- | --- |
+| `action` | `plan`、`advance`、`abort`、`scenario` | 调用 `scripts/ci/release_strategy.py` 的同名子命令。默认 `plan` |
+| `strategy` | `canary`、`blue_green`、`multi_cluster_canary`、`multi_cluster_blue_green` | 默认 `multi_cluster_canary` |
+| `environment` | `dev`、`staging`、`production` | 默认 `production` |
+| `service` | string | DNS-1123 服务名 |
+| `artifact_name` | string | Artifact Contract v2 的 artifact name |
+| `bundle_sha256` | string | 必须等于当前环境指针 |
+| `source_sha` | string | 制品上的源提交 |
+| `source_run_id` | string | 可信构建 run id |
+| `release_tag` | string | `artifact-v2` 归档标签 |
+| `baseline_digest` | string | 当前正在接流量的 digest |
+| `accept_excluded` | boolean | 默认 `false`。确认同一环境里不能接流量的集群 |
+| `allow_clusters` | string | 可选，逗号分隔，每个 id 都必须入选 |
+| `deny_clusters` | string | 可选，逗号分隔，从名单里去掉 |
+| `active_slot` | `blue`、`green` | 蓝绿基线槽，默认 `blue` |
+| `analysis` | string | 仅 `advance`。JSON 对象，字段是 `smoke`、`readiness`、`error_rate`、`latency_p95_ms`、`requests` |
+| `state` | string | 仅 `advance` 和 `abort`。上一次 `release-state.json` 的全文 |
+
+`plan` 和 `scenario` 不读 `state`，用上面的制品字段生成状态。`check-pointer` 在这四者之前执行。
+
+下一次 `workflow_dispatch` 不能把上一次的 artifact 重新上传进来，表单也没有文件输入。`advance` 和 `abort` 因此让操作者把 `release-state.json` 压成一行贴进 `state`。Job 把字符串写到工作区的 `release-state.json`（不提交），再交给现有引擎校验。状态里的 `candidate_digest` 必须等于刚刚核对过的指针，`environment` 必须等于本次环境。参考目录的状态大约 3KB。
+
+`advance` 把 `analysis` 原样写入 `analysis.json`。Workflow 不填合成的通过结果。`scenario` 才会在摘要里打印 `synthetic analysis is not production evidence`。
+
+`ops/Jenkinsfile` 只是这条 CLI 的可选调用方。它不决定权重，也不代替上面的 Actions 输入。
 
 操作手册：**[灰度、蓝绿与跨集群跨区域灰度](docs/progressive-delivery.md)**
 

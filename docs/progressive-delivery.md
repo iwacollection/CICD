@@ -372,7 +372,7 @@ latency_p95_ms 大于 300
 synthetic analysis is not production evidence
 ```
 
-生产推进只能使用 `advance`，并且证据来自真实流量或真实探活。
+生产推进只能使用 `advance`，并且证据来自真实流量或真实探活。GitHub Actions 的 `analysis` 输入就是这份 JSON 字符串。Job 把它写入 `analysis.json` 后交给 `release_strategy.py advance`，不会在 workflow 里填一份合成的通过结果。
 
 ## 12. 渲染结果
 
@@ -427,7 +427,7 @@ cicd.platform/evidence
 4. HTTPRoute 和 VirtualService 只应用到 `cicd.platform/cluster` 注解指向的集群，并且该集群必须属于这份 pin。VirtualService 的权重从同一份渲染结果来，控制器不能再改一版。
 5. 忽略一切不在已打开波次里的集群，不要用环境级 selector 再选一次。后开区域保持基线，直到它自己的波次出现在渲染结果里。
 6. 看到 `evidence=synthetic` 或 `unverified` 时拒绝作用于生产。
-7. 不在 GitHub Actions 或 Jenkins 里存放 kubeconfig。`release.yml` 只上传 `release-state.json` 和 `rendered/`。`ops/Jenkinsfile` 只调用 CLI，不执行 `kubectl apply`。
+7. 不在 GitHub Actions 或 Jenkins 里存放 kubeconfig。`release.yml` 只上传 `release-state.json` 和 `rendered/`，不执行 `kubectl apply`。下一次 `workflow_dispatch` 不能重新上传上一次的 artifact，所以 `advance` 和 `abort` 由操作者把状态 JSON 字符串贴进 `state`。`ops/Jenkinsfile` 是可选调用方，只调用同一条 CLI。
 
 控制面测试通过，只说明期望状态符合上面的规则。它不表示生产集群已经切了流量。
 
@@ -551,27 +551,64 @@ python3 scripts/ci/release_strategy.py check-pointer \
 
 `scenario` 只用于本地把状态机跑完并渲染最终 JSON。不要把这份渲染结果 apply 到生产。
 
-## 15. Workflow
+## 15. GitHub Actions
 
-`.github/workflows/release.yml` 只在 `main` 上手工触发。可选策略是 `canary`、`blue_green`、`multi_cluster_canary`、`multi_cluster_blue_green`。默认策略是 `multi_cluster_canary`。
+`.github/workflows/release.yml` 只在 `main` 上 `workflow_dispatch`。它不是第二份策略引擎。`plan`、`advance`、`abort`、`scenario` 都调用 `scripts/ci/release_strategy.py`。权限是 `contents: read` 和 `deployments: read`。没有 `deployments: write`，所以它不能移动环境指针，也不能代替 rollback。Job 不读取 kubeconfig，也不执行 `kubectl apply`。
+
+每次运行的顺序是：
 
 ```text
-validate 策略
+validate
 → deployment_pointer.py current
 → check-pointer
-→ plan 或 scenario
+→ plan、advance、abort 或 scenario
+→ 从同一份 release state 渲染 Gateway API HTTPRoute 和 Istio VirtualService
+→ rendered/ 里缺少 HTTPRoute 或 VirtualService 则 Job 失败
 → 上传 release-state.json 与 rendered/
 ```
 
-权限是 `contents: read` 和 `deployments: read`。没有 `deployments: write`，所以它不能移动环境指针，也不能代替 rollback。
+`workflow_dispatch` 输入：
 
-`action=plan` 渲染当前步骤，证据标记为 `unverified`。`action=scenario` 使用合成证据走完步骤。同一次 dispatch 从同一份 release state 写出 Gateway API HTTPRoute 和 Istio VirtualService。Job 里没有 kubeconfig，也不会把清单应用到集群。
+| 输入 | 类型 | 何时使用 |
+| --- | --- | --- |
+| `action` | choice：`plan`、`advance`、`abort`、`scenario` | 必填，默认 `plan` |
+| `strategy` | choice：`canary`、`blue_green`、`multi_cluster_canary`、`multi_cluster_blue_green` | 必填，默认 `multi_cluster_canary` |
+| `environment` | choice：`dev`、`staging`、`production` | 必填，默认 `production` |
+| `service` | string | 必填，DNS-1123 服务名 |
+| `artifact_name` | string | 必填，Artifact Contract v2 的 artifact name |
+| `bundle_sha256` | string | 必填，必须等于当前环境指针 |
+| `source_sha` | string | 必填 |
+| `source_run_id` | string | 必填 |
+| `release_tag` | string | 必填 |
+| `baseline_digest` | string | 必填，当前正在接流量的 digest |
+| `accept_excluded` | boolean | 必填，默认 `false` |
+| `allow_clusters` | string | 可选，逗号分隔的 cluster id |
+| `deny_clusters` | string | 可选，逗号分隔的 cluster id |
+| `active_slot` | choice：`blue`、`green` | 必填，默认 `blue` |
+| `analysis` | string | `advance` 使用。JSON 对象，字段是 `smoke`、`readiness`、`error_rate`、`latency_p95_ms`、`requests` |
+| `state` | string | `advance` 和 `abort` 使用。上一次 `release-state.json` 的全文 |
 
-生产切流用仓库外的控制器消费 `advance` 之后、证据标记为 `operator` 的渲染结果。控制器可以选择 HTTPRoute，也可以选择从同一状态渲染出来的 VirtualService。两边的权重和槽位必须保持这次渲染的结果。
+`plan` 和 `scenario` 用制品字段现场生成状态，不读 `state`。`check-pointer` 仍然先跑：`bundle_sha256` 必须等于 `deployment_pointer.py current` 读到的指针，指针里的 `environment` 必须等于本次 `environment`。
 
-## 16. Jenkins 只调用同一条 CLI
+`advance` 和 `abort` 不能靠上一次运行的 artifact 接着做。`workflow_dispatch` 没有文件输入，下一次运行也不会把上一次的 artifact 重新上传进来。操作者把上一次 artifact 里的 `release-state.json` 压成一行，贴进 `state`。Job 把这个字符串写到工作区的 `release-state.json`，不提交进仓库，然后由 `release_strategy.py advance` 或 `abort` 校验这份 JSON。参考目录上走完一步之后的状态大约 3KB，放得进这个字符串。
 
-`ops/Jenkinsfile` 是调用方，不是第二份策略。它做两件事：
+写完文件之后、调用引擎之前，Job 还核对两件事：状态里的 `candidate_digest` 等于刚刚通过 `check-pointer` 的指针 digest，状态里的 `environment` 等于本次 `environment`。对不上就失败，不会推进另一份发布。
+
+`analysis` 同样是字符串。`advance` 把它写入 `analysis.json`，原样交给引擎。需要哪些字段仍由当前步骤决定，缺字段、超过阈值或 `requests` 不是整数时，引擎拒绝，权重和槽位不变。Workflow 不生成 `smoke=pass` 这类合成通过证据。
+
+`action=plan` 渲染当前步骤，证据标记为 `unverified`。`action=advance` 和 `action=abort` 的证据标记为 `operator`。`action=scenario` 使用合成证据走完步骤，并在摘要里打印：
+
+```text
+synthetic analysis is not production evidence
+```
+
+同一次 dispatch 从同一份 release state 写出 Gateway API HTTPRoute 和 Istio VirtualService。渲染结果里缺任何一种 kind，Job 失败。这个 Job 只上传期望状态，不应用到集群。
+
+生产切流用仓库外的控制器消费 `advance` 或 `abort` 之后、证据标记为 `operator` 的渲染结果。控制器可以选择 HTTPRoute，也可以选择从同一状态渲染出来的 VirtualService。两边的权重和槽位必须保持这次渲染的结果。
+
+## 16. Jenkins 是可选调用方
+
+`ops/Jenkinsfile` 可选。它不是第二份策略，只调用同一条 CLI。它做两件事：
 
 ```text
 检出参数 PLATFORM_SHA 指向的平台提交
@@ -620,7 +657,8 @@ validate 策略
 - 分析失败不改变已打开区域的槽位；`requests` 为布尔值时失败关闭；
 - abort 把每一个已打开区域切回基线槽并清空 inactive，包括已经 confirm 的华东；
 - `completed` 之后不能 abort，要走环境 rollback；
-- 把 `prod-edge-offline` 写进多集群蓝绿的 allow 会因缺少 gateway 失败。
+- 把 `prod-edge-offline` 写进多集群蓝绿的 allow 会因缺少 gateway 失败；
+- `release.yml` 的 `action` 包含 `plan`、`advance`、`abort`、`scenario`；`advance` 把操作者传入的分析 JSON 交给引擎；渲染结果同时包含 HTTPRoute 和 VirtualService；workflow 里没有 kubeconfig，也不包含 `kubectl apply`。
 
 平台校验 `validate.yml` 会执行 `release_strategy.py validate`。
 

@@ -311,7 +311,7 @@ MediaTek / MTK          ⏸ planned
 - cn-east 内的集群共享同一步权重，cn-north 打开前保持 0%，打开后仍然是 canary；
 - 多集群蓝绿是 `multi_cluster_blue_green`：cn-east 然后 cn-north，区域内共用槽位，后开区域打开前不渲染；
 - 集群名单由 PlacementDecision 与 ApplicationSet 钉死，路由不能超出名单；
-- Istio VirtualService 从同一份状态渲染，不是第二份策略；`ops/Jenkinsfile` 只调用 CLI；
+- Istio VirtualService 从同一份状态渲染，不是第二份策略；`release.yml` 先核对指针，再 plan 或 advance，然后同时渲染 HTTPRoute 和 VirtualService；`ops/Jenkinsfile` 只是可选调用方；
 - 环境内蓝绿仍是独立策略：同一环境的 gateway 集群一次切完，预览不进入生产权重；
 - 候选 digest 必须等于该环境当前指针；
 - 真实集群 apply 仍由外部控制器执行。
