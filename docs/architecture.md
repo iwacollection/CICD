@@ -172,7 +172,7 @@ examples/              可跑通的最小示例
 
 晋级把同一个 digest 授权到 `dev`、`staging` 或 `production`。授权之后，流量怎么切、集群名单怎么定，由 [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md) 决定。
 
-环境内灰度和蓝绿调整的是 Gateway API HTTPRoute。多集群灰度 `multi_cluster_canary` 先用 Open Cluster Management PlacementDecision 和 Argo CD ApplicationSet 钉死集群 ID，再只在这份名单里调整 HTTPRoute 权重；后开区域在打开前保持 0%。路由对象不能把制品送到名单之外的集群。
+环境内灰度和蓝绿调整的是 Gateway API HTTPRoute。多集群灰度 `multi_cluster_canary` 先用 Open Cluster Management PlacementDecision 和 Argo CD ApplicationSet 钉死集群 ID，再只在这份名单里调整 HTTPRoute 权重；后开区域在打开前保持 0%。多集群蓝绿 `multi_cluster_blue_green` 使用同一份名单和区域顺序，但在名单内做原子槽位切换，预览 header 不改变生产权重，后开区域打开前保持基线。路由对象不能把制品送到名单之外的集群。
 
 ## 11. 后续生产化扩展
 

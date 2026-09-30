@@ -101,7 +101,8 @@ Artifact Contract v2
 
 7. [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md)
    - 多集群灰度是 `multi_cluster_canary`：cn-east 然后 cn-north，区域内同权，后开区域打开前为 0%；
-   - 名单用 PlacementDecision 与 ApplicationSet 钉死，权重用 HTTPRoute；
+   - 多集群蓝绿是 `multi_cluster_blue_green`：同一区域顺序，区域内共用槽位，预览 header 不改变生产权重；
+   - 名单用 PlacementDecision 与 ApplicationSet 钉死，流量用 HTTPRoute；
    - 候选 digest 必须已经是环境指针。
 
 8. [生产生命周期真实验收记录](production-verification.md)
@@ -308,8 +309,9 @@ MediaTek / MTK          ⏸ planned
 
 - 多集群灰度是 `multi_cluster_canary`：跨集群、跨区域的 HTTPRoute 权重；
 - cn-east 内的集群共享同一步权重，cn-north 打开前保持 0%，打开后仍然是 canary；
+- 多集群蓝绿是 `multi_cluster_blue_green`：cn-east 然后 cn-north，区域内共用槽位，后开区域打开前不渲染；
 - 集群名单由 PlacementDecision 与 ApplicationSet 钉死，路由不能超出名单；
-- 蓝绿仍是独立策略：生产流量一次切完，预览不进入生产权重；
+- 环境内蓝绿仍是独立策略：同一环境的 gateway 集群一次切完，预览不进入生产权重；
 - 候选 digest 必须等于该环境当前指针；
 - 真实集群 apply 仍由外部控制器执行。
 

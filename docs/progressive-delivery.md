@@ -38,13 +38,25 @@ Build once
 
 因此本仓库把 `multi_cluster_canary` 做成一等策略。它按区域顺序打开，区域内所有入选集群共享同一步权重，后开区域在打开前保持 0% canary。后开区域仍然按 canary 权重推进，不会改成蓝绿。
 
+环境内 `blue_green` 也有同样的边界：它会把该环境里每一个 `traffic=gateway` 的集群放进同一次原子切换。参考目录的 production 因此会让 cn-east 和 cn-north 在同一步切槽。这不是按区域展开的蓝绿。
+
+跨区域蓝绿要同时满足两件事，而且不能退回到权重爬坡：
+
+```text
+集群名单：精确到 cluster id，路由不能把名单外面的集群加进来
+流量：名单里的集群共用同一个蓝绿槽位，生产权重始终是 100，后开区域在打开前保持基线
+```
+
+因此 `multi_cluster_blue_green` 也是一等策略。它使用和多集群灰度相同的区域顺序与精确名单，但流量策略仍是 `blue_green`。预览 header 不改变生产权重。
+
 ## 3. 方法：路由和集群管理各管一件事
 
 | 发布方式 | 要决定的事 | 方法 | 本仓库钉死的工具 |
 | --- | --- | --- | --- |
 | 环境内灰度 `canary` | 同一环境里已选中的 gateway 集群，如何用同一步权重分配新旧版本 | 路由 | Gateway API `HTTPRoute` 后端权重 |
-| 蓝绿 `blue_green` | 新旧版本如何各占一个槽位，并一次切完生产流量 | 路由，而且必须原子切换 | Gateway API `HTTPRoute`；预览使用独立 header |
+| 蓝绿 `blue_green` | 同一环境里已选中的 gateway 集群，如何各占一个槽位并一次切完生产流量 | 路由，而且必须原子切换 | Gateway API `HTTPRoute`；预览使用独立 header |
 | 多集群灰度 `multi_cluster_canary` | 多个区域、每个区域内多个集群，如何按同一套灰度权重展开 | 集群管理决定名单，路由只改名单内的权重 | OCM `PlacementDecision` + Argo CD `ApplicationSet` list generator，加上 Gateway API `HTTPRoute` |
+| 多集群蓝绿 `multi_cluster_blue_green` | 多个区域、每个区域内多个集群，如何共用一个槽位并一次切完，后开区域在打开前保持基线 | 集群管理决定名单，路由只在名单内做原子切换 | OCM `PlacementDecision` + Argo CD `ApplicationSet` list generator，加上 Gateway API `HTTPRoute` |
 
 灰度如果只靠“先发 1 个集群，再发其余集群”，控制的是集群成员，不是 1% 的请求。那是波次，不是灰度。
 
@@ -58,6 +70,14 @@ Build once
 先用集群管理得到这一区域的精确 cluster id 名单
 再只在这份名单里调整 HTTPRoute 的 canary 权重
 下个区域没打开时，不渲染它的路由，权重保持 0
+```
+
+`multi_cluster_blue_green` 的实现是：
+
+```text
+先用同一份集群管理得到这一区域的精确 cluster id 名单
+再只在这份名单里做蓝绿槽位切换，生产后端权重保持 100
+下个区域没打开时，不渲染它的路由，服务 digest 保持基线
 ```
 
 Gateway API 是路由合同，而不是某一家服务网格。能实现 HTTPRoute 的 Istio、Contour、NGINX Gateway 或 Envoy Gateway 都可以做数据面。仓库不把 VirtualService、Ingress 注解权重写成第二份事实来源，避免两套权重漂移。
@@ -87,7 +107,7 @@ release.yml / release_strategy.py
   按 ClusterPin 应用到真实集群
         |
         v
-abort（区域灰度尚未全部完成时）
+abort（发布尚未 completed：已打开区域收回基线；这不是 rollback）
   或 rollback.yml（发布 completed 之后要回到旧 digest）
 ```
 
@@ -144,7 +164,7 @@ baseline_digest != bundle_sha256
 
 第一条例说明候选版本已经晋级到这个环境。第二条说明确实有一个旧版本正在服务；候选已经是基线时，没有可发布的差异。引擎不因为灰度再构建一次。
 
-`release.yml` 会调用 `deployment_pointer.py current`，再用 `check-pointer` 核对。操作者手填的 digest 和环境指针不一致时，Job 失败。
+`release.yml` 会调用 `deployment_pointer.py current`，再用 `check-pointer` 核对。操作者手填的 digest 和环境指针不一致时，Job 失败。指针里的 `bundle_sha256` 也必须是 64 位小写十六进制；格式不对时先失败，不会把两份非法字符串的相等当成通过。指针的 `environment` 必须等于这次发布的环境。
 
 ## 7. 环境内灰度
 
@@ -270,7 +290,53 @@ confirm 之前 abort 会把 active 槽切回基线槽，并清掉 inactive 上�
 
 和多集群灰度一样，同一环境里没有 gateway 的集群必须 `--accept-excluded` 才会被排除，排除后保持基线。
 
-## 10. 分析证据
+计划生成时这一波已经打开，所以 `plan` 会渲染当前期望状态，证据标记为 `unverified`。此时生产路由权重是 100，后端是基线槽，inactive 还没有候选 digest，也没有预览路由。这一步不消耗分析。`deploy_inactive` 才在 readiness 通过后把候选写入 inactive。参考目录的 production 会把 cn-east 和 cn-north 放进同一波，两地在同一步切槽。要先切华东、让华北保持基线且不出现在渲染结果里，用第 10 节。
+
+## 10. 跨集群、跨区域蓝绿
+
+策略名：`multi_cluster_blue_green`。这是跨集群、跨区域蓝绿的做法，不是多集群灰度的后半段，也不是把权重从 0 调到 100。
+
+方法分成两层：
+
+```text
+method = cluster_management
+traffic_strategy = blue_green
+工具 = PlacementDecision + ApplicationSet list generator + HTTPRoute
+```
+
+区域顺序写在 `region_order`，参考目录是 `cn-east` 然后 `cn-north`。每一波的 `strategy` 必须是 `blue_green`。策略校验会拒绝把后开区域写成 `canary`，也会拒绝只配置一个区域。`abort` 必须是 `restore_baseline_slot`。
+
+| 顺序 | 波次 | 区域 | 选择器 | 流量策略 | 参考目录命中的集群 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `cn-east` | cn-east | environment=production, region=cn-east | blue_green | `prod-cn-east-a`、`prod-cn-east-b`、`prod-cn-east-canary` |
+| 2 | `cn-north` | cn-north | environment=production, region=cn-north | blue_green | `prod-cn-north-a` |
+
+命中规则与第 8 节相同：选择器全部匹配、不在更早的波次里、服从 allow 和 deny，并且 `traffic=gateway`。cn-east 里三个 gateway 集群共用这一波的同一个槽位。cn-north 在打开之前不渲染。
+
+`prod-edge-offline` 的 `traffic=none` 不在任何波次。不写进 `--allow` 时，它只是未选中，保持基线。把它写进 `--allow`，计划直接失败，错误说明它没有 gateway，并且不会把它放进 `ClusterPin`。只 allow `prod-cn-north-a` 会让华东变成空波次，整次发布失败，不会跳过华东。对 dev 使用这份 production 波次也会失败。
+
+`--active-slot` 是每个区域打开时的基线槽，默认 `blue`。同一区域内的集群永远使用这一步的同一个 active 槽、同一对 slot digest 和同一个预览标记。
+
+步骤仍是蓝绿的四步，不是 1、5、25、50、100：
+
+| 时刻 | cn-east 三个集群 | cn-north |
+| --- | --- | --- |
+| 计划生成，华东已打开 | 生产 100% 在基线槽，inactive 还是空的，没有预览路由 | 未打开。保持基线，不出现在渲染结果里 |
+| `deploy_inactive` | 候选写入 inactive，生产仍是基线槽，权重 100 | 仍未打开 |
+| `preview` | 生产仍是基线槽，权重 100。header `x-release-preview: true` 打到 inactive | 仍未打开 |
+| `cutover` | 生产一次切到候选槽，权重 100，预览路由删除 | 仍未打开 |
+| `confirm` | 保持候选槽，基线槽仍保留旧 digest | 此时才打开，生产 100% 在基线槽，inactive 为空 |
+| 华北走完四步 | 保持候选槽 | `confirm` 后发布 `completed`，基线槽仍保留旧 digest |
+
+预览 header 不改变生产权重。生产 HTTPRoute 在 cutover 之前后端一直是基线槽，权重 100，规则里没有 header 匹配。预览是另一条 HTTPRoute。cutover 不做 50/50，也不出现 canary 后端。
+
+分析阈值和失败行为与第 9 节相同。`deploy_inactive` 要求 readiness，`preview` 要求 smoke，`cutover` 要求 error_rate 和 latency_p95，`confirm` 不要求分析。分析失败不改变任何区域的槽位。缺证据、`requests` 不是整数（包括布尔值）或超过阈值，都不会切槽。
+
+`abort` 把每一个已经打开的区域切回基线槽，并清掉 inactive 上的候选 digest。华东已经 confirm、华北还停在 preview 时中止，两个区域都回到基线，不能留下“华东已经是新版本、华北失败了但华东继续接新流量”。未打开的区域本来就不在渲染结果里。`completed` 之后不能 abort，要走环境 rollback。abort 不是 rollback：rollback 只在发布完成后恢复历史 digest。
+
+进行中的渲染只包含已经打开的波次。华东还在 preview 时，华北的 Placement、ApplicationSet 和 HTTPRoute 都不存在。
+
+## 11. 分析证据
 
 `advance` 读取一个 JSON 对象。需要哪些字段由当前步骤决定。
 
@@ -294,7 +360,7 @@ error_rate 大于 0.01
 latency_p95_ms 大于 300
 ```
 
-`requests` 必须是整数。缺证据即失败，不会把缺省值当成通过。失败时当前区域和已经完成的区域都保持原权重。
+`requests` 必须是整数。布尔值在 Python 里是 `int` 的子类，引擎仍把它当成缺证据，不会当成通过。缺字段或分析对象不是 JSON object 都会失败。失败时当前区域和已经完成的区域都保持原权重或原槽位。
 
 `scenario` 子命令会自行构造一份全通过的证据，把状态机走到 `completed`，用来检查最终期望状态。workflow 里对应的句子是：
 
@@ -304,7 +370,7 @@ synthetic analysis is not production evidence
 
 生产推进只能使用 `advance`，并且证据来自真实流量或真实探活。
 
-## 11. 渲染结果
+## 12. 渲染结果
 
 每个已经打开的波次产出这些 JSON。Kubernetes 和 Argo CD 可以直接 apply JSON。
 
@@ -329,7 +395,7 @@ stableWeight / canaryWeight = 当前区域的这一步
 
 HTTPRoute、PlacementDecision 和 ApplicationSet 里的集群 ID 必须等于这一波的 `ClusterPin.clusterIds`。未打开的区域、其他环境、`prod-edge-offline` 都不会出现。
 
-蓝绿元素带着 `blueDigest`、`greenDigest`、`activeSlot`。预览步骤额外带 `previewDigest`。
+蓝绿元素带着 `blueDigest`、`greenDigest`、`activeSlot`。预览步骤额外带 `previewDigest`。多集群蓝绿在同一波次里这些字段完全相同，`canaryWeight` 保持 `0`。生产 HTTPRoute 只有一个后端，权重 100。预览路由只在 preview 步骤出现，而且不改生产路由。非法的 `evidence` 模式会被拒绝，不会写出文档。
 
 每份对象都有注解：
 
@@ -345,7 +411,7 @@ cicd.platform/evidence
 
 `evidence` 为 `unverified`（刚 plan）、`operator`（advance 或 abort）或 `synthetic`（scenario）。控制器可以拒绝 apply `synthetic` 和 `unverified`。
 
-## 12. 外部控制器合同
+## 13. 外部控制器合同
 
 控制器是仓库之外的组件。它要做的检查：
 
@@ -359,7 +425,7 @@ cicd.platform/evidence
 
 控制面测试通过，只说明期望状态符合上面的规则。它不表示生产集群已经切了流量。
 
-## 13. 命令
+## 14. 命令
 
 在仓库根目录执行。
 
@@ -387,7 +453,7 @@ python3 scripts/ci/release_strategy.py plan \
   --out-dir rendered
 ```
 
-推进当前区域的下一步。证据失败时权重不变：
+推进当前区域的下一步。证据失败时权重或槽位不变：
 
 ```bash
 python3 scripts/ci/release_strategy.py advance \
@@ -443,7 +509,26 @@ python3 scripts/ci/release_strategy.py plan \
   --out-dir rendered
 ```
 
-蓝绿仍然单独使用 `--strategy blue_green`。`--active-slot` 表示当前基线槽，默认 `blue`。
+环境内蓝绿使用 `--strategy blue_green`。production 上它和灰度一样需要 `--accept-excluded`，并且 cn-east 与 cn-north 在同一步切槽。`--active-slot` 表示当前基线槽，默认 `blue`。
+
+跨区域蓝绿使用 `--strategy multi_cluster_blue_green`。不需要 `--accept-excluded`。华东三个集群共用一个槽位，华北在 confirm 华东之前不出现在渲染结果里。预览 header 不改变生产权重：
+
+```bash
+python3 scripts/ci/release_strategy.py plan \
+  --strategy multi_cluster_blue_green \
+  --environment production \
+  --service checkout \
+  --artifact-name checkout-generic-linux-x86_64-gcc \
+  --bundle-sha256 <candidate-64-hex> \
+  --source-sha <source-40-hex> \
+  --source-run-id <run-id> \
+  --release-tag artifact-v2-<archive-tag-suffix> \
+  --baseline-digest <serving-64-hex> \
+  --environment-pointer-digest <candidate-64-hex> \
+  --active-slot blue \
+  --out release-state.json \
+  --out-dir rendered
+```
 
 核对指针文件：
 
@@ -460,9 +545,9 @@ python3 scripts/ci/release_strategy.py check-pointer \
 
 `scenario` 只用于本地把状态机跑完并渲染最终 JSON。不要把这份渲染结果 apply 到生产。
 
-## 14. Workflow
+## 15. Workflow
 
-`.github/workflows/release.yml` 只在 `main` 上手工触发。默认策略是 `multi_cluster_canary`。
+`.github/workflows/release.yml` 只在 `main` 上手工触发。可选策略是 `canary`、`blue_green`、`multi_cluster_canary`、`multi_cluster_blue_green`。默认策略是 `multi_cluster_canary`。
 
 ```text
 validate 策略
@@ -476,7 +561,7 @@ validate 策略
 
 `action=plan` 渲染当前步骤，证据标记为 `unverified`。`action=scenario` 使用合成证据走完步骤。生产切流用仓库外的控制器消费 `advance` 之后、证据标记为 `operator` 的渲染结果。
 
-## 15. 已经验证的不变量
+## 16. 已经验证的不变量
 
 `tests/test_progressive_delivery.py` 锁定这些行为：
 
@@ -498,12 +583,22 @@ validate 策略
 - 把 `prod-edge-offline` 写进 allow 会因缺少 gateway 失败，不会进入 pin；
 - 路由里的集群 ID 不会超出该波次的 ClusterPin；
 - ApplicationSet 只有 list generator；
-- 候选 digest 必须等于环境指针，且不能已经是基线。
+- 候选 digest 必须等于环境指针，且不能已经是基线；
+- `check-pointer` 拒绝非 SHA256 的指针 digest，也拒绝环境和 digest 不相等；
+- 环境内蓝绿的 `plan` 会渲染基线槽，生产权重 100，没有预览路由；cn-east 和 cn-north 在同一步切槽；
+- `multi_cluster_blue_green` 的区域顺序是 cn-east 然后 cn-north，两波都是 blue_green；
+- 华东三个集群共用同一个槽位，华北在打开前保持基线且不出现在渲染结果里；
+- 预览 header 不改变生产权重，cutover 是权重 100 的原子切换，不会出现 1、5、25、50、100；
+- 华东 confirm 后华北才打开，打开时 inactive 仍为空，策略仍是 blue_green；
+- 分析失败不改变已打开区域的槽位；`requests` 为布尔值时失败关闭；
+- abort 把每一个已打开区域切回基线槽并清空 inactive，包括已经 confirm 的华东；
+- `completed` 之后不能 abort，要走环境 rollback；
+- 把 `prod-edge-offline` 写进多集群蓝绿的 allow 会因缺少 gateway 失败。
 
 平台校验 `validate.yml` 会执行 `release_strategy.py validate`。
 
-## 16. 还没有做的事
+## 17. 还没有做的事
 
-真实集群 apply 需要集群里的 Gateway、带 `cicd.platform/cluster-id` 标签的 OCM ManagedCluster，以及消费这些 JSON 的 Argo CD。这些资源不在本仓库。控制面测试通过，不等于生产集群已经完成灰度。
+真实集群 apply 需要集群里的 Gateway、带 `cicd.platform/cluster-id` 标签的 OCM ManagedCluster，以及消费这些 JSON 的 Argo CD。这些资源不在本仓库。控制面测试通过，不等于生产集群已经完成灰度或蓝绿。
 
-把 kubeconfig 放进 GitHub Actions，或者在 Job 里直接 `kubectl apply`，都违反第 12 节的合同。
+把 kubeconfig 放进 GitHub Actions，或者在 Job 里直接 `kubectl apply`，都违反第 13 节的合同。

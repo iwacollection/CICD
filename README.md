@@ -169,7 +169,7 @@ rollback to historical production digest
 | 长期制品归档 | ✅ | 当前使用 GitHub Releases |
 | `dev -> staging -> production` | ✅ | exact artifact identity 强制晋级 |
 | Production Rollback | ✅ | `A -> B -> A`，旧版本不重新构建 |
-| 灰度 / 蓝绿 / 跨集群跨区域灰度 | ✅ | 同一 digest 上做路由；多集群灰度按区域展开并钉死集群名单；见下文 |
+| 灰度 / 蓝绿 / 跨集群跨区域发布 | ✅ | 同一 digest 上做路由；多集群灰度和多集群蓝绿都按区域展开并钉死集群名单；见下文 |
 
 ### 4.2 平台已实现
 
@@ -186,7 +186,8 @@ rollback to historical production digest
 | RK 物理接入准备 | ✅ Ready | x86_64 build host → arm64 target |
 | 环境内灰度 | ✅ 控制面 | Gateway API HTTPRoute 权重，逐步 1→5→25→50→100；同一环境的 gateway 集群同步同一步 |
 | 多集群灰度 | ✅ 控制面 | `multi_cluster_canary`：cn-east 然后 cn-north，区域内集群同权，后开区域打开前保持 0%，名单用 PlacementDecision + ApplicationSet 钉死 |
-| 蓝绿发布 | ✅ 控制面 | HTTPRoute 原子切换，预览流量不进入生产权重；不作为多集群灰度的后半段 |
+| 蓝绿发布 | ✅ 控制面 | HTTPRoute 原子切换，预览流量不进入生产权重；同一环境的 gateway 集群在同一步切槽 |
+| 多集群蓝绿 | ✅ 控制面 | `multi_cluster_blue_green`：cn-east 然后 cn-north，区域内集群共用槽位，后开区域打开前不渲染，预览 header 不改变生产权重，切换不是权重爬坡 |
 
 ### 4.3 仍需真实外部资源
 
@@ -325,7 +326,7 @@ CICD/
 │   ├── toolchain-images.yml               # Toolchain Supply Chain
 │   ├── archive-artifacts.yml              # 长期归档
 │   ├── promote.yml                        # dev/staging/production
-│   ├── release.yml                        # 环境内灰度 / 蓝绿 / 跨区域灰度期望状态
+│   ├── release.yml                        # 环境内灰度 / 蓝绿 / 跨区域灰度 / 跨区域蓝绿期望状态
 │   ├── rollback.yml                       # 历史 digest rollback
 │   ├── platform-health.yml                # Platform SLO
 │   ├── repository-governance.yml          # Ruleset drift
@@ -341,7 +342,7 @@ CICD/
 │   ├── hardware-rollout.json              # SoC rollout policy
 │   ├── supply-chain-policy.json
 │   ├── promotion-policy.json
-│   ├── release-strategies.json            # 环境内灰度 / 蓝绿 / 跨区域灰度
+│   ├── release-strategies.json            # 环境内灰度 / 蓝绿 / 跨区域灰度 / 跨区域蓝绿
 │   ├── clusters.json                      # 集群目录与流量能力
 │   ├── platform-slo.json
 │   └── repository-governance-policy.json
@@ -432,7 +433,8 @@ Rollback 只接受同环境历史 Deployment ID，并创建新的 rollback point
 | --- | --- | --- |
 | 多个区域里的多个集群如何按灰度比例展开 | 先钉死集群名单，再只改名单内的权重 | OCM `PlacementDecision` + Argo CD `ApplicationSet` list generator，加上 Gateway API `HTTPRoute` |
 | 同一环境里所有 gateway 集群如何用同一步权重分配请求 | 路由 | Gateway API `HTTPRoute` 后端权重。策略名是 `canary`。cn-east 和 cn-north 会一起变化 |
-| 新旧版本如何各占一个槽位，验证后一次切完生产流量 | 路由，而且必须是原子切换 | Gateway API `HTTPRoute`，预览走独立 header。策略名是 `blue_green` |
+| 同一环境里所有 gateway 集群如何各占一个槽位，验证后一次切完生产流量 | 路由，而且必须是原子切换 | Gateway API `HTTPRoute`，预览走独立 header。策略名是 `blue_green`。cn-east 和 cn-north 会一起切换 |
+| 多个区域里的多个集群如何共用槽位并一次切完，后开区域在打开前保持基线 | 先钉死集群名单，再只在名单内做原子切换 | OCM `PlacementDecision` + Argo CD `ApplicationSet` list generator，加上 Gateway API `HTTPRoute`。策略名是 `multi_cluster_blue_green` |
 
 只给 `role=canary` 的 `prod-cn-east-canary` 做权重，再把后面的区域改成蓝绿，得到的不是跨区域灰度。环境内 `canary` 会让华东和华北使用同一步权重，也做不到“当前区域加权重，后开区域保持 0%”。路由如果没有精确名单，未选中的集群仍会接到新 digest。所以多集群灰度同时要名单和权重，而且路由不能扩大名单。
 
@@ -443,6 +445,30 @@ Rollback 只接受同环境历史 Deployment ID，并创建新的 rollback point
 ```bash
 python3 scripts/ci/release_strategy.py plan \
   --strategy multi_cluster_canary \
+  --environment production \
+  --service checkout \
+  --artifact-name <artifact-name> \
+  --bundle-sha256 <candidate-64-hex> \
+  --source-sha <source-40-hex> \
+  --source-run-id <run-id> \
+  --release-tag <artifact-v2-tag> \
+  --baseline-digest <serving-64-hex> \
+  --environment-pointer-digest <candidate-64-hex> \
+  --out release-state.json \
+  --out-dir rendered
+```
+
+### 9.2 多集群蓝绿：跨集群、跨区域
+
+生产上要按区域做蓝绿，用 `multi_cluster_blue_green`。它不是把 `multi_cluster_canary` 的后半段改成蓝绿，也不会把权重从 1% 爬到 100%。参考目录先打开 cn-east，再打开 cn-north。cn-east 里的 `prod-cn-east-a`、`prod-cn-east-b`、`prod-cn-east-canary` 共用同一个槽位。cn-north 在华东 `confirm` 之前保持基线 digest，不出现在渲染结果里。
+
+预览使用 header `x-release-preview: true`，生产 HTTPRoute 的权重保持 100，后端仍是基线槽。cutover 把生产后端一次换成候选槽。`abort` 把每一个已经打开的区域切回基线槽。`completed` 之后不能 abort，要走环境 rollback。
+
+`prod-edge-offline` 没有 Gateway。多集群蓝绿默认不选它。若用 `--allow` 明确点名它，计划失败关闭，不会把它写进 `ClusterPin`。分析失败不改变槽位。环境指针必须等于候选 digest，而且必须是 64 位小写十六进制。
+
+```bash
+python3 scripts/ci/release_strategy.py plan \
+  --strategy multi_cluster_blue_green \
   --environment production \
   --service checkout \
   --artifact-name <artifact-name> \
