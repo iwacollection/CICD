@@ -666,6 +666,42 @@ class ProgressiveDeliveryTests(unittest.TestCase):
             workflow.index("release_strategy.py plan") if "release_strategy.py plan" in workflow else workflow.index("release_strategy.py"),
         )
 
+    def test_operator_manual_covers_release_controls_without_the_engine(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        guide = (ROOT / "docs" / "progressive-delivery.md").read_text(encoding="utf-8")
+        shared = (
+            "1、5、25、50、100",
+            "x-release-preview",
+            "synthetic analysis is not production evidence",
+            "workflow_dispatch",
+            "PLATFORM_SHA",
+            "rollback.yml",
+            "prod-edge-offline",
+            "analysis.json",
+            "--accept-excluded",
+            "list generator",
+            "kubectl apply",
+            "completed release cannot be aborted; use environment rollback",
+            "candidate digest must match the environment pointer",
+        )
+        for phrase in shared:
+            self.assertIn(phrase, readme, phrase)
+            self.assertIn(phrase, guide, phrase)
+        for phrase in (
+            "COMMAND",
+            "EVIDENCE_MODE",
+            "explicitly targeted clusters lack gateway traffic",
+            "shift_all_weight_to_baseline",
+            "restore_baseline_slot",
+            "deploy_inactive",
+            "confirm",
+        ):
+            self.assertIn(phrase, guide, phrase)
+        self.assertIn("action=abort", readme)
+        self.assertIn("不执行 `kubectl apply`", readme)
+        self.assertLess(guide.index("怎么选方法"), guide.index("分析证据"))
+        self.assertLess(guide.index("GitHub Actions"), guide.index("Jenkins 是可选调用方"))
+
     def test_environment_blue_green_plan_renders_baseline_and_switches_every_region_together(self) -> None:
         state = self._plan("blue_green", accept_excluded=True)
         self.assertEqual(state["region_order"], [])

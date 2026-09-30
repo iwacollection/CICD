@@ -303,18 +303,21 @@ MediaTek / MTK          ⏸ planned
 - OIDC / KMS / HSM；
 - 依赖混淆与签名。
 
-## [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md)
+## [灰度、蓝绿与跨集群跨区域发布操作手册](progressive-delivery.md)
+
+这是操作手册。按手册里的命令、输入和渲染检查执行，不必先读 Python。
 
 重点：
 
-- 多集群灰度是 `multi_cluster_canary`：跨集群、跨区域的 HTTPRoute 权重；
-- cn-east 内的集群共享同一步权重，cn-north 打开前保持 0%，打开后仍然是 canary；
-- 多集群蓝绿是 `multi_cluster_blue_green`：cn-east 然后 cn-north，区域内共用槽位，后开区域打开前不渲染；
-- 集群名单由 PlacementDecision 与 ApplicationSet 钉死，路由不能超出名单；
-- Istio VirtualService 从同一份状态渲染，不是第二份策略；`release.yml` 先核对指针，再 plan 或 advance，然后同时渲染 HTTPRoute 和 VirtualService；`ops/Jenkinsfile` 只是可选调用方；
-- 环境内蓝绿仍是独立策略：同一环境的 gateway 集群一次切完，预览不进入生产权重；
-- 候选 digest 必须等于该环境当前指针；
-- 真实集群 apply 仍由外部控制器执行。
+- 先选方法：环境内 `canary` / `blue_green`，或跨区域 `multi_cluster_canary` / `multi_cluster_blue_green`；
+- 多集群灰度是 `multi_cluster_canary`：cn-east 然后 cn-north，区域内同权，后开区域打开前为 0% 且不渲染，打开后仍然是 canary；
+- 多集群蓝绿是 `multi_cluster_blue_green`：同一区域顺序，区域内共用槽位，预览 header 不改变生产权重，切换不是权重爬坡；
+- 集群名单由 PlacementDecision 与 ApplicationSet list generator 钉死，HTTPRoute 和 VirtualService 不能超出名单；
+- Istio VirtualService 从同一份状态渲染，不是第二份策略；
+- `release.yml` 的 `workflow_dispatch` 先核对指针，再 `plan`、`advance`、`abort` 或 `scenario`；`advance` 使用操作者提供的分析 JSON；
+- `ops/Jenkinsfile` 只调用 `validate` / `plan` / `advance` / `render`；
+- 进行中用 abort 收回基线；`completed` 之后走 `rollback.yml`，不能 abort；
+- 候选 digest 必须等于该环境当前指针；仓库不执行 `kubectl apply`，也不把本地渲染当成已上线。
 
 ## [制品、晋级与回滚](artifacts-promotion-and-rollback.md)
 
