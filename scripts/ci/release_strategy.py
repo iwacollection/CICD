@@ -1647,10 +1647,32 @@ def check_pointer(pointer: dict[str, Any], *, bundle_sha256: str, environment: s
         raise ValueError("environment pointer digest does not match release candidate")
 
 
+_RENDERED_JSON_SUFFIXES = (
+    "-pin.json",
+    "-placement.json",
+    "-decision.json",
+    "-appset.json",
+    "-route.json",
+    "-preview.json",
+    "-preview-vs.json",
+    "-vs.json",
+)
+
+
 def _write_documents(documents: list[tuple[str, dict[str, Any]]], out_dir: Path) -> None:
+    """Write the current render and drop manifest files this render no longer emits.
+
+    Operators reuse ``--out-dir`` across plan and advance. A later step must not
+    leave the previous preview route, or a region that is not open, on disk.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
+    written: set[str] = set()
     for filename, document in documents:
         (out_dir / filename).write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        written.add(filename)
+    for path in out_dir.glob("*.json"):
+        if path.is_file() and path.name not in written and path.name.endswith(_RENDERED_JSON_SUFFIXES):
+            path.unlink()
 
 
 def _emit(result: dict[str, Any]) -> None:

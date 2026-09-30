@@ -300,7 +300,7 @@ abort = shift_all_weight_to_baseline
 
 `abort` 把每一个已经打开的区域收成 stable 权重 100、基线 digest。华东已经完成、华北停在 5% 时中止，两个区域都回到基线，不能留下“华东已经是新版本、华北失败了但华东继续接新流量”。未打开的区域本来就不在渲染结果里。`completed` 之后不能 abort。
 
-进行中的渲染只包含已经打开的波次。华东还在 25% 时，华北的 Placement、ApplicationSet、HTTPRoute 和 VirtualService 都不存在。
+进行中的渲染只包含已经打开的波次。华东还在 25% 时，华北的 Placement、ApplicationSet、HTTPRoute 和 VirtualService 都不存在。同一个 `--out-dir` 再次渲染时，这次没有写出的清单会被删掉，所以目录里也不会留下上一次的预览文件或尚未打开的区域。
 
 不需要 `--accept-excluded`。命令：
 
@@ -413,7 +413,7 @@ region_order = cn-east 然后 cn-north
 
 `abort` 把每一个已经打开的区域切回基线槽，并清掉 inactive 上的候选 digest。华东已经 confirm、华北还停在 preview 时中止，两个区域都回到基线，不能留下“华东已经是新版本、华北失败了但华东继续接新流量”。未打开的区域本来就不在渲染结果里。`completed` 之后不能 abort，要走环境 rollback。abort 不是 rollback：rollback 只在发布完成后恢复历史 digest。
 
-进行中的渲染只包含已经打开的波次。华东还在 preview 时，华北的 Placement、ApplicationSet、HTTPRoute 和 VirtualService 都不存在。
+进行中的渲染只包含已经打开的波次。华东还在 preview 时，华北的 Placement、ApplicationSet、HTTPRoute 和 VirtualService 都不存在。同一个 `--out-dir` 再次渲染时，cutover 会删掉上一次留下的预览文件。
 
 从 `plan` 到 `completed` 一共 8 次成功的 advance：华东 4 次，华北 4 次。华东 `confirm` 那一次会同时打开华北。
 
@@ -791,6 +791,7 @@ synthetic analysis is not production evidence
 - `prod-edge-offline`、dev、staging 保持基线，且不出现在渲染结果里；
 - 把 `prod-edge-offline` 写进 allow 会因缺少 gateway 失败，不会进入 pin；
 - 路由里的集群 ID 不会超出该波次的 ClusterPin；
+- 同一个 `--out-dir` 再次渲染时，会删掉这次不再写出的清单，包括已经结束的预览路由和尚未打开区域的文件；
 - 同一集群的 VirtualService 权重与 HTTPRoute 相同，且和为 100；
 - 蓝绿生产 VirtualService 把 100% 流量送到当前槽，没有权重爬坡；
 - 预览 VirtualService 只有 header `x-release-preview` 的 match，不改变生产 route；
