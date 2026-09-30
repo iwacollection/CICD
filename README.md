@@ -169,7 +169,7 @@ rollback to historical production digest
 | 长期制品归档 | ✅ | 当前使用 GitHub Releases |
 | `dev -> staging -> production` | ✅ | exact artifact identity 强制晋级 |
 | Production Rollback | ✅ | `A -> B -> A`，旧版本不重新构建 |
-| 灰度 / 蓝绿 / 跨集群跨区域发布 | ✅ | 同一 digest 上做路由；多集群灰度和多集群蓝绿都按区域展开并钉死集群名单；见下文 |
+| 灰度 / 蓝绿 / 跨集群跨区域发布 | ✅ | 同一 digest 上做路由；多集群灰度和多集群蓝绿都按区域展开并钉死集群名单；Istio VirtualService 从同一状态渲染，不是第二份策略；见下文 |
 
 ### 4.2 平台已实现
 
@@ -184,10 +184,13 @@ rollback to historical production digest
 | HIL Lease | ✅ 已实现 | 真机独占租约与释放语义 |
 | Vendor Adapter | ✅ 已实现 | RK/Qcom/MTK build + HIL 适配层 |
 | RK 物理接入准备 | ✅ Ready | x86_64 build host → arm64 target |
-| 环境内灰度 | ✅ 控制面 | Gateway API HTTPRoute 权重，逐步 1→5→25→50→100；同一环境的 gateway 集群同步同一步 |
+| 环境内灰度 | ✅ 控制面 | Gateway API HTTPRoute 权重，逐步 1→5→25→50→100；同一环境的 gateway 集群同步同一步；同一次渲染写出权重相同的 Istio VirtualService |
 | 多集群灰度 | ✅ 控制面 | `multi_cluster_canary`：cn-east 然后 cn-north，区域内集群同权，后开区域打开前保持 0%，名单用 PlacementDecision + ApplicationSet 钉死 |
-| 蓝绿发布 | ✅ 控制面 | HTTPRoute 原子切换，预览流量不进入生产权重；同一环境的 gateway 集群在同一步切槽 |
+| 蓝绿发布 | ✅ 控制面 | HTTPRoute 原子切换，预览流量不进入生产权重；同一环境的 gateway 集群在同一步切槽；VirtualService 把 100% 生产流量送到当前槽 |
 | 多集群蓝绿 | ✅ 控制面 | `multi_cluster_blue_green`：cn-east 然后 cn-north，区域内集群共用槽位，后开区域打开前不渲染，预览 header 不改变生产权重，切换不是权重爬坡 |
+| Istio 数据面适配 | ✅ 控制面渲染 | 同一 release state 再渲染 VirtualService。灰度权重与 HTTPRoute 相同且和为 100。这不是第二份策略 |
+| GitHub Actions 灰度 / 蓝绿 | ✅ 控制面 | `release.yml` 的 `workflow_dispatch`：`plan`、`advance`、`abort`、`scenario`。先核对环境指针，再调用同一 CLI，然后同时渲染 HTTPRoute 和 VirtualService。`advance` 读取操作者提供的分析 JSON，不用合成通过证据 |
+| Jenkins 调用方 | ✅ 可选 | `ops/Jenkinsfile` 可选，检出固定平台 SHA 后只调用同一条 CLI；不写权重、不保存 kubeconfig、不执行 kubectl apply |
 
 ### 4.3 仍需真实外部资源
 
@@ -199,7 +202,7 @@ rollback to historical production digest
 | 企业依赖代理 | ⏳ | Nexus/Artifactory 架构已定义，未实际部署 |
 | 外部长期 Artifact Repository | ⏳ | 当前 GitHub Releases 已可用，规模化后再接 S3/MinIO/Nexus/Artifactory |
 | 生产厂商签名 KMS/HSM | ⏳ | 需要真实企业签名基础设施 |
-| 真实集群 apply | ⏸ | 控制面已产出钉死的名单和路由；下发需要外部 OCM / Argo / Gateway，仓库不把本地推演当成已上线 |
+| 真实集群 apply | ⏸ | 控制面已产出钉死的名单、HTTPRoute 和 Istio VirtualService；下发需要外部 OCM / Argo / Gateway 或 Istio，仓库不把本地推演当成已上线 |
 
 ---
 
@@ -326,7 +329,7 @@ CICD/
 │   ├── toolchain-images.yml               # Toolchain Supply Chain
 │   ├── archive-artifacts.yml              # 长期归档
 │   ├── promote.yml                        # dev/staging/production
-│   ├── release.yml                        # 环境内灰度 / 蓝绿 / 跨区域灰度 / 跨区域蓝绿期望状态
+│   ├── release.yml                        # 指针核对后 plan / advance / abort / scenario，同时渲染 HTTPRoute 与 VirtualService
 │   ├── rollback.yml                       # 历史 digest rollback
 │   ├── platform-health.yml                # Platform SLO
 │   ├── repository-governance.yml          # Ruleset drift
@@ -350,6 +353,7 @@ CICD/
 ├── scripts/ci/                             # 平台规则实现
 ├── scripts/vendor/                         # RK/Qcom/MTK 稳定 Adapter
 ├── docker/toolchains/                      # 不可变 Toolchain Image
+├── ops/Jenkinsfile                         # 可选调用方，只调用 release_strategy.py
 ├── ops/rk-runner/                          # RK 物理接入准备
 ├── examples/                               # Hosted DAG 示例
 ├── tests/                                  # 契约 / 安全边界回归
@@ -435,12 +439,15 @@ Rollback 只接受同环境历史 Deployment ID，并创建新的 rollback point
 | 同一环境里所有 gateway 集群如何用同一步权重分配请求 | 路由 | Gateway API `HTTPRoute` 后端权重。策略名是 `canary`。cn-east 和 cn-north 会一起变化 |
 | 同一环境里所有 gateway 集群如何各占一个槽位，验证后一次切完生产流量 | 路由，而且必须是原子切换 | Gateway API `HTTPRoute`，预览走独立 header。策略名是 `blue_green`。cn-east 和 cn-north 会一起切换 |
 | 多个区域里的多个集群如何共用槽位并一次切完，后开区域在打开前保持基线 | 先钉死集群名单，再只在名单内做原子切换 | OCM `PlacementDecision` + Argo CD `ApplicationSet` list generator，加上 Gateway API `HTTPRoute`。策略名是 `multi_cluster_blue_green` |
+| 同一份期望状态如何交给 Istio | 数据面适配，不是第二份策略 | 同一次渲染写出 `VirtualService`。灰度权重与 HTTPRoute 相同且和为 100；蓝绿生产流量 100% 在当前槽；预览是 header `x-release-preview` 的独立 match |
 
 只给 `role=canary` 的 `prod-cn-east-canary` 做权重，再把后面的区域改成蓝绿，得到的不是跨区域灰度。环境内 `canary` 会让华东和华北使用同一步权重，也做不到“当前区域加权重，后开区域保持 0%”。路由如果没有精确名单，未选中的集群仍会接到新 digest。所以多集群灰度同时要名单和权重，而且路由不能扩大名单。
 
 `prod-edge-offline` 没有 Gateway。多集群灰度默认不选它，它保持基线 digest，也不出现在渲染结果里。若用 `--allow` 明确点名它，计划失败关闭，不会把它写进 `ClusterPin`。分析失败不改变权重。`abort` 把每一个已经打开的区域收回基线。
 
-候选 bundle SHA256 必须等于该环境当前指针，发布不重新构建。`release.yml` 先读取 Deployment pointer，不一致就停止。`scenario` 会用合成分析证据走完所有步骤，只用来渲染最终期望状态；**synthetic analysis is not production evidence**。真实推进用 `advance`，并提交错误率和延迟证据。这个 Job 没有集群凭据，也不会写入 Deployment。
+候选 bundle SHA256 必须等于该环境当前指针，发布不重新构建。GitHub Actions 的顺序见 9.3：先核对环境指针，再 `plan` 或 `advance`，然后从同一份状态渲染 HTTPRoute 和 VirtualService。`scenario` 会用合成分析证据走完所有步骤，只用来渲染最终期望状态；**synthetic analysis is not production evidence**。真实推进用 `advance`，并提交错误率和延迟证据。这个 Job 没有集群凭据，也不会写入 Deployment。
+
+Jenkins 可选。要用的话走 `ops/Jenkinsfile`，它只调用同一条 CLI，不是第二份策略。
 
 ```bash
 python3 scripts/ci/release_strategy.py plan \
@@ -462,7 +469,7 @@ python3 scripts/ci/release_strategy.py plan \
 
 生产上要按区域做蓝绿，用 `multi_cluster_blue_green`。它不是把 `multi_cluster_canary` 的后半段改成蓝绿，也不会把权重从 1% 爬到 100%。参考目录先打开 cn-east，再打开 cn-north。cn-east 里的 `prod-cn-east-a`、`prod-cn-east-b`、`prod-cn-east-canary` 共用同一个槽位。cn-north 在华东 `confirm` 之前保持基线 digest，不出现在渲染结果里。
 
-预览使用 header `x-release-preview: true`，生产 HTTPRoute 的权重保持 100，后端仍是基线槽。cutover 把生产后端一次换成候选槽。`abort` 把每一个已经打开的区域切回基线槽。`completed` 之后不能 abort，要走环境 rollback。
+预览使用 header `x-release-preview: true`，生产 HTTPRoute 的权重保持 100，后端仍是基线槽。同一集群的生产 VirtualService 也是权重 100，没有 header match。预览 VirtualService 只有这条 header match，不改变生产 route。cutover 把生产后端一次换成候选槽。`abort` 把每一个已经打开的区域切回基线槽。`completed` 之后不能 abort，要走环境 rollback。
 
 `prod-edge-offline` 没有 Gateway。多集群蓝绿默认不选它。若用 `--allow` 明确点名它，计划失败关闭，不会把它写进 `ClusterPin`。分析失败不改变槽位。环境指针必须等于候选 digest，而且必须是 64 位小写十六进制。
 
@@ -481,6 +488,51 @@ python3 scripts/ci/release_strategy.py plan \
   --out release-state.json \
   --out-dir rendered
 ```
+
+### 9.3 GitHub Actions：同一条 CLI
+
+`.github/workflows/release.yml` 在 `main` 上手工触发。它不是第二份策略引擎。灰度和蓝绿都走下面的顺序：
+
+```text
+validate
+→ deployment_pointer.py current
+→ check-pointer
+→ plan、advance、abort 或 scenario
+→ 同一份 release state 渲染 Gateway API HTTPRoute 和 Istio VirtualService
+→ 缺任何一种 kind 则 Job 失败
+→ 上传 release-state.json 与 rendered/
+```
+
+权限是 `contents: read` 和 `deployments: read`。没有 `deployments: write`。Job 不读取 kubeconfig，也不执行 `kubectl apply`。
+
+`workflow_dispatch` 输入：
+
+| 输入 | 类型 | 作用 |
+| --- | --- | --- |
+| `action` | `plan`、`advance`、`abort`、`scenario` | 调用 `scripts/ci/release_strategy.py` 的同名子命令。默认 `plan` |
+| `strategy` | `canary`、`blue_green`、`multi_cluster_canary`、`multi_cluster_blue_green` | 默认 `multi_cluster_canary` |
+| `environment` | `dev`、`staging`、`production` | 默认 `production` |
+| `service` | string | DNS-1123 服务名 |
+| `artifact_name` | string | Artifact Contract v2 的 artifact name |
+| `bundle_sha256` | string | 必须等于当前环境指针 |
+| `source_sha` | string | 制品上的源提交 |
+| `source_run_id` | string | 可信构建 run id |
+| `release_tag` | string | `artifact-v2` 归档标签 |
+| `baseline_digest` | string | 当前正在接流量的 digest |
+| `accept_excluded` | boolean | 默认 `false`。确认同一环境里不能接流量的集群 |
+| `allow_clusters` | string | 可选，逗号分隔，每个 id 都必须入选 |
+| `deny_clusters` | string | 可选，逗号分隔，从名单里去掉 |
+| `active_slot` | `blue`、`green` | 蓝绿基线槽，默认 `blue` |
+| `analysis` | string | 仅 `advance`。JSON 对象，字段是 `smoke`、`readiness`、`error_rate`、`latency_p95_ms`、`requests` |
+| `state` | string | 仅 `advance` 和 `abort`。上一次 `release-state.json` 的全文 |
+
+`plan` 和 `scenario` 不读 `state`，用上面的制品字段生成状态。`check-pointer` 在这四者之前执行。
+
+下一次 `workflow_dispatch` 不能把上一次的 artifact 重新上传进来，表单也没有文件输入。`advance` 和 `abort` 因此让操作者把 `release-state.json` 压成一行贴进 `state`。Job 把字符串写到工作区的 `release-state.json`（不提交），再交给现有引擎校验。状态里的 `candidate_digest` 必须等于刚刚核对过的指针，`environment` 必须等于本次环境。参考目录的状态大约 3KB。
+
+`advance` 把 `analysis` 原样写入 `analysis.json`。Workflow 不填合成的通过结果。`scenario` 才会在摘要里打印 `synthetic analysis is not production evidence`。
+
+`ops/Jenkinsfile` 只是这条 CLI 的可选调用方。它不决定权重，也不代替上面的 Actions 输入。
 
 操作手册：**[灰度、蓝绿与跨集群跨区域灰度](docs/progressive-delivery.md)**
 

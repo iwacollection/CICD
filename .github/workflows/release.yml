@@ -4,12 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "plan renders the current step; scenario walks every step with synthetic analysis and is not production evidence"
+        description: "plan renders the current step; advance and abort take a state JSON string because a later dispatch cannot re-upload the previous artifact; scenario walks every step with synthetic analysis and is not production evidence"
         required: true
         default: plan
         type: choice
         options:
           - plan
+          - advance
+          - abort
           - scenario
       strategy:
         description: "canary is one weight for every gateway cluster; blue_green is an atomic slot switch in one environment; multi_cluster_canary is cross-region canary; multi_cluster_blue_green is a cross-region atomic slot switch on an exact pin"
@@ -81,6 +83,16 @@ on:
         options:
           - blue
           - green
+      analysis:
+        description: "advance only. JSON object with smoke, readiness, error_rate, latency_p95_ms, and requests. Written to analysis.json and validated by the release engine. Do not paste a synthetic pass."
+        required: false
+        default: ""
+        type: string
+      state:
+        description: "advance and abort. Compact release-state.json from the previous run. A later workflow_dispatch cannot re-upload that artifact. The job writes this string to release-state.json and the engine validates it. Do not commit it."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -92,7 +104,7 @@ concurrency:
 
 jobs:
   release:
-    name: Plan ${{ inputs.strategy }} for ${{ inputs.service }}
+    name: ${{ inputs.action }} ${{ inputs.strategy }} for ${{ inputs.service }}
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -129,7 +141,7 @@ jobs:
             --bundle-sha256 "$BUNDLE_SHA256" \
             --environment "$ENVIRONMENT"
 
-      - name: Plan or walk the release
+      - name: Plan, advance, abort, or walk the release
         shell: bash
         env:
           ACTION: ${{ inputs.action }}
@@ -146,6 +158,8 @@ jobs:
           ALLOW_CLUSTERS: ${{ inputs.allow_clusters }}
           DENY_CLUSTERS: ${{ inputs.deny_clusters }}
           ACTIVE_SLOT: ${{ inputs.active_slot }}
+          ANALYSIS: ${{ inputs.analysis }}
+          STATE: ${{ inputs.state }}
         run: |
           set -euo pipefail
           args=(
@@ -168,12 +182,92 @@ jobs:
           if [[ "$ACCEPT_EXCLUDED" == "true" ]]; then
             args+=(--accept-excluded)
           fi
+          if [[ "$ACTION" == "advance" || "$ACTION" == "abort" ]]; then
+            python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          action = os.environ["ACTION"]
+          raw_state = os.environ.get("STATE", "")
+          pointer = json.loads(Path("pointer.json").read_text(encoding="utf-8"))
+          text = raw_state if raw_state.endswith("\n") else raw_state + "\n"
+          Path("release-state.json").write_text(text, encoding="utf-8")
+          try:
+              state = json.loads(text)
+          except json.JSONDecodeError as exc:
+              raise SystemExit(f"state input is not valid JSON: {exc}")
+          if not isinstance(state, dict):
+              raise SystemExit("state input must be a JSON object")
+          if state.get("candidate_digest") != pointer.get("bundle_sha256"):
+              raise SystemExit("state candidate_digest does not match the environment pointer")
+          if state.get("environment") != os.environ["ENVIRONMENT"]:
+              raise SystemExit("state environment does not match the release environment")
+          if action == "advance":
+              raw_analysis = os.environ.get("ANALYSIS", "")
+              Path("analysis.json").write_text(
+                  raw_analysis if raw_analysis.endswith("\n") else raw_analysis + "\n",
+                  encoding="utf-8",
+              )
+          PY
+          fi
           if [[ "$ACTION" == "scenario" ]]; then
             echo "synthetic analysis is not production evidence" | tee -a "$GITHUB_STEP_SUMMARY"
             python3 scripts/ci/release_strategy.py scenario "${args[@]}"
-          else
+          elif [[ "$ACTION" == "plan" ]]; then
             python3 scripts/ci/release_strategy.py plan "${args[@]}"
+          elif [[ "$ACTION" == "advance" ]]; then
+            python3 scripts/ci/release_strategy.py advance \
+              --state release-state.json \
+              --analysis analysis.json \
+              --out release-state.json \
+              --out-dir rendered
+          elif [[ "$ACTION" == "abort" ]]; then
+            python3 scripts/ci/release_strategy.py abort \
+              --state release-state.json \
+              --out release-state.json \
+              --out-dir rendered
+          else
+            echo "ERROR: action must be plan, advance, abort, or scenario" >&2
+            exit 1
           fi
+
+      - name: Require HTTPRoute and Istio VirtualService from the same state
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          action = os.environ["ACTION"]
+          rendered = sorted(Path("rendered").glob("*.json"))
+          if not rendered:
+              raise SystemExit("rendered directory is empty")
+          kinds = set()
+          for path in rendered:
+              document = json.loads(path.read_text(encoding="utf-8"))
+              kinds.add(document["kind"])
+              evidence = document.get("metadata", {}).get("annotations", {}).get("cicd.platform/evidence")
+              if action in ("advance", "abort") and evidence == "synthetic":
+                  raise SystemExit(f"{action} must not use synthetic analysis")
+              if document["kind"] not in ("HTTPRoute", "VirtualService"):
+                  continue
+              cluster = document["metadata"]["annotations"]["cicd.platform/cluster"]
+              pin = document["metadata"]["annotations"]["cicd.platform/clusters"].split(",")
+              if cluster not in pin or not cluster:
+                  raise SystemExit(f"{path.name} is outside its ClusterPin")
+              if document["metadata"]["labels"]["cicd.platform/cluster-id"] != cluster:
+                  raise SystemExit(f"{path.name} cluster label does not match the pin annotation")
+          missing = {"HTTPRoute", "VirtualService"} - kinds
+          if missing:
+              raise SystemExit("dispatch must render " + ", ".join(sorted(missing)))
+          print("rendered Gateway API HTTPRoute and Istio VirtualService from the same release state")
+          print("this job does not apply manifests to a live cluster")
+          PY
 
       - name: Publish release decision
         shell: bash
@@ -187,6 +281,7 @@ jobs:
           print(f"- strategy: `{state['strategy']}`")
           print(f"- method: `{state['method']}`")
           print(f"- tool: `{state['tool']}`")
+          print("- data-plane adapter: `Istio VirtualService` rendered from the same release state")
           print(f"- status: `{state['status']}`")
           print(f"- candidate: `{state['candidate_digest']}`")
           print("")

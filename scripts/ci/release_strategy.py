@@ -17,6 +17,13 @@ Cluster membership is an exact pin (Open Cluster Management PlacementDecision
 plus an Argo CD ApplicationSet list generator). A route must never add a
 cluster that the pin omitted.
 
+The same release state also renders an Istio VirtualService data-plane
+adapter. It is not a second policy. Canary weights match the HTTPRoute and
+sum to 100. Blue-green sends 100% of production traffic to the active slot.
+Preview is a separate header match and does not change the production route.
+Each manifest is pinned with cicd.platform/cluster and stays inside the
+ClusterPin.
+
 The engine does not build artifacts and does not apply manifests to a live
 cluster. Callers pass an environment pointer digest that promotion already
 recorded.
@@ -83,6 +90,8 @@ CLUSTER_MANAGEMENT = {
     "delivery_api": "argoproj.io/v1alpha1",
     "delivery_kind": "ApplicationSet",
 }
+ISTIO_API = "networking.istio.io/v1"
+ISTIO_ADAPTER = "istio"
 
 
 def _reject_unknown(payload: dict, allowed: set[str], prefix: str) -> list[str]:
@@ -1365,13 +1374,32 @@ def render_documents(state: dict[str, Any], strategies: dict[str, Any], evidence
         )
         for cluster_id in wave["cluster_ids"]:
             route_name = _k8s_name(state["service"], cluster_id, "route")
-            documents.append((f"{route_name}.json", _http_route(state, strategies, wave, cluster_id, route_name, annotations)))
+            route = _http_route(state, strategies, wave, cluster_id, route_name, annotations)
+            documents.append((f"{route_name}.json", route))
+            vs_name = _k8s_name(state["service"], cluster_id, "vs")
+            documents.append(
+                (
+                    f"{vs_name}.json",
+                    _virtual_service(state, strategies, wave, cluster_id, vs_name, annotations, route),
+                )
+            )
             if wave["preview"]:
                 preview_name = _k8s_name(state["service"], cluster_id, "preview")
+                preview = _preview_route(state, strategies, wave, cluster_id, preview_name, annotations)
+                documents.append((f"{preview_name}.json", preview))
+                preview_vs_name = _k8s_name(state["service"], cluster_id, "preview-vs")
                 documents.append(
                     (
-                        f"{preview_name}.json",
-                        _preview_route(state, strategies, wave, cluster_id, preview_name, annotations),
+                        f"{preview_vs_name}.json",
+                        _preview_virtual_service(
+                            state,
+                            strategies,
+                            wave,
+                            cluster_id,
+                            preview_vs_name,
+                            annotations,
+                            preview,
+                        ),
                     )
                 )
     return documents
@@ -1405,14 +1433,12 @@ def _application_element(state: dict[str, Any], wave: dict[str, Any], cluster_id
     }
 
 
-def _http_route(
-    state: dict[str, Any],
-    strategies: dict[str, Any],
-    wave: dict[str, Any],
-    cluster_id: str,
-    route_name: str,
-    annotations: dict[str, str],
-) -> dict[str, Any]:
+def _require_cluster_in_pin(wave: dict[str, Any], cluster_id: str) -> None:
+    if cluster_id not in wave["cluster_ids"]:
+        raise ValueError("route cluster is outside the ClusterPin")
+
+
+def _production_backends(state: dict[str, Any], strategies: dict[str, Any], wave: dict[str, Any]) -> list[dict[str, Any]]:
     port = strategies["service_port"]
     if wave["strategy"] == "canary":
         backends = [
@@ -1430,21 +1456,104 @@ def _http_route(
                 "weight": 100,
             }
         ]
+    weights = [item["weight"] for item in backends]
+    if any(not isinstance(weight, int) or isinstance(weight, bool) for weight in weights) or sum(weights) != 100:
+        raise ValueError("route weights must sum to 100")
+    if wave["strategy"] == "blue_green" and (len(backends) != 1 or weights != [100]):
+        raise ValueError("blue-green production route must send 100% to the active slot")
+    return backends
+
+
+def _pinned_metadata(
+    strategies: dict[str, Any],
+    name: str,
+    cluster_id: str,
+    annotations: dict[str, str],
+    *,
+    adapter: str = "",
+) -> dict[str, Any]:
     route_annotations = dict(annotations)
     route_annotations["cicd.platform/cluster"] = cluster_id
+    if adapter:
+        route_annotations["cicd.platform/adapter"] = adapter
+    return {
+        "name": name,
+        "namespace": strategies["namespace"],
+        "annotations": route_annotations,
+        "labels": {"cicd.platform/cluster-id": cluster_id},
+    }
+
+
+def _istio_destinations(backends: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "destination": {"host": backend["name"], "port": {"number": backend["port"]}},
+            "weight": backend["weight"],
+        }
+        for backend in backends
+    ]
+
+
+def _http_route(
+    state: dict[str, Any],
+    strategies: dict[str, Any],
+    wave: dict[str, Any],
+    cluster_id: str,
+    route_name: str,
+    annotations: dict[str, str],
+) -> dict[str, Any]:
+    _require_cluster_in_pin(wave, cluster_id)
+    backends = _production_backends(state, strategies, wave)
     return {
         "apiVersion": "gateway.networking.k8s.io/v1",
         "kind": "HTTPRoute",
-        "metadata": {
-            "name": route_name,
-            "namespace": strategies["namespace"],
-            "annotations": route_annotations,
-            "labels": {"cicd.platform/cluster-id": cluster_id},
-        },
+        "metadata": _pinned_metadata(strategies, route_name, cluster_id, annotations),
         "spec": {
             "parentRefs": [{"name": strategies["gateway_name"], "namespace": strategies["namespace"]}],
             "rules": [{"backendRefs": backends}],
         },
+    }
+
+
+def _virtual_service(
+    state: dict[str, Any],
+    strategies: dict[str, Any],
+    wave: dict[str, Any],
+    cluster_id: str,
+    route_name: str,
+    annotations: dict[str, str],
+    http_route: dict[str, Any],
+) -> dict[str, Any]:
+    _require_cluster_in_pin(wave, cluster_id)
+    backends = http_route["spec"]["rules"][0]["backendRefs"]
+    weights = [backend["weight"] for backend in backends]
+    if sum(weights) != 100:
+        raise ValueError("Istio VirtualService weights must match HTTPRoute and sum to 100")
+    if [backend["weight"] for backend in _production_backends(state, strategies, wave)] != weights:
+        raise ValueError("Istio VirtualService weights must match HTTPRoute and sum to 100")
+    if wave["strategy"] == "blue_green" and weights != [100]:
+        raise ValueError("blue-green VirtualService must send 100% of production traffic to the active slot")
+    document = {
+        "apiVersion": ISTIO_API,
+        "kind": "VirtualService",
+        "metadata": _pinned_metadata(strategies, route_name, cluster_id, annotations, adapter=ISTIO_ADAPTER),
+        "spec": {
+            "hosts": [state["service"]],
+            "gateways": [strategies["gateway_name"]],
+            "http": [{"route": _istio_destinations(backends)}],
+        },
+    }
+    if "match" in document["spec"]["http"][0]:
+        raise ValueError("production VirtualService must not carry the preview match")
+    return document
+
+
+def _preview_backend(state: dict[str, Any], strategies: dict[str, Any], wave: dict[str, Any]) -> dict[str, Any]:
+    inactive = _inactive_slot(wave["baseline_slot"])
+    return {
+        "name": f"{state['service']}-{inactive}",
+        "port": strategies["service_port"],
+        "weight": 100,
     }
 
 
@@ -1456,18 +1565,11 @@ def _preview_route(
     route_name: str,
     annotations: dict[str, str],
 ) -> dict[str, Any]:
-    inactive = _inactive_slot(wave["baseline_slot"])
-    route_annotations = dict(annotations)
-    route_annotations["cicd.platform/cluster"] = cluster_id
+    _require_cluster_in_pin(wave, cluster_id)
     return {
         "apiVersion": "gateway.networking.k8s.io/v1",
         "kind": "HTTPRoute",
-        "metadata": {
-            "name": route_name,
-            "namespace": strategies["namespace"],
-            "annotations": route_annotations,
-            "labels": {"cicd.platform/cluster-id": cluster_id},
-        },
+        "metadata": _pinned_metadata(strategies, route_name, cluster_id, annotations),
         "spec": {
             "parentRefs": [{"name": strategies["gateway_name"], "namespace": strategies["namespace"]}],
             "rules": [
@@ -1482,13 +1584,46 @@ def _preview_route(
                             ]
                         }
                     ],
-                    "backendRefs": [
+                    "backendRefs": [_preview_backend(state, strategies, wave)],
+                }
+            ],
+        },
+    }
+
+
+def _preview_virtual_service(
+    state: dict[str, Any],
+    strategies: dict[str, Any],
+    wave: dict[str, Any],
+    cluster_id: str,
+    route_name: str,
+    annotations: dict[str, str],
+    preview_route: dict[str, Any],
+) -> dict[str, Any]:
+    _require_cluster_in_pin(wave, cluster_id)
+    backend = preview_route["spec"]["rules"][0]["backendRefs"][0]
+    if backend["weight"] != 100 or backend != _preview_backend(state, strategies, wave):
+        raise ValueError("preview VirtualService must match the preview HTTPRoute")
+    header = preview_route["spec"]["rules"][0]["matches"][0]["headers"][0]
+    if header["name"] != strategies["preview_header"] or header["value"] != strategies["preview_header_value"]:
+        raise ValueError("preview VirtualService must match the preview header")
+    return {
+        "apiVersion": ISTIO_API,
+        "kind": "VirtualService",
+        "metadata": _pinned_metadata(strategies, route_name, cluster_id, annotations, adapter=ISTIO_ADAPTER),
+        "spec": {
+            "hosts": [state["service"]],
+            "gateways": [strategies["gateway_name"]],
+            "http": [
+                {
+                    "match": [
                         {
-                            "name": f"{state['service']}-{inactive}",
-                            "port": strategies["service_port"],
-                            "weight": 100,
+                            "headers": {
+                                strategies["preview_header"]: {"exact": strategies["preview_header_value"]}
+                            }
                         }
                     ],
+                    "route": _istio_destinations([backend]),
                 }
             ],
         },

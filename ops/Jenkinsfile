@@ -1,0 +1,106 @@
+// Jenkins 只调用 scripts/ci/release_strategy.py。
+// 先检出参数 PLATFORM_SHA 指向的平台提交，再执行 validate、plan、advance 或 render。
+// 权重、槽位和集群名单都在那次提交的策略引擎里，不写在这个文件里。
+// 这个流水线不申请集群凭据，也不对集群执行变更。
+
+pipeline {
+  agent any
+  options {
+    skipDefaultCheckout()
+    disableConcurrentBuilds()
+  }
+  parameters {
+    string(name: 'PLATFORM_SHA', description: '要检出的平台提交 SHA')
+    choice(name: 'COMMAND', choices: ['validate', 'plan', 'advance', 'render'], description: '传给 release_strategy.py 的子命令')
+    string(name: 'STRATEGY', defaultValue: '', description: 'plan 的 --strategy，原样传给 CLI')
+    string(name: 'ENVIRONMENT', defaultValue: '', description: 'plan 的 --environment')
+    string(name: 'SERVICE', defaultValue: '', description: 'plan 的 --service')
+    string(name: 'ARTIFACT_NAME', defaultValue: '', description: 'plan 的 --artifact-name')
+    string(name: 'BUNDLE_SHA256', defaultValue: '', description: 'plan 的 --bundle-sha256')
+    string(name: 'SOURCE_SHA', defaultValue: '', description: 'plan 的 --source-sha')
+    string(name: 'SOURCE_RUN_ID', defaultValue: '', description: 'plan 的 --source-run-id')
+    string(name: 'RELEASE_TAG', defaultValue: '', description: 'plan 的 --release-tag')
+    string(name: 'BASELINE_DIGEST', defaultValue: '', description: 'plan 的 --baseline-digest')
+    string(name: 'ENVIRONMENT_POINTER_DIGEST', defaultValue: '', description: 'plan 的 --environment-pointer-digest')
+    booleanParam(name: 'ACCEPT_EXCLUDED', defaultValue: false, description: 'plan 是否追加 --accept-excluded')
+    string(name: 'ALLOW', defaultValue: '', description: 'plan 的 --allow，原样传给 CLI')
+    string(name: 'DENY', defaultValue: '', description: 'plan 的 --deny，原样传给 CLI')
+    choice(name: 'ACTIVE_SLOT', choices: ['blue', 'green'], description: 'plan 的 --active-slot')
+    string(name: 'STATE', defaultValue: 'release-state.json', description: 'advance 和 render 读取的状态文件')
+    string(name: 'ANALYSIS', defaultValue: 'analysis.json', description: 'advance 读取的分析证据')
+    string(name: 'OUT', defaultValue: 'release-state.json', description: 'plan 和 advance 写出的状态文件')
+    string(name: 'OUT_DIR', defaultValue: 'rendered', description: '渲染目录')
+    string(name: 'EVIDENCE_MODE', defaultValue: 'operator', description: 'render 的 --evidence-mode')
+  }
+  stages {
+    stage('Checkout pinned platform SHA') {
+      steps {
+        script {
+          if (!params.PLATFORM_SHA?.trim()) {
+            error('PLATFORM_SHA is required')
+          }
+        }
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: params.PLATFORM_SHA.trim()]],
+          extensions: [[$class: 'WipeWorkspace']],
+          userRemoteConfigs: [[url: 'https://github.com/iwacollection/CICD.git']]
+        ])
+      }
+    }
+    stage('Call release_strategy.py') {
+      steps {
+        sh '''
+          set -eu
+          cli="python3 scripts/ci/release_strategy.py"
+          case "$COMMAND" in
+            validate)
+              $cli validate
+              ;;
+            plan)
+              args=(
+                plan
+                --strategy "$STRATEGY"
+                --environment "$ENVIRONMENT"
+                --service "$SERVICE"
+                --artifact-name "$ARTIFACT_NAME"
+                --bundle-sha256 "$BUNDLE_SHA256"
+                --source-sha "$SOURCE_SHA"
+                --source-run-id "$SOURCE_RUN_ID"
+                --release-tag "$RELEASE_TAG"
+                --baseline-digest "$BASELINE_DIGEST"
+                --environment-pointer-digest "$ENVIRONMENT_POINTER_DIGEST"
+                --allow "$ALLOW"
+                --deny "$DENY"
+                --active-slot "$ACTIVE_SLOT"
+                --out "$OUT"
+                --out-dir "$OUT_DIR"
+              )
+              if [ "$ACCEPT_EXCLUDED" = "true" ]; then
+                args+=(--accept-excluded)
+              fi
+              $cli "${args[@]}"
+              ;;
+            advance)
+              $cli advance \
+                --state "$STATE" \
+                --analysis "$ANALYSIS" \
+                --out "$OUT" \
+                --out-dir "$OUT_DIR"
+              ;;
+            render)
+              $cli render \
+                --state "$STATE" \
+                --out-dir "$OUT_DIR" \
+                --evidence-mode "$EVIDENCE_MODE"
+              ;;
+            *)
+              echo "ERROR: COMMAND must be validate, plan, advance, or render" >&2
+              exit 1
+              ;;
+          esac
+        '''
+      }
+    }
+  }
+}
