@@ -4,6 +4,7 @@ import copy
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -1093,6 +1094,102 @@ class ProgressiveDeliveryTests(unittest.TestCase):
                 bundle_sha256=CANDIDATE,
                 environment="production",
             )
+
+    def test_reused_out_dir_drops_preview_and_unopened_region_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state = root / "release-state.json"
+            rendered = root / "rendered"
+            analysis = root / "analysis.json"
+            self._cli(
+                "plan",
+                "--strategy",
+                "blue_green",
+                "--accept-excluded",
+                "--out",
+                str(state),
+                "--out-dir",
+                str(rendered),
+            )
+            analysis.write_text(json.dumps({"readiness": "pass"}) + "\n", encoding="utf-8")
+            self._cli("advance", "--state", str(state), "--analysis", str(analysis), "--out", str(state), "--out-dir", str(rendered))
+            analysis.write_text(json.dumps({"smoke": "pass"}) + "\n", encoding="utf-8")
+            self._cli("advance", "--state", str(state), "--analysis", str(analysis), "--out", str(state), "--out-dir", str(rendered))
+            names = {path.name for path in rendered.glob("*.json")}
+            self.assertTrue(any(name.endswith("-preview.json") for name in names))
+            self.assertTrue(any(name.endswith("-preview-vs.json") for name in names))
+            (rendered / "notes.json").write_text("{}\n", encoding="utf-8")
+            analysis.write_text(
+                json.dumps({"error_rate": 0.0, "latency_p95_ms": 20, "requests": 80}) + "\n",
+                encoding="utf-8",
+            )
+            self._cli("advance", "--state", str(state), "--analysis", str(analysis), "--out", str(state), "--out-dir", str(rendered))
+            names = {path.name for path in rendered.glob("*.json")}
+            self.assertFalse(any(name.endswith("-preview.json") for name in names))
+            self.assertFalse(any(name.endswith("-preview-vs.json") for name in names))
+            self.assertTrue(any(name.endswith("-route.json") for name in names))
+            self.assertTrue(any(name.endswith("-vs.json") for name in names))
+            self.assertIn("notes.json", names)
+
+            scenario_dir = root / "scenario"
+            scenario_state = root / "scenario-state.json"
+            self._cli(
+                "scenario",
+                "--strategy",
+                "multi_cluster_canary",
+                "--out",
+                str(scenario_state),
+                "--out-dir",
+                str(scenario_dir),
+            )
+            self.assertTrue(any("prod-cn-north-a" in path.name for path in scenario_dir.glob("*.json")))
+            self._cli(
+                "plan",
+                "--strategy",
+                "multi_cluster_canary",
+                "--out",
+                str(scenario_state),
+                "--out-dir",
+                str(scenario_dir),
+            )
+            names = {path.name for path in scenario_dir.glob("*.json")}
+            self.assertFalse(any("prod-cn-north-a" in name or "cn-north" in name for name in names))
+            self.assertTrue(any("cn-east" in name for name in names))
+            self.assertTrue(any(name.endswith("-vs.json") for name in names))
+
+    def _cli(self, command: str, *args: str) -> None:
+        prefix = self._identity_args() if command in ("plan", "scenario") else []
+        result = subprocess.run(
+            [sys.executable, "scripts/ci/release_strategy.py", command, *prefix, *args],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def _identity_args(self) -> list[str]:
+        identity = _identity()
+        return [
+            "--environment",
+            "production",
+            "--service",
+            "checkout",
+            "--artifact-name",
+            identity["artifact_name"],
+            "--bundle-sha256",
+            identity["bundle_sha256"],
+            "--source-sha",
+            identity["source_sha"],
+            "--source-run-id",
+            identity["source_run_id"],
+            "--release-tag",
+            identity["release_tag"],
+            "--baseline-digest",
+            BASELINE,
+            "--environment-pointer-digest",
+            CANDIDATE,
+        ]
 
     def _plan(self, strategy: str, **overrides: object) -> dict:
         arguments = dict(
