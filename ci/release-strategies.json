@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "环境内灰度走同一套 HTTPRoute 权重。多集群灰度按区域顺序走同一套权重，区域内集群同权，后开区域在打开前保持 0%，并且仍然是灰度而不是蓝绿。集群名单用 PlacementDecision 和 ApplicationSet 钉死。蓝绿仍是独立的原子切换策略。",
+  "description": "环境内灰度走同一套 HTTPRoute 权重。多集群灰度按区域顺序走同一套权重，区域内集群同权，后开区域在打开前保持 0%，并且仍然是灰度而不是蓝绿。多集群蓝绿按同一区域顺序做原子槽位切换，区域内集群共用槽位，后开区域打开前不渲染，预览 header 不改变生产权重。集群名单用 PlacementDecision 和 ApplicationSet 钉死。",
   "artifact_contract": 2,
   "namespace": "apps",
   "gateway_name": "platform-gateway",
@@ -86,6 +86,37 @@
           "name": "cn-north",
           "selector": {"environment": "production", "region": "cn-north"},
           "strategy": "canary"
+        }
+      ]
+    },
+    "multi_cluster_blue_green": {
+      "kind": "placement",
+      "method": "cluster_management",
+      "traffic_strategy": "blue_green",
+      "region_order": ["cn-east", "cn-north"],
+      "cluster_management": {
+        "placement_api": "cluster.open-cluster-management.io/v1beta1",
+        "placement_kind": "Placement",
+        "decision_kind": "PlacementDecision",
+        "delivery_api": "argoproj.io/v1alpha1",
+        "delivery_kind": "ApplicationSet"
+      },
+      "deny_unmatched": true,
+      "pin_exact_cluster_ids": true,
+      "required_cluster_labels": {
+        "traffic": "gateway"
+      },
+      "abort": "restore_baseline_slot",
+      "waves": [
+        {
+          "name": "cn-east",
+          "selector": {"environment": "production", "region": "cn-east"},
+          "strategy": "blue_green"
+        },
+        {
+          "name": "cn-north",
+          "selector": {"environment": "production", "region": "cn-north"},
+          "strategy": "blue_green"
         }
       ]
     }

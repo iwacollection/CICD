@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Plan canary, blue-green, and cross-region multi-cluster canary releases.
+"""Plan canary, blue-green, and cross-region multi-cluster releases.
 
 Environment canary and blue-green change traffic on one chosen cluster set
 (Gateway API HTTPRoute). Cross-region canary (`multi_cluster_canary`) keeps
 that same weight schedule, but opens one region at a time. Clusters in the
 open region share the step weight. Later regions stay at 0% canary until
 they open, and they stay on canary weights instead of switching to blue-green.
+
+Cross-region blue-green (`multi_cluster_blue_green`) uses the same region
+order and exact cluster pin, but never ramps weights. Clusters in the open
+region share one blue/green slot. Later regions stay on the baseline slot
+and are omitted from the render until they open. A preview header does not
+change the production route weight. Cutover is atomic.
 
 Cluster membership is an exact pin (Open Cluster Management PlacementDecision
 plus an Argo CD ApplicationSet list generator). A route must never add a
@@ -58,9 +64,18 @@ METHOD_DECISION = {
         "method": "cluster_management",
         "tool": "PlacementDecision + ApplicationSet + HTTPRoute",
     },
+    "multi_cluster_blue_green": {
+        "question": "多个区域里的多个集群如何共用蓝绿槽位并一次切完，后开区域在打开前保持基线",
+        "method": "cluster_management",
+        "tool": "PlacementDecision + ApplicationSet + HTTPRoute",
+    },
 }
 
-MEMBERSHIP_STRATEGIES = frozenset({"multi_cluster_canary"})
+MEMBERSHIP_STRATEGIES = frozenset({"multi_cluster_canary", "multi_cluster_blue_green"})
+MEMBERSHIP_TRAFFIC = {
+    "multi_cluster_canary": "canary",
+    "multi_cluster_blue_green": "blue_green",
+}
 CLUSTER_MANAGEMENT = {
     "placement_api": "cluster.open-cluster-management.io/v1beta1",
     "placement_kind": "Placement",
@@ -224,10 +239,17 @@ def validate_release_policy(
     if not isinstance(defined, dict):
         errors.append("strategies must be an object")
         return errors
-    errors.extend(_reject_unknown(defined, {"canary", "blue_green", "multi_cluster_canary"}, "strategies"))
+    errors.extend(
+        _reject_unknown(
+            defined,
+            {"canary", "blue_green", "multi_cluster_canary", "multi_cluster_blue_green"},
+            "strategies",
+        )
+    )
     canary = defined.get("canary")
     blue = defined.get("blue_green")
     multi = defined.get("multi_cluster_canary")
+    multi_blue = defined.get("multi_cluster_blue_green")
     if isinstance(canary, dict):
         errors.extend(_validate_canary(canary))
     else:
@@ -237,9 +259,21 @@ def validate_release_policy(
     else:
         errors.append("strategies.blue_green must be an object")
     if isinstance(multi, dict):
-        errors.extend(_validate_multi_canary(multi, environment_set, items))
+        errors.extend(_validate_multi_region(multi, "multi_cluster_canary", "canary", environment_set, items))
     else:
         errors.append("strategies.multi_cluster_canary must be an object")
+    if isinstance(multi_blue, dict):
+        errors.extend(
+            _validate_multi_region(
+                multi_blue,
+                "multi_cluster_blue_green",
+                "blue_green",
+                environment_set,
+                items,
+            )
+        )
+    else:
+        errors.append("strategies.multi_cluster_blue_green must be an object")
     for name, decision in METHOD_DECISION.items():
         body = defined.get(name)
         if isinstance(body, dict) and body.get("method") != decision["method"]:
@@ -388,12 +422,17 @@ def _validate_blue_green(blue: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _validate_multi_canary(
+def _validate_multi_region(
     multi: dict[str, Any],
+    strategy_name: str,
+    traffic_strategy: str,
     environments: set[str],
     clusters: list[Any],
 ) -> list[str]:
-    prefix_root = "strategies.multi_cluster_canary"
+    prefix_root = f"strategies.{strategy_name}"
+    expected_abort = (
+        "shift_all_weight_to_baseline" if traffic_strategy == "canary" else "restore_baseline_slot"
+    )
     errors = _reject_unknown(
         multi,
         {
@@ -412,10 +451,10 @@ def _validate_multi_canary(
     )
     if multi.get("kind") != "placement":
         errors.append(f"{prefix_root}.kind must be placement")
-    if multi.get("traffic_strategy") != "canary":
-        errors.append(f"{prefix_root}.traffic_strategy must be canary")
-    if multi.get("abort") != "shift_all_weight_to_baseline":
-        errors.append(f"{prefix_root}.abort must shift_all_weight_to_baseline")
+    if multi.get("traffic_strategy") != traffic_strategy:
+        errors.append(f"{prefix_root}.traffic_strategy must be {traffic_strategy}")
+    if multi.get("abort") != expected_abort:
+        errors.append(f"{prefix_root}.abort must be {expected_abort}")
     if multi.get("deny_unmatched") is not True:
         errors.append(f"{prefix_root}.deny_unmatched must be true")
     if multi.get("pin_exact_cluster_ids") is not True:
@@ -459,8 +498,8 @@ def _validate_multi_canary(
             errors.append(f"duplicate wave name: {wave['name']}")
         else:
             names.add(wave["name"])
-        if wave.get("strategy") != "canary":
-            errors.append(f"{prefix}.strategy must be canary")
+        if wave.get("strategy") != traffic_strategy:
+            errors.append(f"{prefix}.strategy must be {traffic_strategy}")
         selector = wave.get("selector")
         if not isinstance(selector, dict) or not selector:
             errors.append(f"{prefix}.selector must be a non-empty object")
@@ -486,11 +525,11 @@ def _validate_multi_canary(
             if not gateway:
                 errors.append(f"{prefix} selects no gateway clusters")
     if len(wave_environments) > 1:
-        errors.append("multi_cluster_canary waves must target one environment")
+        errors.append(f"{strategy_name} waves must target one environment")
     if region_order and wave_regions != region_order:
-        errors.append("multi_cluster_canary waves must follow region_order")
+        errors.append(f"{strategy_name} waves must follow region_order")
     if len(set(wave_regions)) < 2:
-        errors.append("multi_cluster_canary must span more than one region")
+        errors.append(f"{strategy_name} must span more than one region")
     return errors
 
 
@@ -582,6 +621,7 @@ def _new_blue_wave(
     baseline: str,
     candidate: str,
     active_slot: str,
+    region: str = "",
 ) -> dict[str, Any]:
     inactive = _inactive_slot(active_slot)
     slots = {"blue": "", "green": ""}
@@ -606,19 +646,31 @@ def _new_blue_wave(
         "baseline_slot": active_slot,
         "slot_digests": slots,
         "preview": False,
+        "region": region,
     }
 
 
 def _open_wave(wave: dict[str, Any]) -> None:
     wave["started"] = True
+    wave["step_index"] = -1
+    wave["step_name"] = ""
+    wave["status"] = "planned"
+    wave["preview"] = False
     if wave["strategy"] == "canary":
         wave["stable_digest"] = wave["baseline_digest"]
         wave["canary_digest"] = wave["candidate_digest"]
         wave["stable_weight"] = 100
         wave["canary_weight"] = 0
-        wave["step_index"] = -1
-        wave["step_name"] = ""
-        wave["status"] = "planned"
+        return
+    if wave["strategy"] == "blue_green":
+        inactive = _inactive_slot(wave["baseline_slot"])
+        wave["active_slot"] = wave["baseline_slot"]
+        wave["slot_digests"][wave["baseline_slot"]] = wave["baseline_digest"]
+        wave["slot_digests"][inactive] = ""
+        wave["stable_digest"] = wave["baseline_digest"]
+        wave["canary_digest"] = ""
+        wave["stable_weight"] = 100
+        wave["canary_weight"] = 0
 
 
 def plan_release(
@@ -675,15 +727,17 @@ def plan_release(
 
     candidate = identity["bundle_sha256"]
     region_order: list[str] = []
-    if strategy == "multi_cluster_canary":
-        waves, unselected = _plan_region_canary(
+    if strategy in MEMBERSHIP_STRATEGIES:
+        waves, unselected = _plan_region_placement(
             strategies=strategies,
             indexed=indexed,
+            strategy=strategy,
             environment=environment,
             allow_ids=allow_ids,
             deny_ids=deny_ids,
             baseline=baseline_digest,
             candidate=candidate,
+            active_slot=active_slot,
         )
         region_order = [wave["region"] for wave in waves]
         excluded: list[dict[str, str]] = []
@@ -711,7 +765,7 @@ def plan_release(
         for cluster_id in wave["cluster_ids"]:
             _k8s_name(service, cluster_id, "route")
 
-    if waves and waves[0]["strategy"] == "canary":
+    if waves:
         _open_wave(waves[0])
 
     return {
@@ -815,24 +869,27 @@ def _explicit_non_gateway(
         )
 
 
-def _plan_region_canary(
+def _plan_region_placement(
     *,
     strategies: dict[str, Any],
     indexed: dict[str, dict[str, Any]],
+    strategy: str,
     environment: str,
     allow_ids: list[str],
     deny_ids: list[str],
     baseline: str,
     candidate: str,
+    active_slot: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    multi = strategies["strategies"]["multi_cluster_canary"]
-    if multi.get("traffic_strategy") != "canary":
-        raise ValueError("multi_cluster_canary traffic strategy must be canary")
+    traffic = MEMBERSHIP_TRAFFIC[strategy]
+    multi = strategies["strategies"][strategy]
+    if multi.get("traffic_strategy") != traffic:
+        raise ValueError(f"{strategy} traffic strategy must be {traffic}")
     _explicit_non_gateway(allow_ids, indexed, environment)
     wave_environments = {wave["selector"]["environment"] for wave in multi["waves"]}
     if wave_environments != {environment}:
         raise ValueError(
-            "multi_cluster_canary waves target "
+            f"{strategy} waves target "
             + ", ".join(sorted(wave_environments))
             + f", release environment is {environment}"
         )
@@ -840,10 +897,10 @@ def _plan_region_canary(
     waves: list[dict[str, Any]] = []
     allow_set = set(allow_ids)
     deny_set = set(deny_ids)
-    required = strategies["strategies"]["canary"]["required_cluster_labels"]
+    required = strategies["strategies"][traffic]["required_cluster_labels"]
     for wave in multi["waves"]:
-        if wave["strategy"] != "canary":
-            raise ValueError(f"wave {wave['name']} must use canary, not {wave['strategy']}")
+        if wave["strategy"] != traffic:
+            raise ValueError(f"wave {wave['name']} must use {traffic}, not {wave['strategy']}")
         region = wave["selector"].get("region")
         if not isinstance(region, str) or not region:
             raise ValueError(f"wave {wave['name']} must select one region")
@@ -861,14 +918,14 @@ def _plan_region_canary(
         ]
         if incapable:
             raise ValueError(
-                f"wave {wave['name']} includes clusters without canary traffic capability: "
+                f"wave {wave['name']} includes clusters without gateway traffic capability: "
                 + ", ".join(incapable)
             )
         if not matched:
             raise ValueError(f"empty wave: {wave['name']}")
         assigned.update(matched)
-        waves.append(
-            _new_canary_wave(
+        if traffic == "canary":
+            built = _new_canary_wave(
                 name=wave["name"],
                 cluster_ids=matched,
                 baseline=baseline,
@@ -876,10 +933,19 @@ def _plan_region_canary(
                 started=False,
                 region=region,
             )
-        )
+        else:
+            built = _new_blue_wave(
+                name=wave["name"],
+                cluster_ids=matched,
+                baseline=baseline,
+                candidate=candidate,
+                active_slot=active_slot,
+                region=region,
+            )
+        waves.append(built)
     regions = [wave["region"] for wave in waves]
     if regions != list(multi["region_order"]) or len(set(regions)) < 2:
-        raise ValueError("multi_cluster_canary must select gateway clusters in more than one region")
+        raise ValueError(f"{strategy} must select gateway clusters in more than one region")
     if allow_ids:
         missing = [item for item in allow_ids if item not in assigned]
         if missing:
@@ -1430,6 +1496,16 @@ def _preview_route(
 
 
 def check_pointer(pointer: dict[str, Any], *, bundle_sha256: str, environment: str) -> None:
+    if not isinstance(pointer, dict):
+        raise ValueError("environment pointer must be an object")
+    digest_error = _sha256(bundle_sha256, "bundle_sha256")
+    if digest_error:
+        raise ValueError(digest_error)
+    pointer_error = _sha256(pointer.get("bundle_sha256"), "pointer bundle_sha256")
+    if pointer_error:
+        raise ValueError(pointer_error)
+    if not isinstance(environment, str) or not environment:
+        raise ValueError("environment is required")
     if pointer.get("environment") != environment:
         raise ValueError("pointer environment does not match the release environment")
     if pointer.get("bundle_sha256") != bundle_sha256:
@@ -1531,7 +1607,7 @@ def main() -> int:
         if args.command == "validate":
             print(
                 "OK: progressive release policy validated "
-                f"({len(clusters['clusters'])} clusters, strategies canary/blue_green/multi_cluster_canary)"
+                f"({len(clusters['clusters'])} clusters, strategies {'/'.join(METHOD_DECISION)})"
             )
             return 0
         if args.command == "check-pointer":

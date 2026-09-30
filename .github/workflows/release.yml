@@ -12,7 +12,7 @@ on:
           - plan
           - scenario
       strategy:
-        description: "canary is one weight for every gateway cluster; blue_green is an atomic slot switch; multi_cluster_canary is cross-cluster cross-region canary on an exact pin"
+        description: "canary is one weight for every gateway cluster; blue_green is an atomic slot switch in one environment; multi_cluster_canary is cross-region canary; multi_cluster_blue_green is a cross-region atomic slot switch on an exact pin"
         required: true
         default: multi_cluster_canary
         type: choice
@@ -20,6 +20,7 @@ on:
           - canary
           - blue_green
           - multi_cluster_canary
+          - multi_cluster_blue_green
       environment:
         description: "Promotion environment whose current pointer digest is the only legal candidate"
         required: true
