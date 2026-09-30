@@ -184,8 +184,8 @@ rollback to historical production digest
 | HIL Lease | ✅ 已实现 | 真机独占租约与释放语义 |
 | Vendor Adapter | ✅ 已实现 | RK/Qcom/MTK build + HIL 适配层 |
 | RK 物理接入准备 | ✅ Ready | x86_64 build host → arm64 target |
-| 环境内灰度 | ✅ 控制面 | Gateway API HTTPRoute 权重，逐步 1→5→25→50→100；同一环境的 gateway 集群同步同一步；同一次渲染写出权重相同的 Istio VirtualService |
-| 多集群灰度 | ✅ 控制面 | `multi_cluster_canary`：cn-east 然后 cn-north，区域内集群同权，后开区域打开前保持 0%，名单用 PlacementDecision + ApplicationSet 钉死 |
+| 环境内灰度 | ✅ 控制面 | Gateway API HTTPRoute 权重，逐步 1→5→25→50→100，100% 留在 canary 后端直到 `confirm` 收到 stable；同一环境的 gateway 集群同步同一步；同一次渲染写出权重相同的 Istio VirtualService |
+| 多集群灰度 | ✅ 控制面 | `multi_cluster_canary`：cn-east 然后 cn-north，区域内集群同权，后开区域要等前一区域 `confirm` 才打开，名单用 PlacementDecision + ApplicationSet 钉死 |
 | 蓝绿发布 | ✅ 控制面 | HTTPRoute 原子切换，预览流量不进入生产权重；同一环境的 gateway 集群在同一步切槽；VirtualService 把 100% 生产流量送到当前槽 |
 | 多集群蓝绿 | ✅ 控制面 | `multi_cluster_blue_green`：cn-east 然后 cn-north，区域内集群共用槽位，后开区域打开前不渲染，预览 header 不改变生产权重，切换不是权重爬坡 |
 | Istio 数据面适配 | ✅ 控制面渲染 | 同一 release state 再渲染 VirtualService。灰度权重与 HTTPRoute 相同且和为 100。这不是第二份策略 |
@@ -437,7 +437,7 @@ Rollback 只接受同环境历史 Deployment ID，并创建新的 rollback point
 | --- | --- | --- | --- |
 | 同一环境里所有 `traffic=gateway` 的集群用同一步权重 | `canary` | 路由 | Gateway API `HTTPRoute` 权重 1、5、25、50、100。参考目录的 production 会让 cn-east 和 cn-north 一起变 |
 | 同一环境里所有 gateway 集群各占一个槽，验证后一次切完 | `blue_green` | 路由，而且必须原子切换 | 生产权重始终 100。预览 header `x-release-preview: true` 不改变生产权重。cn-east 和 cn-north 同一步切槽 |
-| 多个区域按同一套灰度权重展开，后开区域先保持 0% | `multi_cluster_canary` | 先钉死集群名单，再只改名单内的权重 | 参考目录先打开 cn-east，再打开 cn-north。区域内集群同权。后开区域打开前不出现在渲染结果里，打开后仍然按 1、5、25、50、100，不会改成蓝绿 |
+| 多个区域按同一套灰度权重展开，后开区域先保持 0% | `multi_cluster_canary` | 先钉死集群名单，再只改名单内的权重 | 参考目录先打开 cn-east，cn-east `confirm` 之后才打开 cn-north。区域内集群同权。后开区域打开前不出现在渲染结果里，打开后仍然按 1、5、25、50、100，不会改成蓝绿 |
 | 多个区域共用槽位并一次切完，后开区域先保持基线 | `multi_cluster_blue_green` | 先钉死集群名单，再只在名单内做原子切换 | 同一区域顺序。不是权重爬坡。预览 header 不改变生产权重 |
 
 只给 `role=canary` 的 `prod-cn-east-canary` 做权重，再把后面的区域改成蓝绿，得到的不是跨区域灰度。环境内 `canary` 也做不到“当前区域加权重，后开区域保持 0%”。
@@ -446,7 +446,7 @@ Rollback 只接受同环境历史 Deployment ID，并创建新的 rollback point
 
 ### 9.2 权重、槽位、分析、中止
 
-灰度步骤名是 `1pct`、`5pct`、`25pct`、`50pct`、`100pct`。不能跳步。分析失败时进程退出，`release-state.json` 不改写，权重不动。`100pct` 成功之后，候选 digest 写到 stable 后端，canary 权重回到 0。读到的 HTTPRoute 是 stable 权重 100，不是一条长期挂着的 100% canary 后端。
+灰度步骤名是 `1pct`、`5pct`、`25pct`、`50pct`、`100pct`、`confirm`。不能跳步。分析失败时进程退出，`release-state.json` 不改写，权重不动。`100pct` 成功之后，流量 100% 在 canary 后端，stable 权重是 0，stable digest 仍是基线，状态保持 `in_progress`。这时 abort 回到基线并清空 canary digest。下一步 `confirm` 通过 `error_rate` 之后，候选 digest 才写到 stable 后端，canary 权重回到 0，这一波 `completed`。`confirm` 之后 abort 被拒绝。`multi_cluster_canary` 里 cn-north 要等 cn-east 的 `confirm`，不是只等到 100% canary 权重。
 
 `abort` 把每一个已经打开的区域收回基线：灰度是 stable 权重 100、基线 digest；蓝绿是切回基线槽，并清掉 inactive 上的候选。未打开的区域本来就不在渲染结果里。
 

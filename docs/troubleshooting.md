@@ -235,7 +235,8 @@ release-state.json 的 status
 - 同环境里有 `traffic=none` 的集群，灰度计划会要求 `accept_excluded`。没有确认就失败，是为了避免假装全环境都切了流量。
 - `scenario` 的分析证据是合成的。synthetic analysis is not production evidence。
 - 多集群灰度还停在当前区域时，后开区域保持 0%，并且不会出现在渲染结果里。后开区域打开后仍然按 canary 权重推进，不会变成蓝绿。
-- 已 confirm 的蓝绿不能用发布 abort，要走同环境 rollback。
+- 灰度 `100pct` 时流量在 canary 后端，stable digest 仍是基线。要收回基线就 abort。`confirm` 之后候选才写到 stable。
+- 已 confirm 的蓝绿，以及已经 `completed` 的灰度，不能用发布 abort，要走同环境 rollback。
 
 ## 16. 事故处理模板
 

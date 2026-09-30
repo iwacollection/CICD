@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "环境内灰度走同一套 HTTPRoute 权重。多集群灰度按区域顺序走同一套权重，区域内集群同权，后开区域在打开前保持 0%，并且仍然是灰度而不是蓝绿。多集群蓝绿按同一区域顺序做原子槽位切换，区域内集群共用槽位，后开区域打开前不渲染，预览 header 不改变生产权重。集群名单用 PlacementDecision 和 ApplicationSet 钉死。同一次渲染从这份状态再写出 Istio VirtualService 适配：灰度权重与 HTTPRoute 相同且和为 100，蓝绿生产流量 100% 在当前槽，预览是独立 header match，不改变生产 route。VirtualService 不是第二份策略。",
+  "description": "环境内灰度走同一套 HTTPRoute 权重。100pct 把流量留在 canary 后端，stable 权重为 0，stable digest 仍是基线，状态保持 in_progress；下一步 confirm 通过 error_rate 后才把候选写到 stable、清空 canary，并完成该波。多集群灰度按区域顺序走同一套权重，区域内集群同权，后开区域要等前一区域 confirm 才打开，打开前保持基线并且仍然是灰度。多集群蓝绿按同一区域顺序做原子槽位切换，区域内集群共用槽位，后开区域打开前不渲染，预览 header 不改变生产权重。集群名单用 PlacementDecision 和 ApplicationSet 钉死。同一次渲染从这份状态再写出 Istio VirtualService 适配：灰度权重与 HTTPRoute 相同且和为 100，蓝绿生产流量 100% 在当前槽，预览是独立 header match，不改变生产 route。VirtualService 不是第二份策略。",
   "artifact_contract": 2,
   "namespace": "apps",
   "gateway_name": "platform-gateway",
@@ -24,7 +24,8 @@
         {"name": "5pct", "canary_weight": 5, "analysis": ["error_rate", "latency_p95"]},
         {"name": "25pct", "canary_weight": 25, "analysis": ["error_rate", "latency_p95"]},
         {"name": "50pct", "canary_weight": 50, "analysis": ["error_rate", "latency_p95"]},
-        {"name": "100pct", "canary_weight": 100, "analysis": ["error_rate"]}
+        {"name": "100pct", "canary_weight": 100, "analysis": ["error_rate"]},
+        {"name": "confirm", "analysis": ["error_rate"]}
       ],
       "analysis_thresholds": {
         "error_rate_max": 0.01,
