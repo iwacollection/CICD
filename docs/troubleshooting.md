@@ -226,7 +226,7 @@ release-state.json 的 status
 → 当前 wave 的 step_name / canary_weight / active_slot
 → 分析证据是被拒绝，还是步骤根本没 advance
 → ClusterPin.clusterIds 里有没有目标集群
-→ HTTPRoute 是否只渲染了这些集群
+→ HTTPRoute 和 VirtualService 是否只渲染了这些集群，两边权重是否相同
 ```
 
 常见原因：

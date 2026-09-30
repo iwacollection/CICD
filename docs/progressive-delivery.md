@@ -1,6 +1,6 @@
 # 灰度、蓝绿与跨集群跨区域灰度
 
-这份文档是发布策略的规格。`scripts/ci/release_strategy.py`、`ci/release-strategies.json`、`ci/clusters.json` 和 `.github/workflows/release.yml` 按这里的规则实现。规则变了，要同时改策略文件、引擎和 `tests/test_progressive_delivery.py`。
+这份文档是发布策略的规格。`scripts/ci/release_strategy.py`、`ci/release-strategies.json`、`ci/clusters.json`、`.github/workflows/release.yml` 和 `ops/Jenkinsfile` 按这里的规则实现。规则变了，要同时改策略文件、引擎和 `tests/test_progressive_delivery.py`。
 
 ## 1. 它解决什么问题
 
@@ -80,14 +80,18 @@ Build once
 下个区域没打开时，不渲染它的路由，服务 digest 保持基线
 ```
 
-Gateway API 是路由合同，而不是某一家服务网格。能实现 HTTPRoute 的 Istio、Contour、NGINX Gateway 或 Envoy Gateway 都可以做数据面。仓库不把 VirtualService、Ingress 注解权重写成第二份事实来源，避免两套权重漂移。
+Gateway API `HTTPRoute` 仍是路由合同。同一次渲染会从同一份 release state 再写出 Istio `VirtualService`，这是数据面适配，不是第二份策略。Jenkins 和 GitHub Actions 都不另写权重。
+
+灰度 VirtualService 的权重必须与同一集群的 HTTPRoute 相同，并且和为 100。蓝绿 VirtualService 把 100% 生产流量送到当前槽，不做 1、5、25、50、100。预览是另一份 VirtualService，里面只有 header `x-release-preview` 的独立 match，不修改生产 VirtualService 的 route。每份 HTTPRoute 和 VirtualService 都带注解 `cicd.platform/cluster`，这个集群必须落在当前波次的 `ClusterPin.clusterIds` 里。名单外的集群不能出现在这两份清单里。
+
+Contour、NGINX Gateway、Envoy Gateway 仍然可以在集群里实现 HTTPRoute。本仓库没有为它们再写一份权重。Ingress 注解权重也不是事实来源。
 
 集群管理钉死的是两份对象：
 
 - `PlacementDecision.status.decisions[].clusterName` 是允许落地的集群 ID；
 - `ApplicationSet` 使用 list generator，元素就是这些 ID。
 
-不使用 ApplicationSet 的 cluster selector generator。selector 会在标签漂移时扩大范围。Karmada Placement、Rancher Fleet 属于同一类工具；接入时必须消费同一份 `ClusterPin`，不能再维护一份自己的 selector。HTTPRoute 的 `cicd.platform/cluster-id` 必须落在当前已打开波次的 `ClusterPin.clusterIds` 里。名单外的集群不能出现在路由里。
+不使用 ApplicationSet 的 cluster selector generator。selector 会在标签漂移时扩大范围。Karmada Placement、Rancher Fleet 属于同一类工具；接入时必须消费同一份 `ClusterPin`，不能再维护一份自己的 selector。HTTPRoute 和 VirtualService 的 `cicd.platform/cluster` 必须落在当前已打开波次的 `ClusterPin.clusterIds` 里。名单外的集群不能出现在路由里。
 
 ## 4. 和晋级、回滚的边界
 
@@ -381,7 +385,9 @@ synthetic analysis is not production evidence
 | `<service>-<wave>-decision.json` | `PlacementDecision` | `clusterName` 列表，必须和 ClusterPin 一致 |
 | `<service>-<wave>-appset.json` | `ApplicationSet` | list generator，每个元素带该集群的 digest 和权重 |
 | `<service>-<cluster>-route.json` | `HTTPRoute` | 只带这个集群的标签，权重之和为 100 |
+| `<service>-<cluster>-vs.json` | `VirtualService` | 与同一集群 HTTPRoute 的权重或槽位相同；注解 `cicd.platform/cluster` |
 | `<service>-<cluster>-preview.json` | `HTTPRoute` | 仅蓝绿预览步骤存在 |
+| `<service>-<cluster>-preview-vs.json` | `VirtualService` | 仅蓝绿预览步骤存在；只有 header `x-release-preview` 的 match |
 
 多集群灰度进行中时，ApplicationSet 元素同时带着：
 
@@ -393,9 +399,9 @@ stableWeight / canaryWeight = 当前区域的这一步
 
 同一波次里每个元素的 `canaryWeight` 相同。不能把单个 `image.digest` 写成候选后再靠路由“看起来像灰度”。那样 stable 后端也会变成新版本。
 
-HTTPRoute、PlacementDecision 和 ApplicationSet 里的集群 ID 必须等于这一波的 `ClusterPin.clusterIds`。未打开的区域、其他环境、`prod-edge-offline` 都不会出现。
+HTTPRoute、VirtualService、PlacementDecision 和 ApplicationSet 里的集群 ID 必须等于这一波的 `ClusterPin.clusterIds`。未打开的区域、其他环境、`prod-edge-offline` 都不会出现。
 
-蓝绿元素带着 `blueDigest`、`greenDigest`、`activeSlot`。预览步骤额外带 `previewDigest`。多集群蓝绿在同一波次里这些字段完全相同，`canaryWeight` 保持 `0`。生产 HTTPRoute 只有一个后端，权重 100。预览路由只在 preview 步骤出现，而且不改生产路由。非法的 `evidence` 模式会被拒绝，不会写出文档。
+蓝绿元素带着 `blueDigest`、`greenDigest`、`activeSlot`。预览步骤额外带 `previewDigest`。多集群蓝绿在同一波次里这些字段完全相同，`canaryWeight` 保持 `0`。生产 HTTPRoute 只有一个后端，权重 100。同一集群的生产 VirtualService 也只有这一条 route，权重 100，没有 header match。预览路由和预览 VirtualService 只在 preview 步骤出现，而且不改生产路由。非法的 `evidence` 模式会被拒绝，不会写出文档。
 
 每份对象都有注解：
 
@@ -418,10 +424,10 @@ cicd.platform/evidence
 1. 读取 `ClusterPin.clusterIds`。
 2. `PlacementDecision` 里每一个 `clusterName` 都必须在这份名单里，名单里的每一个 ID 也都必须出现。
 3. 只把 ApplicationSet 的 list 元素发到同名集群。
-4. HTTPRoute 只应用到 `cicd.platform/cluster` 注解指向的集群，并且该集群必须属于这份 pin。
+4. HTTPRoute 和 VirtualService 只应用到 `cicd.platform/cluster` 注解指向的集群，并且该集群必须属于这份 pin。VirtualService 的权重从同一份渲染结果来，控制器不能再改一版。
 5. 忽略一切不在已打开波次里的集群，不要用环境级 selector 再选一次。后开区域保持基线，直到它自己的波次出现在渲染结果里。
 6. 看到 `evidence=synthetic` 或 `unverified` 时拒绝作用于生产。
-7. 不在 GitHub Actions 里存放 kubeconfig。`release.yml` 只上传 `release-state.json` 和 `rendered/`。
+7. 不在 GitHub Actions 或 Jenkins 里存放 kubeconfig。`release.yml` 只上传 `release-state.json` 和 `rendered/`。`ops/Jenkinsfile` 只调用 CLI，不执行 `kubectl apply`。
 
 控制面测试通过，只说明期望状态符合上面的规则。它不表示生产集群已经切了流量。
 
@@ -559,9 +565,26 @@ validate 策略
 
 权限是 `contents: read` 和 `deployments: read`。没有 `deployments: write`，所以它不能移动环境指针，也不能代替 rollback。
 
-`action=plan` 渲染当前步骤，证据标记为 `unverified`。`action=scenario` 使用合成证据走完步骤。生产切流用仓库外的控制器消费 `advance` 之后、证据标记为 `operator` 的渲染结果。
+`action=plan` 渲染当前步骤，证据标记为 `unverified`。`action=scenario` 使用合成证据走完步骤。同一次 dispatch 从同一份 release state 写出 Gateway API HTTPRoute 和 Istio VirtualService。Job 里没有 kubeconfig，也不会把清单应用到集群。
 
-## 16. 已经验证的不变量
+生产切流用仓库外的控制器消费 `advance` 之后、证据标记为 `operator` 的渲染结果。控制器可以选择 HTTPRoute，也可以选择从同一状态渲染出来的 VirtualService。两边的权重和槽位必须保持这次渲染的结果。
+
+## 16. Jenkins 只调用同一条 CLI
+
+`ops/Jenkinsfile` 是调用方，不是第二份策略。它做两件事：
+
+```text
+检出参数 PLATFORM_SHA 指向的平台提交
+按 COMMAND 调用 scripts/ci/release_strategy.py 的 validate、plan、advance 或 render
+```
+
+`STRATEGY`、`ALLOW`、`DENY`、digest 和槽位都原样传给 CLI。Jenkinsfile 里不写 canary 权重，不写集群名单，不写 `kubectl apply`，也不保存 kubeconfig。权重、区域顺序和 ClusterPin 仍由检出的那次提交里的 Python 策略引擎决定。改 Jenkins 参数不会变成另一套灰度或蓝绿。
+
+`advance` 读取调用方提供的 `analysis.json`。Jenkins 不合成通过的证据。`render` 只把已有状态再写成 JSON，包括 HTTPRoute 和 VirtualService。
+
+这条流水线跑完，只说明工作区里有期望状态。它不表示生产集群已经切了流量。
+
+## 17. 已经验证的不变量
 
 `tests/test_progressive_delivery.py` 锁定这些行为：
 
@@ -582,6 +605,10 @@ validate 策略
 - `prod-edge-offline`、dev、staging 保持基线，且不出现在渲染结果里；
 - 把 `prod-edge-offline` 写进 allow 会因缺少 gateway 失败，不会进入 pin；
 - 路由里的集群 ID 不会超出该波次的 ClusterPin；
+- 同一集群的 VirtualService 权重与 HTTPRoute 相同，且和为 100；
+- 蓝绿生产 VirtualService 把 100% 流量送到当前槽，没有权重爬坡；
+- 预览 VirtualService 只有 header `x-release-preview` 的 match，不改变生产 route；
+- VirtualService 的 `cicd.platform/cluster` 落在 ClusterPin 内，名单外集群不会出现；
 - ApplicationSet 只有 list generator；
 - 候选 digest 必须等于环境指针，且不能已经是基线；
 - `check-pointer` 拒绝非 SHA256 的指针 digest，也拒绝环境和 digest 不相等；
@@ -597,8 +624,8 @@ validate 策略
 
 平台校验 `validate.yml` 会执行 `release_strategy.py validate`。
 
-## 17. 还没有做的事
+## 18. 还没有做的事
 
-真实集群 apply 需要集群里的 Gateway、带 `cicd.platform/cluster-id` 标签的 OCM ManagedCluster，以及消费这些 JSON 的 Argo CD。这些资源不在本仓库。控制面测试通过，不等于生产集群已经完成灰度或蓝绿。
+真实集群 apply 需要集群里的 Gateway 或 Istio、带 `cicd.platform/cluster-id` 标签的 OCM ManagedCluster，以及消费这些 JSON 的控制器。这些资源不在本仓库。控制面测试通过，不等于生产集群已经完成灰度或蓝绿。
 
-把 kubeconfig 放进 GitHub Actions，或者在 Job 里直接 `kubectl apply`，都违反第 13 节的合同。
+把 kubeconfig 放进 GitHub Actions 或 Jenkins，或者在 Job 里直接 `kubectl apply`，都违反第 13 节的合同。VirtualService 只是同一份状态的适配，不能在网格里再维护一套权重。

@@ -175,6 +175,36 @@ jobs:
             python3 scripts/ci/release_strategy.py plan "${args[@]}"
           fi
 
+      - name: Require HTTPRoute and Istio VirtualService from the same state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          rendered = sorted(Path("rendered").glob("*.json"))
+          if not rendered:
+              raise SystemExit("rendered directory is empty")
+          kinds = set()
+          for path in rendered:
+              document = json.loads(path.read_text(encoding="utf-8"))
+              kinds.add(document["kind"])
+              if document["kind"] not in ("HTTPRoute", "VirtualService"):
+                  continue
+              cluster = document["metadata"]["annotations"]["cicd.platform/cluster"]
+              pin = document["metadata"]["annotations"]["cicd.platform/clusters"].split(",")
+              if cluster not in pin or not cluster:
+                  raise SystemExit(f"{path.name} is outside its ClusterPin")
+              if document["metadata"]["labels"]["cicd.platform/cluster-id"] != cluster:
+                  raise SystemExit(f"{path.name} cluster label does not match the pin annotation")
+          missing = {"HTTPRoute", "VirtualService"} - kinds
+          if missing:
+              raise SystemExit("dispatch must render " + ", ".join(sorted(missing)))
+          print("rendered Gateway API HTTPRoute and Istio VirtualService from the same release state")
+          print("this job does not apply manifests to a live cluster")
+          PY
+
       - name: Publish release decision
         shell: bash
         run: |
@@ -187,6 +217,7 @@ jobs:
           print(f"- strategy: `{state['strategy']}`")
           print(f"- method: `{state['method']}`")
           print(f"- tool: `{state['tool']}`")
+          print("- data-plane adapter: `Istio VirtualService` rendered from the same release state")
           print(f"- status: `{state['status']}`")
           print(f"- candidate: `{state['candidate_digest']}`")
           print("")

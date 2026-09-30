@@ -211,6 +211,21 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertTrue(preview_routes)
         self.assertEqual(preview_routes[0]["spec"]["rules"][0]["backendRefs"][0]["weight"], 100)
         self.assertEqual(preview_routes[0]["spec"]["rules"][0]["matches"][0]["headers"][0]["name"], "x-release-preview")
+        self._assert_istio_matches_http_route(documents)
+        preview_services = [doc for name, doc in documents if name.endswith("-preview-vs.json")]
+        self.assertEqual(len(preview_services), len(preview_routes))
+        preview_match = preview_services[0]["spec"]["http"][0]
+        self.assertEqual(preview_match["match"][0]["headers"]["x-release-preview"]["exact"], "true")
+        self.assertEqual(preview_match["route"][0]["weight"], 100)
+        self.assertEqual(preview_match["route"][0]["destination"]["host"], "checkout-green")
+        production_service = next(
+            doc
+            for name, doc in documents
+            if name.endswith("-vs.json") and not name.endswith("-preview-vs.json") and doc["metadata"]["annotations"]["cicd.platform/cluster"] == "prod-cn-east-a"
+        )
+        self.assertNotIn("match", production_service["spec"]["http"][0])
+        self.assertEqual(production_service["spec"]["http"][0]["route"][0]["weight"], 100)
+        self.assertEqual(production_service["spec"]["http"][0]["route"][0]["destination"]["host"], "checkout-blue")
 
         state = advance_release(state, self._pass(), self.strategies)
         self.assertEqual(state["waves"][0]["step_name"], "cutover")
@@ -227,6 +242,17 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertEqual(routes[0]["spec"]["rules"][0]["backendRefs"], [
             {"name": "checkout-green", "port": 80, "weight": 100}
         ])
+        cut_documents = render_documents(state, self.strategies, "operator")
+        virtual = next(
+            doc
+            for _, doc in cut_documents
+            if doc["kind"] == "VirtualService" and doc["metadata"]["annotations"]["cicd.platform/cluster"] == "prod-cn-east-b"
+        )
+        self.assertEqual(virtual["spec"]["http"], [
+            {"route": [{"destination": {"host": "checkout-green", "port": {"number": 80}}, "weight": 100}]}
+        ])
+        self.assertEqual(virtual["metadata"]["annotations"]["cicd.platform/cluster"], "prod-cn-east-b")
+        self.assertIn("prod-cn-east-b", virtual["metadata"]["annotations"]["cicd.platform/clusters"].split(","))
 
         aborted = abort_release(state)
         restored = project_release(aborted, self.clusters)["prod-cn-east-b"]
@@ -262,6 +288,28 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertEqual(projected["prod-cn-east-a"]["canary_weight"], 1)
         self.assertEqual(projected["prod-cn-north-a"]["canary_weight"], 1)
         self.assertEqual(state["region_order"], [])
+        documents = render_documents(state, self.strategies, "operator")
+        self._assert_istio_matches_http_route(documents)
+        self._assert_route_clusters_match_pin(documents)
+        for cluster_id in ("prod-cn-east-a", "prod-cn-north-a"):
+            route = next(
+                doc
+                for _, doc in documents
+                if doc["kind"] == "HTTPRoute" and doc["metadata"]["labels"]["cicd.platform/cluster-id"] == cluster_id
+            )
+            service = next(
+                doc
+                for _, doc in documents
+                if doc["kind"] == "VirtualService" and doc["metadata"]["annotations"]["cicd.platform/cluster"] == cluster_id
+            )
+            self.assertEqual(
+                [backend["weight"] for backend in route["spec"]["rules"][0]["backendRefs"]],
+                [99, 1],
+            )
+            self.assertEqual(
+                [item["weight"] for item in service["spec"]["http"][0]["route"]],
+                [99, 1],
+            )
 
     def test_cross_region_canary_shares_weight_inside_a_region_and_holds_the_next_region(self) -> None:
         east = ["prod-cn-east-a", "prod-cn-east-b", "prod-cn-east-canary"]
@@ -334,13 +382,22 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self._assert_exact_clusters(stepped, set(east))
         self._assert_route_clusters_match_pin(stepped)
         east_weights = []
+        istio_weights = []
         for _, doc in stepped:
-            if doc["kind"] != "HTTPRoute":
-                continue
-            weights = [backend["weight"] for backend in doc["spec"]["rules"][0]["backendRefs"]]
-            east_weights.append(weights)
-            self.assertEqual(sum(weights), 100)
+            if doc["kind"] == "HTTPRoute":
+                weights = [backend["weight"] for backend in doc["spec"]["rules"][0]["backendRefs"]]
+                east_weights.append(weights)
+                self.assertEqual(sum(weights), 100)
+            if doc["kind"] == "VirtualService":
+                weights = [item["weight"] for item in doc["spec"]["http"][0]["route"]]
+                istio_weights.append(weights)
+                self.assertEqual(sum(weights), 100)
+                self.assertEqual(doc["metadata"]["annotations"]["cicd.platform/adapter"], "istio")
+                cluster_id = doc["metadata"]["annotations"]["cicd.platform/cluster"]
+                self.assertIn(cluster_id, east)
+                self.assertNotIn("prod-cn-north-a", doc["metadata"]["annotations"]["cicd.platform/clusters"])
         self.assertEqual(east_weights, [[99, 1], [99, 1], [99, 1]])
+        self.assertEqual(istio_weights, east_weights)
 
         for _ in range(2):
             state = advance_release(state, self._pass(), self.strategies)
@@ -390,6 +447,27 @@ class ProgressiveDeliveryTests(unittest.TestCase):
             [backend["weight"] for backend in north_route["spec"]["rules"][0]["backendRefs"]],
             [95, 5],
         )
+        north_service = next(
+            doc
+            for _, doc in both
+            if doc["kind"] == "VirtualService" and doc["metadata"]["annotations"]["cicd.platform/cluster"] == "prod-cn-north-a"
+        )
+        self.assertEqual(
+            [item["weight"] for item in north_service["spec"]["http"][0]["route"]],
+            [95, 5],
+        )
+        self.assertEqual(sum(item["weight"] for item in north_service["spec"]["http"][0]["route"]), 100)
+        self.assertIn("prod-cn-north-a", north_service["metadata"]["annotations"]["cicd.platform/clusters"].split(","))
+        east_service = next(
+            doc
+            for _, doc in both
+            if doc["kind"] == "VirtualService" and doc["metadata"]["annotations"]["cicd.platform/cluster"] == "prod-cn-east-a"
+        )
+        self.assertEqual(
+            [item["weight"] for item in east_service["spec"]["http"][0]["route"]],
+            [100],
+        )
+        self.assertNotIn("prod-cn-east-a", north_service["metadata"]["annotations"]["cicd.platform/clusters"])
         self.assertEqual(split["prod-edge-offline"]["serving_digests"], [BASELINE])
         self.assertEqual(split["dev-cn-east-a"]["serving_digests"], [BASELINE])
 
@@ -526,14 +604,29 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         index = (ROOT / "docs" / "README.md").read_text(encoding="utf-8")
         validate = (ROOT / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        jenkins = (ROOT / "ops" / "Jenkinsfile").read_text(encoding="utf-8")
         for text in (readme, guide):
             self.assertIn("HTTPRoute", text)
+            self.assertIn("VirtualService", text)
             self.assertIn("PlacementDecision", text)
             self.assertIn("ApplicationSet", text)
             self.assertIn("multi_cluster_canary", text)
             self.assertIn("multi_cluster_blue_green", text)
             self.assertIn("cn-east", text)
             self.assertIn("cn-north", text)
+            self.assertIn("ops/Jenkinsfile", text)
+            self.assertIn("不是第二份策略", text)
+        self.assertNotIn("kubectl", jenkins)
+        self.assertNotIn("kubeconfig", jenkins.lower())
+        self.assertNotIn("prod-cn-", jenkins)
+        self.assertNotIn("canary_weight", jenkins)
+        for command in ("validate", "plan", "advance", "render"):
+            self.assertIn(command, jenkins)
+        self.assertIn("PLATFORM_SHA", jenkins)
+        self.assertIn("scripts/ci/release_strategy.py", jenkins)
+        self.assertIn("VirtualService", workflow)
+        self.assertNotIn("kubectl", workflow)
+        self.assertNotIn("kubeconfig", workflow.lower())
         self.assertIn("后开区域仍然按 canary 权重推进，不会改成蓝绿", guide)
         self.assertIn("预览 header 不改变生产权重", guide)
         self.assertIn("--strategy multi_cluster_canary", guide)
@@ -571,12 +664,21 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertFalse(any(name.endswith("-preview.json") for name, _ in documents))
         self.assertIn("prod-cn-north-a", json.dumps([doc for _, doc in documents]))
         for _, doc in documents:
-            if doc["kind"] != "HTTPRoute":
-                continue
-            self.assertEqual(
-                doc["spec"]["rules"][0]["backendRefs"],
-                [{"name": "checkout-blue", "port": 80, "weight": 100}],
-            )
+            if doc["kind"] == "HTTPRoute":
+                self.assertEqual(
+                    doc["spec"]["rules"][0]["backendRefs"],
+                    [{"name": "checkout-blue", "port": 80, "weight": 100}],
+                )
+            if doc["kind"] == "VirtualService":
+                self.assertEqual(
+                    doc["spec"]["http"][0]["route"],
+                    [{"destination": {"host": "checkout-blue", "port": {"number": 80}}, "weight": 100}],
+                )
+                self.assertNotIn("match", doc["spec"]["http"][0])
+                cluster_id = doc["metadata"]["annotations"]["cicd.platform/cluster"]
+                self.assertIn(cluster_id, state["waves"][0]["cluster_ids"])
+                self.assertIn("prod-cn-north-a", doc["metadata"]["annotations"]["cicd.platform/clusters"].split(","))
+                self.assertIn("prod-cn-east-a", doc["metadata"]["annotations"]["cicd.platform/clusters"].split(","))
 
         for _ in range(3):
             state = advance_release(state, self._pass(), self.strategies)
@@ -675,6 +777,24 @@ class ProgressiveDeliveryTests(unittest.TestCase):
             self.assertEqual(rule["matches"][0]["headers"][0]["value"], "true")
             self.assertEqual(rule["backendRefs"], [{"name": "checkout-green", "port": 80, "weight": 100}])
             self.assertNotIn("matches", [doc for _, doc in preview_docs if doc["kind"] == "HTTPRoute" and not doc["metadata"]["name"].endswith("-preview")][0]["spec"]["rules"][0])
+        preview_services = [doc for name, doc in preview_docs if name.endswith("-preview-vs.json")]
+        self.assertEqual(len(preview_services), len(east))
+        for service in preview_services:
+            http = service["spec"]["http"]
+            self.assertEqual(len(http), 1)
+            self.assertEqual(http[0]["match"][0]["headers"]["x-release-preview"]["exact"], "true")
+            self.assertEqual(http[0]["route"], [
+                {"destination": {"host": "checkout-green", "port": {"number": 80}}, "weight": 100}
+            ])
+            cluster_id = service["metadata"]["annotations"]["cicd.platform/cluster"]
+            self.assertIn(cluster_id, east)
+            self.assertNotIn("prod-cn-north-a", service["metadata"]["annotations"]["cicd.platform/clusters"])
+        for name, doc in preview_docs:
+            if doc["kind"] != "VirtualService" or name.endswith("-preview-vs.json"):
+                continue
+            self.assertNotIn("match", doc["spec"]["http"][0])
+            self.assertEqual(doc["spec"]["http"][0]["route"][0]["destination"]["host"], "checkout-blue")
+            self.assertEqual(doc["spec"]["http"][0]["route"][0]["weight"], 100)
         self.assertNotIn("prod-cn-north-a", json.dumps([doc for _, doc in preview_docs]))
 
         early = copy.deepcopy(state)
@@ -760,6 +880,29 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertEqual(production["spec"]["rules"][0]["backendRefs"], [{"name": "checkout-blue", "port": 80, "weight": 100}])
         self.assertNotIn("matches", production["spec"]["rules"][0])
         self.assertEqual(header["spec"]["rules"][0]["backendRefs"], [{"name": "checkout-green", "port": 80, "weight": 100}])
+        north_services = [
+            doc
+            for name, doc in both
+            if doc["kind"] == "VirtualService" and doc["metadata"]["annotations"]["cicd.platform/cluster"] == "prod-cn-north-a"
+        ]
+        self.assertEqual(len(north_services), 2)
+        production_service = next(doc for name, doc in both if name.endswith("prod-cn-north-a-vs.json"))
+        preview_service = next(doc for name, doc in both if name.endswith("prod-cn-north-a-preview-vs.json"))
+        self.assertEqual(production_service["spec"]["http"][0]["route"], [
+            {"destination": {"host": "checkout-blue", "port": {"number": 80}}, "weight": 100}
+        ])
+        self.assertNotIn("match", production_service["spec"]["http"][0])
+        self.assertEqual(
+            preview_service["spec"]["http"][0]["match"][0]["headers"]["x-release-preview"]["exact"],
+            "true",
+        )
+        self.assertEqual(preview_service["spec"]["http"][0]["route"][0]["destination"]["host"], "checkout-green")
+        self.assertEqual(preview_service["spec"]["http"][0]["route"][0]["weight"], 100)
+        self.assertEqual(production_service["metadata"]["annotations"]["cicd.platform/cluster"], "prod-cn-north-a")
+        east_still = next(doc for name, doc in both if name.endswith("prod-cn-east-a-vs.json"))
+        self.assertEqual(east_still["spec"]["http"][0]["route"][0]["destination"]["host"], "checkout-green")
+        self.assertEqual(east_still["spec"]["http"][0]["route"][0]["weight"], 100)
+        self.assertNotIn("prod-cn-east-a", production_service["metadata"]["annotations"]["cicd.platform/clusters"])
         self.assertEqual(split["prod-edge-offline"]["serving_digests"], [BASELINE])
         self.assertEqual(split["dev-cn-east-a"]["serving_digests"], [BASELINE])
 
@@ -834,6 +977,18 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         preview_routes = [doc for name, doc in documents if name.endswith("-preview.json")]
         self.assertTrue(preview_routes)
         self.assertEqual(preview_routes[0]["spec"]["rules"][0]["backendRefs"][0]["name"], "checkout-blue")
+        preview_services = [doc for name, doc in documents if name.endswith("-preview-vs.json")]
+        self.assertTrue(preview_services)
+        self.assertEqual(preview_services[0]["spec"]["http"][0]["route"][0]["destination"]["host"], "checkout-blue")
+        self.assertEqual(preview_services[0]["spec"]["http"][0]["route"][0]["weight"], 100)
+        self.assertEqual(
+            preview_services[0]["spec"]["http"][0]["match"][0]["headers"]["x-release-preview"]["exact"],
+            "true",
+        )
+        self.assertEqual(
+            preview_services[0]["metadata"]["annotations"]["cicd.platform/cluster"],
+            preview_services[0]["metadata"]["labels"]["cicd.platform/cluster-id"],
+        )
         self.assertEqual(project_release(state, self.clusters)["prod-cn-east-b"]["serving_digests"], [BASELINE])
         state = advance_release(state, self._pass(), self.strategies)
         self.assertEqual(state["waves"][0]["active_slot"], "blue")
@@ -924,9 +1079,52 @@ class ProgressiveDeliveryTests(unittest.TestCase):
             if doc["kind"] == "HTTPRoute":
                 cluster_id = doc["metadata"]["labels"]["cicd.platform/cluster-id"]
                 self.assertIn(cluster_id, allowed)
+                self.assertEqual(doc["metadata"]["annotations"]["cicd.platform/cluster"], cluster_id)
+            if doc["kind"] == "VirtualService":
+                cluster_id = doc["metadata"]["annotations"]["cicd.platform/cluster"]
+                self.assertEqual(doc["metadata"]["labels"]["cicd.platform/cluster-id"], cluster_id)
+                self.assertIn(cluster_id, allowed)
+                self.assertIn(cluster_id, doc["metadata"]["annotations"]["cicd.platform/clusters"].split(","))
             if doc["kind"] == "ApplicationSet":
                 clusters = [item["cluster"] for item in doc["spec"]["generators"][0]["list"]["elements"]]
                 self.assertIn(clusters, pins)
+        self._assert_istio_matches_http_route(documents)
+
+    def _assert_istio_matches_http_route(self, documents: list[tuple[str, dict]]) -> None:
+        routes = {
+            doc["metadata"]["annotations"]["cicd.platform/cluster"]: doc
+            for name, doc in documents
+            if doc["kind"] == "HTTPRoute" and not name.endswith("-preview.json")
+        }
+        services = {
+            doc["metadata"]["annotations"]["cicd.platform/cluster"]: doc
+            for name, doc in documents
+            if doc["kind"] == "VirtualService" and not name.endswith("-preview-vs.json")
+        }
+        self.assertEqual(set(services), set(routes))
+        allowed = {
+            cluster_id
+            for _, doc in documents
+            if doc["kind"] == "ClusterPin"
+            for cluster_id in doc["spec"]["clusterIds"]
+        }
+        for cluster_id, route in routes.items():
+            self.assertIn(cluster_id, allowed)
+            service = services[cluster_id]
+            self.assertEqual(service["apiVersion"], "networking.istio.io/v1")
+            self.assertEqual(service["metadata"]["annotations"]["cicd.platform/adapter"], "istio")
+            self.assertEqual(service["metadata"]["annotations"]["cicd.platform/cluster"], cluster_id)
+            http_weights = [backend["weight"] for backend in route["spec"]["rules"][0]["backendRefs"]]
+            production = service["spec"]["http"]
+            self.assertEqual(len(production), 1)
+            self.assertNotIn("match", production[0])
+            istio_weights = [item["weight"] for item in production[0]["route"]]
+            self.assertEqual(istio_weights, http_weights)
+            self.assertEqual(sum(istio_weights), 100)
+            self.assertEqual(
+                [item["destination"]["host"] for item in production[0]["route"]],
+                [backend["name"] for backend in route["spec"]["rules"][0]["backendRefs"]],
+            )
 
     def _assert_single_slot_routes(self, documents: list[tuple[str, dict]], backend: str) -> None:
         production = [
@@ -939,6 +1137,24 @@ class ProgressiveDeliveryTests(unittest.TestCase):
             backends = doc["spec"]["rules"][0]["backendRefs"]
             self.assertEqual(backends, [{"name": backend, "port": 80, "weight": 100}])
             self.assertNotIn("canary", backends[0]["name"])
+        virtual = [
+            doc
+            for name, doc in documents
+            if doc["kind"] == "VirtualService" and not name.endswith("-preview-vs.json")
+        ]
+        self.assertEqual(len(virtual), len(production))
+        for doc in virtual:
+            http = doc["spec"]["http"]
+            self.assertEqual(len(http), 1)
+            self.assertNotIn("match", http[0])
+            self.assertEqual(
+                http[0]["route"],
+                [{"destination": {"host": backend, "port": {"number": 80}}, "weight": 100}],
+            )
+            self.assertEqual(
+                doc["metadata"]["annotations"]["cicd.platform/cluster"],
+                doc["metadata"]["labels"]["cicd.platform/cluster-id"],
+            )
 
     def _assert_exact_clusters(self, documents: list[tuple[str, dict]], expected: set[str]) -> None:
         seen: set[str] = set()
@@ -949,6 +1165,8 @@ class ProgressiveDeliveryTests(unittest.TestCase):
                 seen.update(item["clusterName"] for item in doc["status"]["decisions"])
             if doc["kind"] == "HTTPRoute":
                 seen.add(doc["metadata"]["labels"]["cicd.platform/cluster-id"])
+            if doc["kind"] == "VirtualService":
+                seen.add(doc["metadata"]["annotations"]["cicd.platform/cluster"])
             blob = json.dumps(doc)
             self.assertNotIn("prod-edge-offline", blob)
             self.assertNotIn("dev-cn-east-a", blob)
