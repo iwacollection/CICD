@@ -72,7 +72,8 @@
       "apt_snapshot": "20261029T000000Z",
       "owner": "ci-platform",
       "guava_version": "33.7.2-jre",
-      "build_context_sha256": "156feed5a12816cd87b77009bf0519f84d85e4d2959f2d3fc3f9ab10fa13fd37"
+      "build_context_sha256": "156feed5a12816cd87b77009bf0519f84d85e4d2959f2d3fc3f9ab10fa13fd37",
+      "build_definition_sha256": "d3b6001d106ea4bd7f51678dd9958c066d873089939029f9ca1cc33979e5300d"
     }
   ]
 }
