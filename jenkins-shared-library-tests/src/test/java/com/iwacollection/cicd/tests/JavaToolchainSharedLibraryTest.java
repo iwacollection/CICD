@@ -216,6 +216,9 @@ public class JavaToolchainSharedLibraryTest {
                     ? String.valueOf(options.get("script"))
                     : String.valueOf(rawOptions);
                 shellCommands.add(command);
+                if ("true".equals(env.get("CI_MOCK_FAIL_BUILD")) && command.contains("run_build.py")) {
+                    throw new IllegalStateException("simulated Maven build failure");
+                }
                 if (Boolean.TRUE.equals(options.get("returnStatus"))) return 0;
                 if (Boolean.TRUE.equals(options.get("returnStdout"))) {
                     if (command.contains("rev-parse HEAD")) return PLATFORM_SHA + "\n";
@@ -329,6 +332,17 @@ public class JavaToolchainSharedLibraryTest {
         assertTrue(environmentAssignments.contains("GITHUB_REPOSITORY=example/java-service"));
         assertEquals(1, junit.size());
         assertEquals(1, archived.size());
+
+        // A failed build must still publish JUnit results from the finally path.
+        env.put("CI_MOCK_FAIL_BUILD", "true");
+        try {
+            script.invokeMethod("call", options);
+            fail("The injected Maven failure should propagate");
+        } catch (IllegalStateException ex) {
+            assertTrue(ex.getMessage().contains("simulated Maven build failure"));
+        }
+        assertEquals("JUnit must be called for both successful and failed builds", 2, junit.size());
+        assertEquals("Failed builds must not archive a success-only Artifact Contract", 1, archived.size());
     }
 
     @Test
