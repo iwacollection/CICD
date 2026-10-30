@@ -129,6 +129,16 @@ Artifact Contract v2
 
 ## [容器化构建环境](containerized-build-environments.md)
 
+## [Java / JDK 标准工具链管理](java-toolchain-management.md)
+
+重点：
+
+- JDK 8/11/17/21 标准镜像；
+- Maven / Gradle 版本治理；
+- 中央 Toolchain Registry 与 Candidate / Active 晋级；
+- Harbor 漏洞扫描、镜像签名、SBOM 与 digest；
+- Jenkins 消费端流水线、缓存、制品追溯和退役。
+
 重点：
 
 - Runner 与 Toolchain Image 的边界；
