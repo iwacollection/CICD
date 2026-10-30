@@ -163,7 +163,8 @@ python3 .ci-platform/scripts/ci/resolve_toolchain.py \
 
     def executeBuildAndPackage = {
         withEnv(buildEnvironment) {
-            sh '''#!/usr/bin/env bash
+            try {
+                sh '''#!/usr/bin/env bash
 set -euo pipefail
 docker info >/dev/null
 cosign version
