@@ -21,6 +21,7 @@ PROBES = {
     "make": "make --version",
     "java": "java -version 2>&1",
     "javac": "javac -version 2>&1",
+    "maven": "mvn --version 2>&1",
     "gradle": "gradle --version",
 }
 
