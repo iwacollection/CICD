@@ -92,9 +92,9 @@ Jenkins Agent 宿主机不安装多套 JDK。实际 JDK 与 Maven 来自中央�
 
 | Credential ID 示例 | 类型 | 用途 |
 |---|---|---|
+| cicd-platform-sha | Secret text | Controller 管理的 40 位 CICD commit SHA；必须与 Global Pipeline Library 的 Default version 完全一致，项目 Jenkinsfile 不得设置或覆盖 |
 | ghcr-readonly | Username with password | GHCR 只读拉取；用户名为 GitHub 用户/机器人，密码使用仅含 read:packages 的 PAT |
 | maven-settings-readonly | Secret file | Maven 私服 settings.xml，只有项目需要内部依赖时才传入 |
-| cicd-repository-readonly | Username with password / SSH | 仅当 CICD 仓库为私有且 Jenkins Git SCM 需要认证 |
 
 不要把 PAT、Maven 密码、settings.xml 或私钥写入 Git、Jenkinsfile 或镜像。
 
@@ -142,10 +142,6 @@ pipeline {
         disableConcurrentBuilds()
         skipDefaultCheckout(true)
     }
-    parameters {
-        string(name: 'CICD_PLATFORM_REF', defaultValue: '',
-               description: '固定的 40 位 CICD 平台 commit SHA')
-    }
     stages {
         stage('Checkout') {
             steps {
@@ -156,10 +152,8 @@ pipeline {
             steps {
                 script {
                     javaToolchainBuild(
-                        platformRef: params.CICD_PLATFORM_REF,
                         projectDir: 'examples/java17-maven-service',
                         toolchainConfig: 'ci/toolchain.json',
-                        trustedBranch: 'main',
                         registryCredentialsId: 'ghcr-readonly'
                     )
                 }
@@ -171,7 +165,7 @@ pipeline {
 
 单独业务仓库通常把 projectDir 设置为 .，并让自己的仓库根目录包含 ci/toolchain.json。示例 Jenkinsfile 仍位于 CICD monorepo，因此路径指向 examples/java17-maven-service。
 
-CICD_PLATFORM_REF 必须与 Jenkins Global Shared Library 实际加载的已批准平台提交一致。不要填移动分支。中央 Resolver、策略和工具链注册表都从该 SHA 检出。
+CICD 平台 SHA 不由业务 Jenkinsfile 提供。Controller 上的 Secret Text credential `cicd-platform-sha` 必须与 Global Pipeline Library 的 Default version 指向同一个 40 位 commit SHA。Shared Library 先拒绝 PR/非 main 分支，再从该 Controller 管理的凭据取 SHA 并校验格式；业务项目不能选择历史 SHA 回退中央 Registry 状态。中央 Resolver、策略和工具链注册表都从该 SHA 检出。
 
 ## 7. 完整调用顺序
 
@@ -190,7 +184,9 @@ Read ci/toolchain.json
   -> extract Toolchain ID only
         |
         v
-Checkout CICD at exact platformRef
+Read controller-managed cicd-platform-sha
+  -> exact 40-character commit SHA
+  -> checkout CICD at that exact SHA
   -> verify checked-out commit SHA
         |
         v
@@ -228,7 +224,8 @@ package_artifact.py
 verify_artifact.py
         |
         v
-JUnit reports + archiveArtifacts
+JUnit reports (finally path, also on failed Maven build)
+  -> archiveArtifacts (successful Artifact Contract only)
         |
         v
 Cleanup Maven settings + docker logout
