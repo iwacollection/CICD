@@ -1,6 +1,7 @@
 package com.iwacollection.cicd
 
 import groovy.json.JsonSlurperClassic
+import java.util.regex.Pattern
 
 /**
  * Pure validation helpers shared by Jenkins Pipeline steps.
@@ -10,8 +11,8 @@ import groovy.json.JsonSlurperClassic
  */
 class JavaToolchainSpec implements Serializable {
     private static final long serialVersionUID = 1L
-    private static final String ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/
-    private static final String IMAGE_PATTERN = /^.+@sha256:[0-9a-f]{64}$/
+    private static final Pattern ID_PATTERN = ~/^[a-z0-9][a-z0-9._-]{0,127}$/
+    private static final Pattern IMAGE_PATTERN = ~/^.+@sha256:[0-9a-f]{64}$/
 
     static Map parseProjectConfig(String content) {
         if (content == null || !content.trim()) {
