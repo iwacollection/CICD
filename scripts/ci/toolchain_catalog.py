@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -127,7 +128,78 @@ def toolchain_identity(item: dict) -> str:
     return item.get("host_identity") or f"host:{item.get('id')}"
 
 
-def build_publish_matrix(data: dict) -> dict:
+def build_context_sha256(repository_root: Path, context: str) -> str:
+    """Hash a complete Docker build context by sorted relative path and content digest."""
+    root = repository_root.resolve()
+    relative_context = Path(context)
+    if relative_context.is_absolute() or ".." in relative_context.parts:
+        raise ValueError(f"unsafe toolchain build context path: {context}")
+
+    context_path = (root / relative_context).resolve()
+    if context_path != root and root not in context_path.parents:
+        raise ValueError(f"toolchain build context escapes repository: {context}")
+    if not context_path.is_dir():
+        raise ValueError(f"toolchain build context does not exist: {context}")
+
+    hasher = hashlib.sha256()
+    files = sorted(context_path.rglob("*"), key=lambda path: path.relative_to(context_path).as_posix())
+    for path in files:
+        if path.is_symlink():
+            raise ValueError(
+                f"toolchain build context contains a symlink; use a pinned regular file instead: "
+                f"{path.relative_to(root).as_posix()}"
+            )
+        if not path.is_file():
+            continue
+        relative_path = path.relative_to(context_path).as_posix()
+        file_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+        hasher.update(relative_path.encode("utf-8"))
+        hasher.update(b"\\0")
+        hasher.update(file_sha256.encode("ascii"))
+        hasher.update(b"\\n")
+
+    return hasher.hexdigest()
+
+
+def validate_published_candidate_context(item: dict, repository_root: Path) -> None:
+    expected = item.get("build_context_sha256")
+    if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise ValueError(
+            f"published Candidate {item.get('id')} requires a 64-character build_context_sha256; "
+            "do not skip validation for a pinned image"
+        )
+
+    context = item.get("context", "")
+    dockerfile = item.get("dockerfile", "")
+    context_path = Path(context)
+    dockerfile_path = Path(dockerfile)
+    if context_path.is_absolute() or dockerfile_path.is_absolute():
+        raise ValueError(f"published Candidate {item.get('id')} has an absolute build path")
+    if ".." in context_path.parts or ".." in dockerfile_path.parts:
+        raise ValueError(f"published Candidate {item.get('id')} has an unsafe build path")
+
+    root = repository_root.resolve()
+    context_root = (root / context_path).resolve()
+    dockerfile_resolved = (root / dockerfile_path).resolve()
+    if context_root != root and root not in context_root.parents:
+        raise ValueError(f"published Candidate {item.get('id')} context escapes repository")
+    if context_root not in dockerfile_resolved.parents:
+        raise ValueError(
+            f"published Candidate {item.get('id')} Dockerfile must be inside its pinned context"
+        )
+    if not dockerfile_resolved.is_file():
+        raise ValueError(f"published Candidate {item.get('id')} Dockerfile is missing: {dockerfile}")
+
+    actual = build_context_sha256(repository_root, context)
+    if actual != expected:
+        raise ValueError(
+            f"published Candidate {item.get('id')} build context changed: "
+            f"expected {expected}, got {actual}; clear digest in a reviewed PR before rebuilding"
+        )
+
+
+def build_publish_matrix(data: dict, repository_root: Path | None = None) -> dict:
+    repository_root = repository_root or Path.cwd()
     include: list[dict] = []
     for item in data.get("toolchains", []):
         if not isinstance(item, dict):
@@ -141,7 +213,10 @@ def build_publish_matrix(data: dict) -> dict:
         # An empty digest means this Candidate still needs a first publish
         # or an explicitly requested rebuild. Once published, the registry
         # pins the digest and this workflow must not replace it implicitly.
-        if item.get("status") != "candidate" or item.get("digest"):
+        if item.get("status") != "candidate":
+            continue
+        if item.get("digest"):
+            validate_published_candidate_context(item, repository_root)
             continue
         include.append(
             {
@@ -178,7 +253,12 @@ def main() -> int:
         print(f"OK: {len(data['toolchains'])} toolchain definitions validated")
         return 0
 
-    matrix = build_publish_matrix(data)
+    try:
+        matrix = build_publish_matrix(data, Path.cwd())
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
     encoded = json.dumps(matrix, separators=(",", ":"))
     print(encoded)
     output = os.environ.get("GITHUB_OUTPUT")
