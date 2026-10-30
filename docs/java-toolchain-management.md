@@ -129,7 +129,8 @@ COPY smoke-test.sh /usr/local/bin/smoke-test
 RUN chmod 0755 /usr/local/bin/smoke-test
 
 USER 10001
-ENTRYPOINT ["/bin/sh"]
+# 不设置固定 ENTRYPOINT；由受控的 smoke/build 命令显式指定 shell 和参数。
+# 避免与现有工具链工作流的 docker run IMAGE bash -euo pipefail -c ... 调用冲突。
 ~~~
 
 镜像构建必须在受控 pipeline 中传入经审核的 BASE_IMAGE digest。不得使用 ubuntu:latest、eclipse-temurin:17 等浮动引用。若选用官方 Maven+JDK 基础镜像，应先审核 OS、JDK、Maven 版本和来源，再固定 digest。
@@ -277,7 +278,7 @@ Checkout
 
 ### Jenkinsfile 示例（消费端）
 
-以下展示 Declarative Pipeline 调用结构。生产接入时，resolveToolchain、verifyImageSignature 应由受保护的 Jenkins Shared Library 或平台 CLI 实现，并固定到经过评审的版本；不能由业务仓库自行实现一个永远返回通过的函数。中央注册表解析应读取固定 CICD commit 的 ci/toolchains.json，而不是从可变 main 分支临时下载。
+以下展示 Declarative Pipeline 调用结构。此示例**仅适用于可信分支/受信发布流水线**：Jenkins Job 必须由平台管理员配置为从受保护分支或可信 Pipeline 定义加载，不能仅靠项目仓库内可被 PR 修改的 Jenkinsfile 自我声明可信。assertTrustedBuildContext、resolveToolchain、verifyImageSignature 应由受保护的 Jenkins Shared Library 或平台 CLI 实现，并固定到经过评审的版本；不能由业务仓库自行实现一个永远返回通过的函数。中央注册表解析应读取固定 CICD commit 的 ci/toolchains.json，而不是从可变 main 分支临时下载。外部 PR/Fork PR 必须走另一条由平台控制的 untrusted-pr-builder 流水线，不绑定 Maven settings、发布凭据或签名凭据。
 
 ~~~groovy
 @Library('company-ci-library@v2.0.0') _
@@ -295,13 +296,24 @@ pipeline {
 
     environment {
         CICD_PLATFORM_REF = 'REPLACE_WITH_APPROVED_40_CHAR_COMMIT_SHA'
-        HARBOR_CREDENTIALS = 'harbor-ci-pull'
+        TOOLCHAIN_REGISTRY_URL = 'REPLACE_WITH_APPROVED_REGISTRY_URL'
+        TOOLCHAIN_REGISTRY_CREDENTIALS = 'toolchain-registry-pull'
         MAVEN_SETTINGS_ID = 'maven-settings-readonly'
     }
 
     stages {
         stage('Checkout') {
             steps { checkout scm }
+        }
+
+        stage('Enforce trusted source') {
+            steps {
+                script {
+                    // 必须读取 Jenkins Controller / 受保护 Job 提供的可信上下文，
+                    // 不能相信 PR 可以自行设置的环境变量或仓库文件。
+                    assertTrustedBuildContext()
+                }
+            }
         }
 
         stage('Resolve approved toolchain') {
@@ -322,9 +334,18 @@ pipeline {
                         error('Toolchain is not Active or digest is invalid')
                     }
 
+                    if (!tc.jdk?.version ||
+                        !tc.jdk?.specificationVersion ||
+                        !tc.maven?.version ||
+                        tc.maven.mode != 'image') {
+                        error('Registry must declare the exact image-managed JDK and Maven versions')
+                    }
+
                     env.TOOLCHAIN_ID = tc.id
                     env.TOOLCHAIN_IMAGE = tc.image + '@' + tc.digest
-                    env.EXPECTED_JDK = tc.jdkVersion
+                    env.EXPECTED_JDK_VERSION = tc.jdk.version
+                    env.EXPECTED_JDK_SPECIFICATION = tc.jdk.specificationVersion
+                    env.EXPECTED_MAVEN_VERSION = tc.maven.version
                 }
             }
         }
@@ -350,15 +371,31 @@ pipeline {
                 ]) {
                     script {
                         docker.withRegistry(
-                            'https://harbor.example.com',
-                            env.HARBOR_CREDENTIALS
+                            env.TOOLCHAIN_REGISTRY_URL,
+                            env.TOOLCHAIN_REGISTRY_CREDENTIALS
                         ) {
                             docker.image(env.TOOLCHAIN_IMAGE).inside {
                                 sh '''
                                     set -eu
-                                    java -version
+
+                                    actual_java_version="$(java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/^[[:space:]]*java.version =/ { print $2; exit }')"
+                                    actual_java_spec="$(java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/^[[:space:]]*java.specification.version =/ { print $2; exit }')"
+                                    actual_maven_version="$(mvn -version | awk 'NR == 1 { print $3; exit }')"
+
+                                    test "$actual_java_version" = "$EXPECTED_JDK_VERSION" || {
+                                        echo "JDK version mismatch: expected $EXPECTED_JDK_VERSION, got $actual_java_version" >&2
+                                        exit 1
+                                    }
+                                    test "$actual_java_spec" = "$EXPECTED_JDK_SPECIFICATION" || {
+                                        echo "JDK specification mismatch: expected $EXPECTED_JDK_SPECIFICATION, got $actual_java_spec" >&2
+                                        exit 1
+                                    }
+                                    test "$actual_maven_version" = "$EXPECTED_MAVEN_VERSION" || {
+                                        echo "Maven version mismatch: expected $EXPECTED_MAVEN_VERSION, got $actual_maven_version" >&2
+                                        exit 1
+                                    }
+
                                     javac -version
-                                    mvn -version
                                     mvn -s "$MAVEN_SETTINGS" -B -ntp clean verify
                                 '''
                             }
@@ -375,7 +412,8 @@ pipeline {
                         file: 'toolchain-build.properties',
                         text: 'toolchain=' + env.TOOLCHAIN_ID + '\n' +
                               'image=' + env.TOOLCHAIN_IMAGE + '\n' +
-                              'jdk=' + env.EXPECTED_JDK + '\n' +
+                              'jdk=' + env.EXPECTED_JDK_VERSION + '\n' +
+                              'maven=' + env.EXPECTED_MAVEN_VERSION + '\n' +
                               'git_commit=' + (env.GIT_COMMIT ?: 'unknown') + '\n' +
                               'jenkins_job=' + env.JOB_NAME + '\n' +
                               'jenkins_build=' + env.BUILD_NUMBER + '\n'
@@ -401,6 +439,8 @@ pipeline {
     }
 }
 ~~~
+
+可信流水线才可执行此示例。外部 PR 的 Pipeline 定义必须由中央平台控制，使用独立隔离 Agent，不加载 Maven settings 和任何写凭据；如果外部 PR 依赖私有 Maven 组件，应由经过安全评审的依赖代理方案解决，不能把通用私服密码注入 PR-controlled Maven 插件。即使是只读密码，也可能被项目构建脚本读取和外传。可信上下文校验必须来自 Jenkins Controller / Job 配置，不得仅依据分支名、PR 环境变量或项目 JSON 自我判断。
 
 注意：这是消费端示例，不是无需适配即可部署的完整 Shared Library 实现。Maven Wrapper 项目应调用 ./mvnw，并校验 Wrapper 版本和 checksum；docker.withRegistry 使用只读机器人账号；不把 Harbor 密码通过命令行或构建日志暴露；实际构建必须验证 JDK、Maven/Gradle 版本与中央注册表声明一致。项目构建阶段通常不必再次扫描镜像；镜像安全扫描在发布和定期复扫流程完成，消费端验证签名、digest 和 Active 状态。并发构建应隔离工作空间并使用唯一制品键。
 
