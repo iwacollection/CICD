@@ -25,6 +25,13 @@ test "$actual_maven_version" = "$EXPECTED_MAVEN_VERSION" || {
   echo "Maven mismatch: expected $EXPECTED_MAVEN_VERSION, got $actual_maven_version" >&2
   exit 1
 }
+
+guava_jars=(/opt/maven/lib/guava-*.jar)
+if [[ "${#guava_jars[@]}" -ne 1 || "$(basename "${guava_jars[0]}")" != "guava-33.7.2-jre.jar" ]]; then
+  printf 'Expected exactly one patched Guava 33.7.2 jar in Maven lib; found: %s\\n' "${guava_jars[*]}" >&2
+  exit 1
+fi
+
 test -w "$HOME/.m2"
 test -w "$PWD"
 
