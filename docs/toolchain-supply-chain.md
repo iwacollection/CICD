@@ -136,6 +136,17 @@ Runner Image Prewarm
 
 预热只是缓存优化，业务仍必须引用 `image@sha256`，不能退回 tag/latest。
 
+## Candidate 构建矩阵与 Active 不可变性
+
+`toolchain_catalog.py --matrix` 只输出状态为 `candidate` 的容器工具链。
+
+- `planned`：仅登记，不构建、不消费。
+- `candidate`：由 Toolchain Supply Chain 工作流构建、冒烟、扫描、生成 SBOM 和来源证明；main 发布得到真实 digest 后仍需 Promotion PR。
+- `active`：已经批准的不可变镜像身份。新工具链的 PR 不能触发 Active 镜像重建或重新发布，也不能把 Active 的 digest 静默替换为新构建结果。
+- `retired`：不参与构建和消费，历史 digest 保留用于审计和恢复。
+
+这样可以避免一个新 Candidate 的提交触发全仓库 Active 镜像重建，也避免某个旧 Active 镜像的当前漏洞扫描结果阻塞无关的 Candidate 构建。Active 镜像的持续漏洞复扫属于独立的 Registry/安全运营任务，应按 Active digest 扫描并触发准入阻断或升级流程；不能通过重新构建 Active 镜像来代替复扫。
+
 ## 回滚
 
 工具链回滚不重新构建旧 SDK。直接把中央目录中的 Active digest 回退到上一个已验证 digest，并重新走 PR + Full Lane。
