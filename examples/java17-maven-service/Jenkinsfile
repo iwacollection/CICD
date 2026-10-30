@@ -47,7 +47,6 @@ pipeline {
                     javaToolchainBuild(
                         projectDir: 'examples/java17-maven-service',
                         toolchainConfig: 'ci/toolchain.json',
-                        trustedBranch: 'main',
                         registryCredentialsId: 'ghcr-readonly'
                     )
                 }
