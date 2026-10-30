@@ -1505,7 +1505,7 @@ RTO/RPO 必须根据实际 Harbor 规模、存储架构和业务要求通过演�
 | Java Toolchain Active | `java17-maven` 当前仍为 Candidate，没有业务项目引用 | 代表项目双跑、审批后晋级 | 不能把 Candidate 说成生产 Active |
 | Harbor 企业服务 | 当前仓库未配置企业 Harbor endpoint/Robot | 企业部署时接入 | Harbor HA、Robot、API 扫描适配器尚未接入 |
 | Harbor Scan Gate | 本方案定义适配器契约；当前实际跑通的是 GHCR + Trivy 工作流门禁 | 按所选 Harbor 版本开发和测试 | 不能声称 Harbor 异步扫描适配器已运行 |
-| Jenkins Shared Library | vars/javaToolchainBuild.groovy 与 Groovy Mock Pipeline 测试已加入当前 PR；尚未在企业 Jenkins Controller 执行 | 受保护 Shared Library 解析并消费 Active digest | 等待本 PR 合并、Jenkins 全局库/Agent/Credentials 配置和真实 Controller 调用 |
+| Jenkins Shared Library | vars/javaToolchainBuild.groovy 已实现；GitHub Actions 在 Java 17 容器中编译并执行 Mock Pipeline，8/8 测试通过（run #159） | 受保护 Shared Library 解析并消费 Active digest | PR #48 尚未合并；企业 Jenkins Controller/Agent/Global Library/Credentials 尚未接入，真实 Controller 调用未验收 |
 | Java 代表项目 | 当前完成的是独立 smoke Maven 项目，不是企业业务项目 | 至少一个真实项目兼容性双跑 | 真实业务项目兼容性验收未完成 |
 | DR | 文档定义恢复范围和演练要求 | 实施备份、灾备和恢复演练 | 不能声称 RTO/RPO 已达成 |
 
@@ -1575,6 +1575,6 @@ RTO/RPO 必须根据实际 Harbor 规模、存储架构和业务要求通过演�
 
 当前 Java 17 仍是 Candidate，因此正式 Shared Library 会拒绝消费。这是正确的安全门禁。当前没有已连接的企业 Jenkins Controller、Agent、全局 Shared Library 配置或企业 Credentials，也没有发现可接入的真实 Java 业务仓库。
 
-本仓库的 Jenkins Shared Library 测试使用 Mock Pipeline DSL 验证调用顺序和失败关闭行为；GitHub Actions 会在 Java 17 容器中编译并执行测试。Mock 通过不代表真实 Jenkins 集成通过。
+本仓库的 Jenkins Shared Library 测试使用 Mock Pipeline DSL 验证调用顺序和失败关闭行为；在 2026-10-30 的 GitHub Actions Toolchain Supply Chain run #159 中，Java 17 Maven 示例 2/2 测试通过，Shared Library Mock Pipeline 8/8 测试通过，Artifact Contract v2 校验通过。Mock 通过不代表真实 Jenkins 集成通过；当前仍未连接企业 Jenkins Controller/Agent，也未接入真实业务 Java 仓库。
 
 详见：[Jenkins Java Toolchain Shared Library 实施与接入](jenkins-shared-library.md)。
