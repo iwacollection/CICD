@@ -134,15 +134,21 @@ public class JavaToolchainSharedLibraryTest {
         List<String> junit = new ArrayList<>();
         Binding binding = new Binding();
         binding.setVariable("env", env);
-        binding.setVariable("error", (groovy.lang.Closure<Object>) args -> {
-            throw new IllegalStateException(String.valueOf(args[0]));
+        binding.setVariable("error", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object message) {
+                throw new IllegalStateException(String.valueOf(message));
+            }
         });
-        binding.setVariable("fileExists", (groovy.lang.Closure<Boolean>) args -> true);
-        binding.setVariable("readFile", (groovy.lang.Closure<String>) args -> {
-            String path = String.valueOf(args[0]);
-            if (path.endsWith("ci/toolchain.json")) return PROJECT_CONFIG;
-            if (path.equals(".ci-toolchain-resolution.json")) return ACTIVE_RESOLUTION;
-            throw new IllegalArgumentException("Unexpected readFile path: " + path);
+        binding.setVariable("fileExists", new groovy.lang.Closure<Boolean>(script) {
+            public Boolean doCall(Object path) { return true; }
+        });
+        binding.setVariable("readFile", new groovy.lang.Closure<String>(script) {
+            public String doCall(Object rawPath) {
+                String path = String.valueOf(rawPath);
+                if (path.endsWith("ci/toolchain.json")) return PROJECT_CONFIG;
+                if (path.equals(".ci-toolchain-resolution.json")) return ACTIVE_RESOLUTION;
+                throw new IllegalArgumentException("Unexpected readFile path: " + path);
+            }
         });
         binding.setVariable("dir", new groovy.lang.Closure<Object>(script) {
             public Object doCall(Object name, Object body) {
@@ -153,18 +159,22 @@ public class JavaToolchainSharedLibraryTest {
         binding.setVariable("deleteDir", new groovy.lang.Closure<Object>(script) {
             public Object doCall() { return null; }
         });
-        binding.setVariable("checkout", (groovy.lang.Closure<Object>) args -> null);
-        binding.setVariable("sh", (groovy.lang.Closure<Object>) args -> {
-            Map<?, ?> options = (Map<?, ?>) args[0];
-            String command = String.valueOf(options.get("script"));
-            shellCommands.add(command);
-            if (Boolean.TRUE.equals(options.get("returnStatus"))) return 0;
-            if (Boolean.TRUE.equals(options.get("returnStdout"))) {
-                if (command.contains("rev-parse HEAD")) return PLATFORM_SHA + "\n";
-                if (command.contains("--format=%ct")) return "1793318400\n";
-                return "";
+        binding.setVariable("checkout", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object configuration) { return null; }
+        });
+        binding.setVariable("sh", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object rawOptions) {
+                Map<?, ?> options = (Map<?, ?>) rawOptions;
+                String command = String.valueOf(options.get("script"));
+                shellCommands.add(command);
+                if (Boolean.TRUE.equals(options.get("returnStatus"))) return 0;
+                if (Boolean.TRUE.equals(options.get("returnStdout"))) {
+                    if (command.contains("rev-parse HEAD")) return PLATFORM_SHA + "\n";
+                    if (command.contains("--format=%ct")) return "1793318400\n";
+                    return "";
+                }
+                return null;
             }
-            return null;
         });
         binding.setVariable("withEnv", new groovy.lang.Closure<Object>(script) {
             public Object doCall(Object rawAssignments, Object body) {
@@ -187,21 +197,29 @@ public class JavaToolchainSharedLibraryTest {
                 return null;
             }
         });
-        binding.setVariable("usernamePassword", (groovy.lang.Closure<Object>) args -> args[0]);
-        binding.setVariable("file", (groovy.lang.Closure<Object>) args -> args[0]);
+        binding.setVariable("usernamePassword", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object configuration) { return configuration; }
+        });
+        binding.setVariable("file", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object configuration) { return configuration; }
+        });
         binding.setVariable("withCredentials", new groovy.lang.Closure<Object>(script) {
             public Object doCall(Object credentials, Object body) {
                 ((groovy.lang.Closure<?>) body).call();
                 return null;
             }
         });
-        binding.setVariable("junit", (groovy.lang.Closure<Object>) args -> {
-            junit.add(String.valueOf(((Map<?, ?>) args[0]).get("testResults")));
-            return null;
+        binding.setVariable("junit", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object rawOptions) {
+                junit.add(String.valueOf(((Map<?, ?>) rawOptions).get("testResults")));
+                return null;
+            }
         });
-        binding.setVariable("archiveArtifacts", (groovy.lang.Closure<Object>) args -> {
-            archived.add(String.valueOf(((Map<?, ?>) args[0]).get("artifacts")));
-            return null;
+        binding.setVariable("archiveArtifacts", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object rawOptions) {
+                archived.add(String.valueOf(((Map<?, ?>) rawOptions).get("artifacts")));
+                return null;
+            }
         });
         script.setBinding(binding);
 
@@ -251,9 +269,11 @@ public class JavaToolchainSharedLibraryTest {
         });
         binding.setVariable("fileExists", (groovy.lang.Closure<Boolean>) args -> true);
         binding.setVariable("readFile", (groovy.lang.Closure<String>) args -> PROJECT_CONFIG);
-        binding.setVariable("sh", (groovy.lang.Closure<Object>) args -> {
-            commands.add(String.valueOf(((Map<?, ?>) args[0]).get("script")));
-            return 0;
+        binding.setVariable("sh", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object rawOptions) {
+                commands.add(String.valueOf(((Map<?, ?>) rawOptions).get("script")));
+                return 0;
+            }
         });
         script.setBinding(binding);
 
@@ -263,7 +283,7 @@ public class JavaToolchainSharedLibraryTest {
                 "trustedBranch", "main"
         );
         try {
-            script.invokeMethod("call", new Object[]{options});
+            script.invokeMethod("call", options);
             fail("Pull Request builds must be rejected");
         } catch (IllegalStateException ex) {
             assertTrue(ex.getMessage().contains("Pull Requests"));
