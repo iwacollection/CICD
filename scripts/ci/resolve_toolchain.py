@@ -63,7 +63,7 @@ def resolve_toolchain(
         "status": item["status"],
         "execution_mode": item["execution_mode"],
         "image": reference,
-        "identity": item.get("digest", "") if expected_mode == "container" else item.get("host_identity", ""),
+        "identity": item.get("digest", "") if expected_mode == "container" else (item.get("host_identity") or f"host:{toolchain_id}"),
         "jdk_vendor": item.get("jdk_vendor", ""),
         "jdk_version": item.get("jdk_version", ""),
         "maven_version": item.get("maven_version", ""),
