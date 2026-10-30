@@ -98,6 +98,8 @@ jobs:
           set -euo pipefail
           if [[ "$RELEVANT" == "true" ]]; then
             python3 scripts/ci/toolchain_catalog.py --consumer-matrix
+            echo "Raw consumer outputs:"
+            cat "$GITHUB_OUTPUT"
           else
             echo 'consumer_matrix={"include":[]}' >> "$GITHUB_OUTPUT"
             echo 'consumer_count=0' >> "$GITHUB_OUTPUT"
@@ -204,6 +206,8 @@ jobs:
           VERIFY_RESULT: ${{ needs.verify.result }}
           MATRIX_COUNT: ${{ needs.discover.outputs.count }}
           RELEVANT: ${{ needs.discover.outputs.relevant }}
+          CONSUMER_COUNT: ${{ needs.discover.outputs.consumer_count }}
+          CONSUMER_MATRIX: ${{ needs.discover.outputs.consumer_matrix }}
         run: |
           set -euo pipefail
           if [[ "$DISCOVER_RESULT" != "success" ]]; then
@@ -220,6 +224,8 @@ jobs:
             exit 1
           fi
           echo "Toolchain gate passed: relevant=$RELEVANT matrix_count=$MATRIX_COUNT verify_result=$VERIFY_RESULT"
+          echo "Candidate consumer count: $CONSUMER_COUNT"
+          echo "Candidate consumer matrix: $CONSUMER_MATRIX"
 
   candidate-consumer:
     name: Candidate consumer / ${{ matrix.toolchain }}
