@@ -50,6 +50,28 @@
       "description": "MediaTek Android SDK installed on a dedicated self-hosted Runner; activation requires a pinned SDK identity and license pool",
       "hardware_profile": "mtk-android-arm64-lab",
       "host_identity": ""
+    },
+    {
+      "id": "java17-maven",
+      "status": "candidate",
+      "execution_mode": "container",
+      "description": "Candidate Java 17 build toolchain using Eclipse Temurin 17.0.21+9 and Apache Maven 3.10.0",
+      "image": "ghcr.io/iwacollection/cicd-toolchain-java17-maven",
+      "digest": "",
+      "dockerfile": "docker/toolchains/java/maven-jdk17/Dockerfile",
+      "context": "docker/toolchains/java/maven-jdk17",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "smoke_command": "bash /usr/local/bin/java-toolchain-smoke",
+      "language": "java",
+      "jdk_vendor": "Eclipse Temurin",
+      "jdk_version": "17.0.21+9",
+      "maven_version": "3.10.0",
+      "base_os": "Ubuntu 24.04",
+      "apt_snapshot": "20261029T000000Z",
+      "owner": "ci-platform",
+      "guava_version": "33.7.2-jre"
     }
   ]
 }

@@ -134,7 +134,11 @@ def build_publish_matrix(data: dict) -> dict:
             continue
         if item.get("execution_mode") != "container" or not item.get("dockerfile"):
             continue
-        if item.get("status") not in {"candidate", "active"}:
+        # Only Candidate images are built and published by this workflow.
+        # Active entries are immutable approved digests: rebuilding or publishing
+        # them during an unrelated catalog change would create an unapproved
+        # replacement and could make an existing project depend on a new image.
+        if item.get("status") != "candidate":
             continue
         include.append(
             {
