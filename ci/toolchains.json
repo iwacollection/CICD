@@ -71,7 +71,8 @@
       "base_os": "Ubuntu 24.04",
       "apt_snapshot": "20261029T000000Z",
       "owner": "ci-platform",
-      "guava_version": "33.7.2-jre"
+      "guava_version": "33.7.2-jre",
+      "build_context_sha256": "156feed5a12816cd87b77009bf0519f84d85e4d2959f2d3fc3f9ab10fa13fd37"
     }
   ]
 }
