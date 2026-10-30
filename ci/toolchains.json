@@ -50,30 +50,6 @@
       "description": "MediaTek Android SDK installed on a dedicated self-hosted Runner; activation requires a pinned SDK identity and license pool",
       "hardware_profile": "mtk-android-arm64-lab",
       "host_identity": ""
-    },
-    {
-      "id": "java8-maven",
-      "status": "planned",
-      "execution_mode": "container",
-      "description": "Java 8 standard Maven container toolchain"
-    },
-    {
-      "id": "java11-maven",
-      "status": "planned",
-      "execution_mode": "container",
-      "description": "Java 11 standard Maven container toolchain"
-    },
-    {
-      "id": "java17-maven",
-      "status": "planned",
-      "execution_mode": "container",
-      "description": "Java 17 standard Maven container toolchain"
-    },
-    {
-      "id": "java21-maven",
-      "status": "planned",
-      "execution_mode": "container",
-      "description": "Java 21 standard Maven container toolchain"
     }
   ]
 }
