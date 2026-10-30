@@ -154,9 +154,9 @@ def build_context_sha256(repository_root: Path, context: str) -> str:
         relative_path = path.relative_to(context_path).as_posix()
         file_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
         hasher.update(relative_path.encode("utf-8"))
-        hasher.update(b"\\0")
+        hasher.update(b"\0")
         hasher.update(file_sha256.encode("ascii"))
-        hasher.update(b"\\n")
+        hasher.update(b"\n")
 
     return hasher.hexdigest()
 
