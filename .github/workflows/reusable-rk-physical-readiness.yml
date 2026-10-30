@@ -25,7 +25,7 @@ jobs:
           [[ "${{ inputs.platform_ref }}" =~ ^[0-9a-f]{40}$ ]] || { echo "platform_ref must be an exact 40-character commit SHA" >&2; exit 1; }
 
       - name: Checkout immutable central platform
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: iwacollection/CICD
           ref: ${{ inputs.platform_ref }}
