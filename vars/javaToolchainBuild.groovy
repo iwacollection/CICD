@@ -123,7 +123,7 @@ python3 .ci-platform/scripts/ci/resolve_toolchain.py \
         error('Cannot derive SOURCE_DATE_EPOCH from the checked out source commit')
     }
 
-    Map buildEnvironment = [
+    List<String> buildEnvironment = [
         'CI_TOOLCHAIN_ID': project.toolchain,
         'CI_TOOLCHAIN_IMAGE': resolved.image,
         'CI_PROJECT_DIR': projectDir,
