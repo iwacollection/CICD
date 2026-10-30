@@ -1,0 +1,62 @@
+@Library('iwacollection-cicd') _
+
+/*
+ * Consumer template for a trusted Jenkins main-branch job.
+ *
+ * Configure the Global Pipeline Library named "iwacollection-cicd" to load
+ * this repository from an immutable, approved 40-character commit SHA.
+ * Configure controller-managed Secret Text credential "cicd-platform-sha"
+ * with the same exact SHA used by the Global Shared Library configuration.
+ *
+ * java17-maven is currently Candidate. The central resolver deliberately
+ * rejects this production consumer until a separate, reviewed Promotion PR
+ * changes the registry entry to Active. The candidate compatibility test is
+ * executed by the Toolchain Supply Chain GitHub Actions workflow.
+ */
+
+pipeline {
+    agent {
+        label 'linux && docker && java-project-builder'
+    }
+
+    options {
+        timestamps()
+        timeout(time: 60, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+    }
+
+    stages {
+        stage('Checkout trusted source') {
+            steps {
+                checkout scm
+                sh '''
+                    set -euo pipefail
+                    test -n "${GIT_COMMIT:-}"
+                    test -n "${GIT_URL:-}"
+                    echo "Source commit: $GIT_COMMIT"
+                    echo "Source repository: $GIT_URL"
+                '''
+            }
+        }
+
+        stage('Build with centrally managed Java toolchain') {
+            steps {
+                script {
+                    javaToolchainBuild(
+                        projectDir: 'examples/java17-maven-service',
+                        toolchainConfig: 'ci/toolchain.json',
+                        registryCredentialsId: 'ghcr-readonly'
+                    )
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Java toolchain pipeline finished; inspect the resolver/build/Artifact Contract stage logs.'
+        }
+    }
+}

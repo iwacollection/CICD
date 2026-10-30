@@ -16,6 +16,9 @@ on:
       - "scripts/ci/package_artifact.py"
       - "scripts/ci/verify_artifact.py"
       - "examples/java17-maven-service/**"
+      - "src/**"
+      - "vars/**"
+      - "jenkins-shared-library-tests/**"
       - ".github/workflows/toolchain-images.yml"
   workflow_dispatch:
 
@@ -64,7 +67,7 @@ jobs:
             relevant=false
             while IFS= read -r path; do
               case "$path" in
-                ci/toolchains.json|ci/supply-chain-policy.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|scripts/ci/supply_chain_policy.py|scripts/ci/run_build.py|scripts/ci/collect_build_metadata.py|scripts/ci/resolve_toolchain.py|scripts/ci/package_artifact.py|scripts/ci/verify_artifact.py|examples/java17-maven-service/*|examples/java17-maven-service/**|.github/workflows/toolchain-images.yml)
+                ci/toolchains.json|ci/supply-chain-policy.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|scripts/ci/supply_chain_policy.py|scripts/ci/run_build.py|scripts/ci/collect_build_metadata.py|scripts/ci/resolve_toolchain.py|scripts/ci/package_artifact.py|scripts/ci/verify_artifact.py|examples/java17-maven-service/*|examples/java17-maven-service/**|src/*|src/**|vars/*|vars/**|jenkins-shared-library-tests/*|jenkins-shared-library-tests/**|.github/workflows/toolchain-images.yml)
                   relevant=true
                   break
                   ;;
@@ -306,6 +309,17 @@ jobs:
             --container-image "$IMAGE" \
             --command "$build_command"
 
+      - name: Compile and exercise Jenkins Shared Library with the pinned Java toolchain
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.immutable_reference }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/run_build.py \
+            --working-directory . \
+            --container-image "$IMAGE" \
+            --command "mvn --batch-mode --no-transfer-progress -f jenkins-shared-library-tests/pom.xml clean test"
+
       - name: Collect actual JDK and Maven metadata
         shell: bash
         env:
@@ -365,6 +379,7 @@ jobs:
             dist/*.sha256
             build-environment.json
             ${{ matrix.consumer_fixture }}/target/surefire-reports/**
+            jenkins-shared-library-tests/target/surefire-reports/**
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
