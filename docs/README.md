@@ -138,13 +138,17 @@ Artifact Contract v2
 
 ## [Java / JDK 标准工具链管理](java-toolchain-management.md)
 
-重点：
+这是 Java 构建环境的完整目标架构与生命周期方案，覆盖：
 
-- JDK 8/11/17/21 标准镜像；
-- Maven / Gradle 版本治理；
-- 中央 Toolchain Registry 与 Candidate / Active 晋级；
-- Harbor 漏洞扫描、镜像签名、SBOM 与 digest；
-- Jenkins 消费端流水线、缓存、制品追溯和退役。
+- Jenkins Controller / Agent Runtime 与项目 Build JDK 的隔离；
+- JDK 8/11/17/21、Maven / Gradle 工具链规格和镜像标准；
+- 中央 Registry、Candidate / Active / Retired 和 Promotion 门禁；
+- GHCR 当前链路与企业 Harbor 高可用、权限、扫描、灾备边界；
+- Jenkins Shared Library 契约、项目迁移、Maven 依赖和缓存隔离；
+- 凭据最小权限、SBOM、签名、Provenance 和 Artifact Contract；
+- 监控告警、故障 Runbook、升级、退役、回滚和生产验收矩阵。
+
+注意：该文档是目标方案，不代表 Java 镜像、企业 Harbor 扫描适配器或 Jenkins Shared Library 已部署。
 
 ## [构建、缓存与依赖](build-cache-and-dependencies.md)
 
