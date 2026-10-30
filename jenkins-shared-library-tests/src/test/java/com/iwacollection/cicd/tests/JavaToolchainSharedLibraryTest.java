@@ -77,7 +77,7 @@ public class JavaToolchainSharedLibraryTest {
         Method parse = spec.getMethod("parseProjectConfig", String.class);
 
         String invalidTestCommand = PROJECT_CONFIG.replace(
-                "\"test_command\": \"",
+                "\"test_command\": \"\",
                 "\"test_command\": 42,"
         );
         try {
