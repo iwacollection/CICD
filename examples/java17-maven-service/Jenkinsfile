@@ -5,7 +5,8 @@
  *
  * Configure the Global Pipeline Library named "iwacollection-cicd" to load
  * this repository from an immutable, approved 40-character commit SHA.
- * CICD_PLATFORM_REF must point to that same approved platform commit.
+ * Configure controller-managed Secret Text credential "cicd-platform-sha"
+ * with the same exact SHA used by the Global Shared Library configuration.
  *
  * java17-maven is currently Candidate. The central resolver deliberately
  * rejects this production consumer until a separate, reviewed Promotion PR
@@ -26,14 +27,6 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '30'))
     }
 
-    parameters {
-        string(
-            name: 'CICD_PLATFORM_REF',
-            defaultValue: '',
-            description: 'Approved 40-character CICD platform commit SHA; must match the Global Shared Library version'
-        )
-    }
-
     stages {
         stage('Checkout trusted source') {
             steps {
@@ -52,7 +45,6 @@ pipeline {
             steps {
                 script {
                     javaToolchainBuild(
-                        platformRef: params.CICD_PLATFORM_REF?.trim(),
                         projectDir: 'examples/java17-maven-service',
                         toolchainConfig: 'ci/toolchain.json',
                         trustedBranch: 'main',
