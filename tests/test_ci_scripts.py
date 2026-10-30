@@ -275,6 +275,39 @@ class CiPlatformTests(unittest.TestCase):
         self.assertIn("gcc-host-container-v1", ids)
         self.assertNotIn("rk-sdk-2026.08", ids)
 
+    def test_java17_toolchain_is_candidate_publishable_but_not_enabled_for_projects(self) -> None:
+        java17 = next(
+            item for item in self.toolchains["toolchains"]
+            if item["id"] == "java17-maven"
+        )
+        self.assertEqual(java17["status"], "candidate")
+        self.assertEqual(java17["execution_mode"], "container")
+        self.assertEqual(java17["jdk_version"], "17.0.21+9")
+        self.assertEqual(java17["maven_version"], "3.10.0")
+        self.assertEqual(java17["digest"], "")
+
+        publish_matrix = build_publish_matrix(self.toolchains)
+        java17_matrix_item = next(
+            item for item in publish_matrix["include"]
+            if item["toolchain"] == "java17-maven"
+        )
+        self.assertEqual(
+            java17_matrix_item["image"],
+            "ghcr.io/iwacollection/cicd-toolchain-java17-maven",
+        )
+        self.assertEqual(
+            java17_matrix_item["smoke_command"],
+            "bash /usr/local/bin/java-toolchain-smoke",
+        )
+        referenced_by_projects = [
+            target.get("toolchain")
+            for project in self.projects["projects"]
+            for target in project.get("targets", [])
+        ]
+        self.assertNotIn("java17-maven", referenced_by_projects)
+        self.assertEqual(validate_toolchain_catalog(self.toolchains), [])
+        self.assertEqual(validate_catalog(self.projects, self.toolchains), [])
+
     def test_dependency_levels_allow_parallel_roots(self) -> None:
         data = {
             "projects": [
