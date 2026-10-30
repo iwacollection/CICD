@@ -93,7 +93,12 @@ def _container_env_args(workdir: Path) -> list[str]:
 
     # Reproducibility controls are intentionally allow-listed rather than
     # forwarding the Runner's complete environment into the toolchain image.
-    for key in ("SOURCE_DATE_EPOCH", "CCACHE_DISABLE"):
+    for key in (
+        "SOURCE_DATE_EPOCH",
+        "CCACHE_DISABLE",
+        "EXPECTED_JAVA_VERSION",
+        "EXPECTED_MAVEN_VERSION",
+    ):
         value = os.environ.get(key, "")
         if value:
             args.extend(["-e", f"{key}={value}"])
