@@ -10,10 +10,22 @@ import groovy.json.JsonSlurperClassic
  * registry, or production credentials.
  */
 def call(Map options = [:]) {
-    if (options.containsKey('platformRef')) {
-        error('platformRef cannot be supplied by a project Jenkinsfile; configure controller-managed Secret Text credential cicd-platform-sha')
+    if (options.containsKey('platformRef') || options.containsKey('trustedBranch')) {
+        error('platformRef and trustedBranch are controller policy; project Jenkinsfiles cannot override them')
     }
 
+    String branch = (env.BRANCH_NAME ?: env.GIT_BRANCH ?: '').toString()
+    branch = branch.replaceFirst(/^origin\//, '')
+    if (env.CHANGE_ID?.toString()?.trim()) {
+        error('javaToolchainBuild is a trusted-branch step; Pull Requests must use the hosted untrusted validation lane')
+    }
+    if (branch && branch != 'main') {
+        error("javaToolchainBuild only permits trusted branch 'main', got '${branch}'")
+    }
+
+    // The platform ref is controller-managed and must match the Global
+    // Shared Library Default version. Project parameters cannot select an
+    // older Registry snapshot to bypass current revocation/Active state.
     String platformRef = ''
     withCredentials([string(
         credentialsId: 'cicd-platform-sha',
@@ -23,16 +35,6 @@ def call(Map options = [:]) {
     }
     if (!(platformRef ==~ /^[0-9a-f]{40}$/)) {
         error('Controller-managed credential cicd-platform-sha must contain an exact 40-character CICD commit SHA')
-    }
-
-    String trustedBranch = (options.trustedBranch ?: 'main').toString()
-    String branch = (env.BRANCH_NAME ?: env.GIT_BRANCH ?: '').toString()
-    branch = branch.replaceFirst(/^origin\//, '')
-    if (env.CHANGE_ID?.toString()?.trim()) {
-        error('javaToolchainBuild is a trusted-branch step; Pull Requests must use the hosted untrusted validation lane')
-    }
-    if (branch && branch != trustedBranch) {
-        error("javaToolchainBuild only permits trusted branch '${trustedBranch}', got '${branch}'")
     }
 
     String projectDir = JavaToolchainSpec.validateRelativePath(
@@ -68,8 +70,8 @@ def call(Map options = [:]) {
         error("Cannot normalize Jenkins GIT_URL to owner/repository: ${ex.message}")
     }
 
-    String platformRepository = (options.platformRepository ?: 'https://github.com/iwacollection/CICD.git').toString()
-    String platformCredentialsId = (options.platformCredentialsId ?: '').toString()
+    String platformRepository = 'https://github.com/iwacollection/CICD.git'
+    String platformCredentialsId = ''
     String registryCredentialsId = (options.registryCredentialsId ?: '').toString()
     String mavenSettingsCredentialsId = (options.mavenSettingsCredentialsId ?: '').toString()
 
