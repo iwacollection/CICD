@@ -150,6 +150,10 @@ Artifact Contract v2
 
 注意：该文档是目标方案，不代表 Java 镜像、企业 Harbor 扫描适配器或 Jenkins Shared Library 已部署。
 
+## [Jenkins Java Toolchain Shared Library](jenkins-shared-library.md)
+
+本文对应已实现的 vars/javaToolchainBuild.groovy、JavaToolchainSpec.groovy、Java Maven Consumer Jenkinsfile 和 Mock Pipeline 测试。明确区分 Mock/CI 验证与真实 Jenkins Controller/Agent 验收。
+
 ## [构建、缓存与依赖](build-cache-and-dependencies.md)
 
 重点：
