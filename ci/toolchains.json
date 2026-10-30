@@ -70,7 +70,8 @@
       "maven_version": "3.10.0",
       "base_os": "Ubuntu 24.04",
       "apt_snapshot": "20261029T000000Z",
-      "owner": "ci-platform"
+      "owner": "ci-platform",
+      "guava_version": "33.7.2-jre"
     }
   ]
 }
