@@ -17,6 +17,8 @@ from dependency_plan import build_levels  # noqa: E402
 from discover_matrix import build_matrix  # noqa: E402
 from impact_analysis import analyze_impact  # noqa: E402
 from toolchain_catalog import (  # noqa: E402
+    build_context_sha256,
+    candidate_build_definition_sha256,
     build_publish_matrix,
     immutable_reference,
     load_toolchain_catalog,
@@ -269,14 +271,60 @@ class CiPlatformTests(unittest.TestCase):
             "ghcr.io/iwacollection/gcc-container@sha256:" + "a" * 64,
         )
 
-    def test_only_candidate_toolchains_are_built_and_published(self) -> None:
-        matrix = build_publish_matrix(self.toolchains)
-        ids = [item["toolchain"] for item in matrix["include"]]
-        self.assertIn("java17-maven", ids)
-        self.assertNotIn("gcc-host-container-v1", ids)
-        self.assertNotIn("rk-sdk-2026.08", ids)
+    def test_only_unpublished_candidate_toolchains_are_built_and_published(self) -> None:
+        pending = deepcopy(self.toolchains)
+        pending_java17 = next(
+            item for item in pending["toolchains"]
+            if item["id"] == "java17-maven"
+        )
+        pending_java17["digest"] = ""
+        pending_ids = [
+            item["toolchain"]
+            for item in build_publish_matrix(pending)["include"]
+        ]
+        self.assertIn("java17-maven", pending_ids)
+        self.assertNotIn("gcc-host-container-v1", pending_ids)
+        self.assertNotIn("rk-sdk-2026.08", pending_ids)
 
-    def test_java17_toolchain_is_candidate_publishable_but_not_enabled_for_projects(self) -> None:
+        published_ids = [
+            item["toolchain"]
+            for item in build_publish_matrix(self.toolchains)["include"]
+        ]
+        self.assertNotIn("java17-maven", published_ids)
+
+    def test_published_candidate_context_mismatch_fails_closed(self) -> None:
+        published = deepcopy(self.toolchains)
+        java17 = next(
+            item for item in published["toolchains"]
+            if item["id"] == "java17-maven"
+        )
+        java17["build_context_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "build context changed.*clear digest"):
+            build_publish_matrix(published)
+
+    def test_published_candidate_build_definition_mismatch_fails_closed(self) -> None:
+        published = deepcopy(self.toolchains)
+        java17 = next(
+            item for item in published["toolchains"]
+            if item["id"] == "java17-maven"
+        )
+        java17["smoke_command"] = "bash /usr/local/bin/skip-smoke"
+        with self.assertRaisesRegex(ValueError, "build definition changed.*clear digest"):
+            build_publish_matrix(published)
+
+    def test_build_context_hash_covers_paths_and_file_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            context = root / "context"
+            context.mkdir()
+            source = context / "Dockerfile"
+            source.write_text("FROM scratch\\n", encoding="utf-8")
+            first = build_context_sha256(root, "context")
+            source.write_text("FROM busybox\\n", encoding="utf-8")
+            second = build_context_sha256(root, "context")
+            self.assertNotEqual(first, second)
+
+    def test_java17_toolchain_is_published_candidate_but_not_enabled_for_projects(self) -> None:
         java17 = next(
             item for item in self.toolchains["toolchains"]
             if item["id"] == "java17-maven"
@@ -286,19 +334,24 @@ class CiPlatformTests(unittest.TestCase):
         self.assertEqual(java17["jdk_version"], "17.0.21+9")
         self.assertEqual(java17["maven_version"], "3.10.0")
         self.assertEqual(java17["guava_version"], "33.7.2-jre")
-        self.assertEqual(java17["digest"], "")
-
-        publish_matrix = build_publish_matrix(self.toolchains)
-        java17_matrix_item = next(
-            item for item in publish_matrix["include"]
-            if item["toolchain"] == "java17-maven"
+        self.assertEqual(
+            java17["digest"],
+            "sha256:3b3c558e4a94ab6f71b059ccd7f23ea60a6f76082844b428645015b1413ce9f7",
         )
         self.assertEqual(
-            java17_matrix_item["image"],
+            java17["build_context_sha256"],
+            "156feed5a12816cd87b77009bf0519f84d85e4d2959f2d3fc3f9ab10fa13fd37",
+        )
+        self.assertEqual(
+            java17["build_definition_sha256"],
+            "d3b6001d106ea4bd7f51678dd9958c066d873089939029f9ca1cc33979e5300d",
+        )
+        self.assertEqual(
+            java17["image"],
             "ghcr.io/iwacollection/cicd-toolchain-java17-maven",
         )
         self.assertEqual(
-            java17_matrix_item["smoke_command"],
+            java17["smoke_command"],
             "bash /usr/local/bin/java-toolchain-smoke",
         )
         referenced_by_projects = [

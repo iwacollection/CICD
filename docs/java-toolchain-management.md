@@ -555,6 +555,43 @@ Maven 缓存键至少包含 project + JDK toolchain digest + Maven/Wrapper versi
 
 验收：扫描排队、失败、超时、报告缺失、数据库过期任一情况都不能晋级；未经批准的镜像无法被项目消费。
 
+### 2026-10-30 实测进度：Java 17 Candidate 已发布
+
+第一套 Java 17 工具链已在主分支实际完成构建、扫描、发布与证据归档。此状态只代表 **Candidate**，不是生产 Active：
+
+| 项目 | 实际结果 |
+|---|---|
+| Toolchain ID | `java17-maven` |
+| JDK | Eclipse Temurin `17.0.21+9` |
+| Maven | Apache Maven `3.10.0` |
+| Maven 内置 Guava | 替换为 `33.7.2-jre`，并固定制品 SHA256 |
+| Base OS | Ubuntu 24.04，APT Snapshot `20261029T000000Z` |
+| 镜像仓库 | GHCR |
+| 不可变引用 | `ghcr.io/iwacollection/cicd-toolchain-java17-maven@sha256:3b3c558e4a94ab6f71b059ccd7f23ea60a6f76082844b428645015b1413ce9f7` |
+| 平台提交 | `c3c386f7b5550371019619918287c1e2beb6d014` |
+| Toolchain Supply Chain | Run `41002782086`，成功 |
+| Platform Validate | Run `41002782062`，成功 |
+| Build Matrix | Run `41002782215`，成功 |
+| Promotion record | Artifact `12954466516`，保存源码提交、Dockerfile SHA256、镜像 digest 和验证结果 |
+
+已实测通过的发布门禁：
+
+1. Buildx 构建 Candidate 镜像；
+2. 非 root UID 10001 运行；
+3. JDK、Maven、Guava 版本精确校验；
+4. Maven `clean package` 编译 Java 17 项目、生成 JAR 并运行；
+5. 对本地候选镜像执行 Trivy 漏洞与许可证扫描；
+6. 执行 HIGH/CRITICAL 供应链策略；
+7. 生成 CycloneDX SBOM；
+8. 对 GHCR 实际发布的精确 digest 再做 smoke test 和 Trivy 扫描；
+9. Cosign keyless 签名及验证；
+10. GitHub build provenance attestation；
+11. 上传 promotion record。
+
+首次扫描曾发现 Maven 3.10.0 发行包携带的 Guava 33.7.1 命中 HIGH CVE。已在镜像构建时固定替换为修复版本 33.7.2，并在 smoke test 中强制验证镜像内只有该版本。没有降低 HIGH/CRITICAL 门槛，也没有增加 CVE 忽略项。
+
+**尚未完成的晋级条件：** 当前未接入真实 Java 业务项目，尚未执行企业 Jenkins Shared Library / 真实 Agent 项目构建及业务兼容性双跑。因此该镜像必须保持 Candidate，不能标记 Active，也不能让业务项目使用。候选 digest 应写回中央 Registry；只有代表项目兼容性验证和审批完成后，才能通过单独 Promotion PR 将状态改为 Active。
+
 ### P2：规模化治理
 1. 增加 Java 8/11/21 和 Gradle 项目；
 2. 建立代表项目兼容性矩阵；
@@ -1459,17 +1496,18 @@ RTO/RPO 必须根据实际 Harbor 规模、存储架构和业务要求通过演�
 
 ## 34. 当前仓库事实、目标架构和未完成事项必须分开
 
-| 能力 | 当前仓库可确认的状态 | 本方案目标 | 不能声称已经完成的内容 |
+| 能力 | 当前仓库可确认的状态 | 本方案目标 | 尚未完成的内容 |
 |---|---|---|---|
-| 中央工具链注册表 | 已有 ci/toolchains.json | 继续复用 | 不需要创建第二份 Registry |
-| GHCR 工具链发布 | 已有现有工作流和既有 GCC 工具链链路 | 复用现有供应链能力 | 不能声称 Java 镜像已构建 |
-| Java JDK Dockerfile | 本方案只定义目录和设计 | 按规格新增并测试 | 不存在的 Dockerfile 不能写成已发布 |
-| Java Toolchain Active | 尚未登记为 Active | Candidate 经晋级后启用 | 不能将 planned/Candidate 写成生产可用 |
-| Harbor 企业服务 | 当前仓库未配置企业 Harbor endpoint/Robot | 企业部署时接入 | 不能声称 Harbor 已接入 |
-| Harbor Scan Gate | 本方案定义适配器契约 | 按所选 Harbor 版本开发与测试 | 不能声称异步扫描门禁已运行 |
-| Jenkins Shared Library | 示例定义了应承担的接口 | 实现并固定受信版本 | 示例函数不是现成实现 |
-| Java 代表项目 | 需要企业项目和 Agent 环境验证 | 双跑并归档报告 | 不能声称构建成功 |
-| DR | 文档定义恢复范围与演练要求 | 实施备份和恢复演练 | 不能声称 RTO/RPO 已达成 |
+| 中央工具链注册表 | 已有 `ci/toolchains.json`；Java 17 Candidate 已登记并固定已发布 digest | 继续复用唯一 Registry | 未完成 Candidate → Active Promotion |
+| 工具链矩阵 | 只构建/发布 digest 为空的 Candidate；Active 与已发布 Candidate 不会被无关提交重建 | 保持候选构建与正式消费解耦 | Active digest 的定期远端复扫需独立安全运营任务 |
+| GHCR 工具链发布 | Java 17 Candidate 已真实发布，digest 为 `sha256:3b3c558e…13ce9f7`；远端 smoke、扫描、签名、Provenance 均成功 | 复用现有供应链能力 | 无 |
+| Java JDK Dockerfile | Java 17 Dockerfile 与 smoke test 已实现，JDK/Maven/Guava 和基础镜像输入固定 | 后续按项目需求增加 JDK 8/11/21、Gradle 组合 | 其他 JDK 版本尚未实施 |
+| Java Toolchain Active | `java17-maven` 当前仍为 Candidate，没有业务项目引用 | 代表项目双跑、审批后晋级 | 不能把 Candidate 说成生产 Active |
+| Harbor 企业服务 | 当前仓库未配置企业 Harbor endpoint/Robot | 企业部署时接入 | Harbor HA、Robot、API 扫描适配器尚未接入 |
+| Harbor Scan Gate | 本方案定义适配器契约；当前实际跑通的是 GHCR + Trivy 工作流门禁 | 按所选 Harbor 版本开发和测试 | 不能声称 Harbor 异步扫描适配器已运行 |
+| Jenkins Shared Library | 文档定义目标接口；当前未配置企业 Jenkins Controller / Shared Library | 受保护 Shared Library 解析并消费 Active digest | 真实 Jenkins 接入尚未完成 |
+| Java 代表项目 | 当前完成的是独立 smoke Maven 项目，不是企业业务项目 | 至少一个真实项目兼容性双跑 | 真实业务项目兼容性验收未完成 |
+| DR | 文档定义恢复范围和演练要求 | 实施备份、灾备和恢复演练 | 不能声称 RTO/RPO 已达成 |
 
 **上线状态只有在运行证据存在时才能更新。** 文档合并、JSON 校验或 GitHub PR 通过，只能证明文档和仓库变更进入版本控制，不能证明 Harbor、Jenkins、Registry 或生产项目已完成部署。
 

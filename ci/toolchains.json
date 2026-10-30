@@ -57,7 +57,7 @@
       "execution_mode": "container",
       "description": "Candidate Java 17 build toolchain using Eclipse Temurin 17.0.21+9 and Apache Maven 3.10.0",
       "image": "ghcr.io/iwacollection/cicd-toolchain-java17-maven",
-      "digest": "",
+      "digest": "sha256:3b3c558e4a94ab6f71b059ccd7f23ea60a6f76082844b428645015b1413ce9f7",
       "dockerfile": "docker/toolchains/java/maven-jdk17/Dockerfile",
       "context": "docker/toolchains/java/maven-jdk17",
       "platforms": [
@@ -71,7 +71,9 @@
       "base_os": "Ubuntu 24.04",
       "apt_snapshot": "20261029T000000Z",
       "owner": "ci-platform",
-      "guava_version": "33.7.2-jre"
+      "guava_version": "33.7.2-jre",
+      "build_context_sha256": "156feed5a12816cd87b77009bf0519f84d85e4d2959f2d3fc3f9ab10fa13fd37",
+      "build_definition_sha256": "d3b6001d106ea4bd7f51678dd9958c066d873089939029f9ca1cc33979e5300d"
     }
   ]
 }
