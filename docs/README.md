@@ -129,6 +129,13 @@ Artifact Contract v2
 
 ## [容器化构建环境](containerized-build-environments.md)
 
+重点：
+
+- Runner 与 Toolchain Image 的边界；
+- Container First、Host Only as Exception；
+- Docker 能解决什么、不能解决什么；
+- USB / 驱动 / License / 大型 Vendor SDK 为什么仍需要 Self-hosted Runner。
+
 ## [Java / JDK 标准工具链管理](java-toolchain-management.md)
 
 重点：
@@ -138,13 +145,6 @@ Artifact Contract v2
 - 中央 Toolchain Registry 与 Candidate / Active 晋级；
 - Harbor 漏洞扫描、镜像签名、SBOM 与 digest；
 - Jenkins 消费端流水线、缓存、制品追溯和退役。
-
-重点：
-
-- Runner 与 Toolchain Image 的边界；
-- Container First、Host Only as Exception；
-- Docker 能解决什么、不能解决什么；
-- USB / 驱动 / License / 大型 Vendor SDK 为什么仍需要 Self-hosted Runner。
 
 ## [构建、缓存与依赖](build-cache-and-dependencies.md)
 
