@@ -1,9 +1,14 @@
 {
   "schema_version": 1,
+  "project_name": "java17-maven-service",
   "toolchain": "java17-maven",
   "build_command": "mvn -B -ntp clean verify",
-  "test_command": "java -jar target/java17-maven-service-1.0.0.jar",
+  "test_command": "",
+  "verify_command": "java -jar target/java17-maven-service-1.0.0.jar",
   "artifact_globs": [
     "target/java17-maven-service-1.0.0.jar"
+  ],
+  "dependency_lock_files": [
+    "pom.xml"
   ]
 }
