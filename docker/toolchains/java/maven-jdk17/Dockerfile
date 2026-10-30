@@ -35,10 +35,14 @@ RUN set -eux; \
     maven_sha_url="https://downloads.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/${maven_archive}.sha512"; \
     curl --fail --show-error --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 600 \
       "${maven_url}" --output "/tmp/${maven_archive}"; \
+    curl --fail --show-error --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 60 \
+      "${maven_sha_url}" --output "/tmp/${maven_archive}.sha512"; \
+    official_maven_sha512="$(awk 'NF { print $1; exit }' "/tmp/${maven_archive}.sha512")"; \
+    test "${official_maven_sha512}" = "${MAVEN_SHA512}"; \
     printf '%s  %s\n' "${MAVEN_SHA512}" "/tmp/${maven_archive}" | sha512sum --check -; \
     mkdir -p /opt/maven; \
     tar -xzf "/tmp/${maven_archive}" --directory /opt/maven --strip-components=1 --no-same-owner; \
-    rm -f "/tmp/${maven_archive}"; \
+    rm -f "/tmp/${maven_archive}" "/tmp/${maven_archive}.sha512"; \
     mkdir -p /home/ci/.m2 /workspace; \
     chown -R 10001:10001 /home/ci /workspace; \
     chmod 0755 /opt/java /opt/java/openjdk /opt/maven
