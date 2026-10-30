@@ -17,6 +17,7 @@ from dependency_plan import build_levels  # noqa: E402
 from discover_matrix import build_matrix  # noqa: E402
 from impact_analysis import analyze_impact  # noqa: E402
 from toolchain_catalog import (  # noqa: E402
+    build_context_sha256,
     build_publish_matrix,
     immutable_reference,
     load_toolchain_catalog,
@@ -290,6 +291,28 @@ class CiPlatformTests(unittest.TestCase):
         ]
         self.assertNotIn("java17-maven", published_ids)
 
+    def test_published_candidate_context_mismatch_fails_closed(self) -> None:
+        published = deepcopy(self.toolchains)
+        java17 = next(
+            item for item in published["toolchains"]
+            if item["id"] == "java17-maven"
+        )
+        java17["build_context_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "build context changed.*clear digest"):
+            build_publish_matrix(published)
+
+    def test_build_context_hash_covers_paths_and_file_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            context = root / "context"
+            context.mkdir()
+            source = context / "Dockerfile"
+            source.write_text("FROM scratch\\n", encoding="utf-8")
+            first = build_context_sha256(root, "context")
+            source.write_text("FROM busybox\\n", encoding="utf-8")
+            second = build_context_sha256(root, "context")
+            self.assertNotEqual(first, second)
+
     def test_java17_toolchain_is_published_candidate_but_not_enabled_for_projects(self) -> None:
         java17 = next(
             item for item in self.toolchains["toolchains"]
@@ -303,6 +326,10 @@ class CiPlatformTests(unittest.TestCase):
         self.assertEqual(
             java17["digest"],
             "sha256:3b3c558e4a94ab6f71b059ccd7f23ea60a6f76082844b428645015b1413ce9f7",
+        )
+        self.assertEqual(
+            java17["build_context_sha256"],
+            "156feed5a12816cd87b77009bf0519f84d85e4d2959f2d3fc3f9ab10fa13fd37",
         )
         self.assertEqual(
             java17["image"],
