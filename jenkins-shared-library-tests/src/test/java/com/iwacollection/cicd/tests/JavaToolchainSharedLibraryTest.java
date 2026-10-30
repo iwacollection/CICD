@@ -77,7 +77,7 @@ public class JavaToolchainSharedLibraryTest {
         Method parse = spec.getMethod("parseProjectConfig", String.class);
 
         String invalidTestCommand = PROJECT_CONFIG.replace(
-                "\"test_command\": \"\",
+                "\"test_command\": \"",
                 "\"test_command\": 42,"
         );
         try {
@@ -381,8 +381,7 @@ public class JavaToolchainSharedLibraryTest {
         script.setBinding(binding);
 
         Map<String, Object> options = Map.of(
-                "projectDir", "examples/java17-maven-service",
-        );
+                "projectDir", "examples/java17-maven-service"
         try {
             script.invokeMethod("call", options);
             fail("Pull Request builds must be rejected");
