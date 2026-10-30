@@ -1,18 +1,15 @@
 package com.iwacollection.cicd
 
 import groovy.json.JsonSlurperClassic
+import java.net.URI
+import java.net.URISyntaxException
 import java.util.regex.Pattern
 
-/**
- * Pure validation helpers shared by Jenkins Pipeline steps.
- *
- * Keep this class free of Jenkins APIs so it can be unit-tested outside a
- * controller and so registry policy remains in scripts/ci/resolve_toolchain.py.
- */
 class JavaToolchainSpec implements Serializable {
     private static final long serialVersionUID = 1L
     private static final Pattern ID_PATTERN = ~/^[a-z0-9][a-z0-9._-]{0,127}$/
     private static final Pattern IMAGE_PATTERN = ~/^.+@sha256:[0-9a-f]{64}$/
+    private static final Pattern SCP_GIT_URL_PATTERN = ~/^[^@\/]+@[^:]+:.+$/
 
     static Map parseProjectConfig(String content) {
         if (content == null || !content.trim()) {
@@ -95,7 +92,7 @@ class JavaToolchainSpec implements Serializable {
         Map resolved = (Map) value
         if (resolved.status != 'active') {
             throw new IllegalArgumentException(
-                "Toolchain ${resolved.id ?: '<unknown>'} is not Active; current status is ${resolved.status ?: 'unknown'}"
+                "Toolchain \${resolved.id ?: '<unknown>'} is not Active; current status is \${resolved.status ?: 'unknown'}"
             )
         }
         if (resolved.execution_mode != 'container') {
@@ -129,44 +126,36 @@ class JavaToolchainSpec implements Serializable {
         ]
     }
 
+    /**
+     * Convert Jenkins GIT_URL (HTTPS, ssh://, or SCP-style SSH) into
+     * the canonical owner/repository value required by Artifact Contract v2.
+     */
     static String normalizeRepositorySlug(String gitUrl) {
         String value = gitUrl == null ? '' : gitUrl.trim()
         if (!value) {
             throw new IllegalArgumentException('GIT_URL must not be empty')
         }
 
-        String path = ''
+        String path
         try {
-            if (value ==~ /^[^@\\/]+@[^:]+:.+$/) {
-                // SCP-style SSH URL: git@github.com:owner/repo.git
+            if (value ==~ SCP_GIT_URL_PATTERN) {
                 path = value.substring(value.indexOf(':') + 1)
             } else {
-                java.net.URI uri = new java.net.URI(value)
+                URI uri = new URI(value)
                 if (!uri.host) {
                     throw new IllegalArgumentException('GIT_URL must include a repository host')
                 }
                 path = uri.path ?: ''
             }
-        } catch (java.net.URISyntaxException ex) {
+        } catch (URISyntaxException ex) {
             throw new IllegalArgumentException('GIT_URL is not a valid repository URL', ex)
         }
 
-        path = path.replaceAll('^/+', '').replaceAll('/+
-        String path = value == null ? '' : value.trim().replace('\\', '/')
-        if (!path || path.startsWith('/') || path ==~ /^[A-Za-z]:.*/) {
-            throw new IllegalArgumentException("${fieldName} must be a non-empty relative path")
-        }
-        List parts = path.split('/') as List
-        if (parts.any { it == '..' || it == '' }) {
-            throw new IllegalArgumentException("${fieldName} contains an unsafe path segment")
-        }
-        return path
-    }
-}
-, '')
+        path = path.replaceAll('^/+', '').replaceAll('/+$', '')
         if (path.toLowerCase().endsWith('.git')) {
             path = path.substring(0, path.length() - 4)
         }
+
         List<String> segments = path.split('/') as List<String>
         if (segments.size() != 2 || segments.any { !it || it == '.' || it == '..' }) {
             throw new IllegalArgumentException('GIT_URL must resolve to exactly owner/repository')
@@ -177,11 +166,11 @@ class JavaToolchainSpec implements Serializable {
     static String validateRelativePath(String value, String fieldName) {
         String path = value == null ? '' : value.trim().replace('\\', '/')
         if (!path || path.startsWith('/') || path ==~ /^[A-Za-z]:.*/) {
-            throw new IllegalArgumentException("${fieldName} must be a non-empty relative path")
+            throw new IllegalArgumentException("\${fieldName} must be a non-empty relative path")
         }
         List parts = path.split('/') as List
         if (parts.any { it == '..' || it == '' }) {
-            throw new IllegalArgumentException("${fieldName} contains an unsafe path segment")
+            throw new IllegalArgumentException("\${fieldName} contains an unsafe path segment")
         }
         return path
     }
