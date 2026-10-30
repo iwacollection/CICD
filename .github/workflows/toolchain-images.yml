@@ -235,7 +235,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cfb913e5ce36c25 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Login GHCR read-only
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
