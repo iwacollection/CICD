@@ -138,7 +138,10 @@ def build_publish_matrix(data: dict) -> dict:
         # Active entries are immutable approved digests: rebuilding or publishing
         # them during an unrelated catalog change would create an unapproved
         # replacement and could make an existing project depend on a new image.
-        if item.get("status") != "candidate":
+        # An empty digest means this Candidate still needs a first publish
+        # or an explicitly requested rebuild. Once published, the registry
+        # pins the digest and this workflow must not replace it implicitly.
+        if item.get("status") != "candidate" or item.get("digest"):
             continue
         include.append(
             {
