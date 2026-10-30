@@ -144,11 +144,15 @@ public class JavaToolchainSharedLibraryTest {
             if (path.equals(".ci-toolchain-resolution.json")) return ACTIVE_RESOLUTION;
             throw new IllegalArgumentException("Unexpected readFile path: " + path);
         });
-        binding.setVariable("dir", (groovy.lang.Closure<Object>) args -> {
-            ((groovy.lang.Closure<?>) args[1]).call();
-            return null;
+        binding.setVariable("dir", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object name, Object body) {
+                ((groovy.lang.Closure<?>) body).call();
+                return null;
+            }
         });
-        binding.setVariable("deleteDir", (groovy.lang.Closure<Object>) args -> null);
+        binding.setVariable("deleteDir", new groovy.lang.Closure<Object>(script) {
+            public Object doCall() { return null; }
+        });
         binding.setVariable("checkout", (groovy.lang.Closure<Object>) args -> null);
         binding.setVariable("sh", (groovy.lang.Closure<Object>) args -> {
             Map<?, ?> options = (Map<?, ?>) args[0];
@@ -162,30 +166,34 @@ public class JavaToolchainSharedLibraryTest {
             }
             return null;
         });
-        binding.setVariable("withEnv", (groovy.lang.Closure<Object>) args -> {
-            List<?> assignments = (List<?>) args[0];
-            Map<String, Object> previous = new HashMap<>();
-            for (Object assignment : assignments) {
-                String[] parts = assignment.toString().split("=", 2);
-                previous.put(parts[0], env.get(parts[0]));
-                env.put(parts[0], parts.length > 1 ? parts[1] : "");
-            }
-            try {
-                ((groovy.lang.Closure<?>) args[1]).call();
-            } finally {
-                for (String key : previous.keySet()) {
-                    Object value = previous.get(key);
-                    if (value == null) env.remove(key);
-                    else env.put(key, value);
+        binding.setVariable("withEnv", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object rawAssignments, Object body) {
+                List<?> assignments = (List<?>) rawAssignments;
+                Map<String, Object> previous = new HashMap<>();
+                for (Object assignment : assignments) {
+                    String[] parts = assignment.toString().split("=", 2);
+                    previous.put(parts[0], env.get(parts[0]));
+                    env.put(parts[0], parts.length > 1 ? parts[1] : "");
                 }
+                try {
+                    ((groovy.lang.Closure<?>) body).call();
+                } finally {
+                    for (String key : previous.keySet()) {
+                        Object value = previous.get(key);
+                        if (value == null) env.remove(key);
+                        else env.put(key, value);
+                    }
+                }
+                return null;
             }
-            return null;
         });
         binding.setVariable("usernamePassword", (groovy.lang.Closure<Object>) args -> args[0]);
         binding.setVariable("file", (groovy.lang.Closure<Object>) args -> args[0]);
-        binding.setVariable("withCredentials", (groovy.lang.Closure<Object>) args -> {
-            ((groovy.lang.Closure<?>) args[1]).call();
-            return null;
+        binding.setVariable("withCredentials", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object credentials, Object body) {
+                ((groovy.lang.Closure<?>) body).call();
+                return null;
+            }
         });
         binding.setVariable("junit", (groovy.lang.Closure<Object>) args -> {
             junit.add(String.valueOf(((Map<?, ?>) args[0]).get("testResults")));
@@ -205,7 +213,7 @@ public class JavaToolchainSharedLibraryTest {
         options.put("registryCredentialsId", "ghcr-readonly");
         options.put("mavenSettingsCredentialsId", "maven-settings-readonly");
 
-        script.invokeMethod("call", new Object[]{options});
+        script.invokeMethod("call", options);
 
         String allCommands = String.join("\n", shellCommands);
         assertTrue(allCommands.contains("resolve_toolchain.py"));
