@@ -164,8 +164,12 @@ public class JavaToolchainSharedLibraryTest {
         });
         binding.setVariable("sh", new groovy.lang.Closure<Object>(script) {
             public Object doCall(Object rawOptions) {
-                Map<?, ?> options = (Map<?, ?>) rawOptions;
-                String command = String.valueOf(options.get("script"));
+                Map<?, ?> options = rawOptions instanceof Map
+                    ? (Map<?, ?>) rawOptions
+                    : java.util.Collections.emptyMap();
+                String command = rawOptions instanceof Map
+                    ? String.valueOf(options.get("script"))
+                    : String.valueOf(rawOptions);
                 shellCommands.add(command);
                 if (Boolean.TRUE.equals(options.get("returnStatus"))) return 0;
                 if (Boolean.TRUE.equals(options.get("returnStdout"))) {
