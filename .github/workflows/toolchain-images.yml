@@ -230,6 +230,7 @@ jobs:
   candidate-consumer:
     name: Candidate consumer / ${{ matrix.toolchain }}
     needs: [discover, gate]
+    if: always() && needs.discover.outputs.consumer_count != '0' && needs.gate.result == 'success'
     permissions:
       contents: read
       packages: read
