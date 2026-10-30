@@ -276,6 +276,18 @@ class CiPlatformTests(unittest.TestCase):
         self.assertNotIn("gcc-host-container-v1", ids)
         self.assertNotIn("rk-sdk-2026.08", ids)
 
+        published = deepcopy(self.toolchains)
+        published_java17 = next(
+            item for item in published["toolchains"]
+            if item["id"] == "java17-maven"
+        )
+        published_java17["digest"] = "sha256:" + "a" * 64
+        published_ids = [
+            item["toolchain"]
+            for item in build_publish_matrix(published)["include"]
+        ]
+        self.assertNotIn("java17-maven", published_ids)
+
     def test_java17_toolchain_is_candidate_publishable_but_not_enabled_for_projects(self) -> None:
         java17 = next(
             item for item in self.toolchains["toolchains"]
