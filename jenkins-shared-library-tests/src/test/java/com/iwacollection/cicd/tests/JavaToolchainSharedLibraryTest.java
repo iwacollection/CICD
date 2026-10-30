@@ -71,6 +71,49 @@ public class JavaToolchainSharedLibraryTest {
     }
 
     @Test
+    public void optionalCommandsMustBeStringsWhenPresent() throws Exception {
+        GroovyClassLoader loader = newLoader();
+        Class<?> spec = loader.loadClass("com.iwacollection.cicd.JavaToolchainSpec");
+        Method parse = spec.getMethod("parseProjectConfig", String.class);
+
+        String invalidTestCommand = PROJECT_CONFIG.replace(
+                "\\"test_command\\": \\"\\",",
+                "\\"test_command\\": 42,"
+        );
+        try {
+            parse.invoke(null, invalidTestCommand);
+            fail("A numeric test_command must not silently disable tests");
+        } catch (InvocationTargetException ex) {
+            assertTrue(ex.getCause().getMessage().contains("test_command must be a string"));
+        }
+
+        String invalidVerifyCommand = PROJECT_CONFIG.replace(
+                "\\"verify_command\\": \\"java -jar target/java17-maven-service-1.0.0.jar\\",",
+                "\\"verify_command\\": false,"
+        );
+        try {
+            parse.invoke(null, invalidVerifyCommand);
+            fail("A boolean verify_command must not silently disable runtime verification");
+        } catch (InvocationTargetException ex) {
+            assertTrue(ex.getCause().getMessage().contains("verify_command must be a string"));
+        }
+    }
+
+    @Test
+    public void repositoryUrlsNormalizeToCanonicalOwnerRepository() throws Exception {
+        GroovyClassLoader loader = newLoader();
+        Class<?> spec = loader.loadClass("com.iwacollection.cicd.JavaToolchainSpec");
+        Method normalize = spec.getMethod("normalizeRepositorySlug", String.class);
+
+        assertEquals("iwacollection/java-service",
+                normalize.invoke(null, "https://github.com/iwacollection/java-service.git"));
+        assertEquals("iwacollection/java-service",
+                normalize.invoke(null, "git@github.com:iwacollection/java-service.git"));
+        assertEquals("iwacollection/java-service",
+                normalize.invoke(null, "ssh://git@github.com/iwacollection/java-service.git"));
+    }
+
+    @Test
     public void candidateIsRejectedBySharedPolicyHelper() throws Exception {
         GroovyClassLoader loader = newLoader();
         Class<?> spec = loader.loadClass("com.iwacollection.cicd.JavaToolchainSpec");
@@ -201,6 +244,9 @@ public class JavaToolchainSharedLibraryTest {
                 return null;
             }
         });
+        binding.setVariable("string", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object configuration) { return configuration; }
+        });
         binding.setVariable("usernamePassword", new groovy.lang.Closure<Object>(script) {
             public Object doCall(Object configuration) { return configuration; }
         });
@@ -208,8 +254,37 @@ public class JavaToolchainSharedLibraryTest {
             public Object doCall(Object configuration) { return configuration; }
         });
         binding.setVariable("withCredentials", new groovy.lang.Closure<Object>(script) {
-            public Object doCall(Object credentials, Object body) {
-                ((groovy.lang.Closure<?>) body).call();
+            public Object doCall(Object rawCredentials, Object body) {
+                List<?> credentials = (List<?>) rawCredentials;
+                Map<String, Object> previous = new HashMap<>();
+                for (Object rawCredential : credentials) {
+                    Map<?, ?> credential = (Map<?, ?>) rawCredential;
+                    String id = String.valueOf(credential.get("credentialsId"));
+                    if (credential.containsKey("variable")) {
+                        String variable = String.valueOf(credential.get("variable"));
+                        previous.put(variable, env.get(variable));
+                        env.put(variable, "cicd-platform-sha".equals(id) ? PLATFORM_SHA : "/tmp/maven-settings.xml");
+                    }
+                    if (credential.containsKey("usernameVariable")) {
+                        String variable = String.valueOf(credential.get("usernameVariable"));
+                        previous.put(variable, env.get(variable));
+                        env.put(variable, "test-ghcr-user");
+                    }
+                    if (credential.containsKey("passwordVariable")) {
+                        String variable = String.valueOf(credential.get("passwordVariable"));
+                        previous.put(variable, env.get(variable));
+                        env.put(variable, "test-ghcr-token");
+                    }
+                }
+                try {
+                    ((groovy.lang.Closure<?>) body).call();
+                } finally {
+                    for (String key : previous.keySet()) {
+                        Object value = previous.get(key);
+                        if (value == null) env.remove(key);
+                        else env.put(key, value);
+                    }
+                }
                 return null;
             }
         });
@@ -228,7 +303,6 @@ public class JavaToolchainSharedLibraryTest {
         script.setBinding(binding);
 
         Map<String, Object> options = new LinkedHashMap<>();
-        options.put("platformRef", PLATFORM_SHA);
         options.put("projectDir", "examples/java17-maven-service");
         options.put("toolchainConfig", "ci/toolchain.json");
         options.put("trustedBranch", "main");
@@ -288,7 +362,6 @@ public class JavaToolchainSharedLibraryTest {
         script.setBinding(binding);
 
         Map<String, Object> options = Map.of(
-                "platformRef", PLATFORM_SHA,
                 "projectDir", "examples/java17-maven-service",
                 "trustedBranch", "main"
         );
