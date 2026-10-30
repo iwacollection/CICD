@@ -77,7 +77,7 @@ public class JavaToolchainSharedLibraryTest {
         Method parse = spec.getMethod("parseProjectConfig", String.class);
 
         String invalidTestCommand = PROJECT_CONFIG.replace(
-                "\"test_command\": \"",",
+                "\"test_command\": \"\",
                 "\"test_command\": 42,"
         );
         try {
@@ -88,7 +88,7 @@ public class JavaToolchainSharedLibraryTest {
         }
 
         String invalidVerifyCommand = PROJECT_CONFIG.replace(
-                "\"verify_command\": \"java -jar target/java17-maven-service-1.0.0.jar\",",
+                "\"verify_command\": \"java -jar target/java17-maven-service-1.0.0.jar\",
                 "\"verify_command\": false,"
         );
         try {
@@ -246,9 +246,6 @@ public class JavaToolchainSharedLibraryTest {
                 }
                 return null;
             }
-        });
-        binding.setVariable("string", new groovy.lang.Closure<Object>(script) {
-            public Object doCall(Object configuration) { return configuration; }
         });
         binding.setVariable("string", new groovy.lang.Closure<Object>(script) {
             public Object doCall(Object configuration) { return configuration; }
