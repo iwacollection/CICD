@@ -10,9 +10,19 @@ import groovy.json.JsonSlurperClassic
  * registry, or production credentials.
  */
 def call(Map options = [:]) {
-    String platformRef = requiredOption(options, 'platformRef')
+    if (options.containsKey('platformRef')) {
+        error('platformRef cannot be supplied by a project Jenkinsfile; configure controller-managed Secret Text credential cicd-platform-sha')
+    }
+
+    String platformRef = ''
+    withCredentials([string(
+        credentialsId: 'cicd-platform-sha',
+        variable: 'CI_PLATFORM_REF'
+    )]) {
+        platformRef = (env.CI_PLATFORM_REF ?: '').toString().trim()
+    }
     if (!(platformRef ==~ /^[0-9a-f]{40}$/)) {
-        error('platformRef must be an exact 40-character CICD commit SHA')
+        error('Controller-managed credential cicd-platform-sha must contain an exact 40-character CICD commit SHA')
     }
 
     String trustedBranch = (options.trustedBranch ?: 'main').toString()
@@ -44,12 +54,18 @@ def call(Map options = [:]) {
     }
 
     String sourceCommit = (env.GIT_COMMIT ?: '').toString().trim()
-    String sourceRepository = (env.GIT_URL ?: '').toString().trim()
+    String sourceGitUrl = (env.GIT_URL ?: '').toString().trim()
     if (!(sourceCommit ==~ /^[0-9a-f]{40}$/)) {
         error('GIT_COMMIT must be set by the Jenkins SCM checkout before javaToolchainBuild')
     }
-    if (!sourceRepository) {
+    if (!sourceGitUrl) {
         error('GIT_URL must be set by the Jenkins SCM checkout before javaToolchainBuild')
+    }
+    String sourceRepository
+    try {
+        sourceRepository = JavaToolchainSpec.normalizeRepositorySlug(sourceGitUrl)
+    } catch (IllegalArgumentException ex) {
+        error("Cannot normalize Jenkins GIT_URL to owner/repository: ${ex.message}")
     }
 
     String platformRepository = (options.platformRepository ?: 'https://github.com/iwacollection/CICD.git').toString()
@@ -216,15 +232,18 @@ python3 .ci-platform/scripts/ci/verify_artifact.py \
   --expected-repository "$GITHUB_REPOSITORY"
 '''
 
-            junit(
-                testResults: "${projectDir}/target/surefire-reports/*.xml",
-                allowEmptyResults: false
-            )
             archiveArtifacts(
                 artifacts: '.ci-dist/**,build-environment.json,' +
                     "${projectDir}/target/surefire-reports/*.xml",
                 fingerprint: true,
                 allowEmptyArchive: false
+            )
+        } finally {
+            // Always publish test results, including failed Maven builds.
+            // Empty results are allowed when the build fails before Surefire runs.
+            junit(
+                testResults: "${projectDir}/target/surefire-reports/*.xml",
+                allowEmptyResults: true
             )
         }
     }
@@ -259,14 +278,6 @@ docker logout "$CI_REGISTRY_HOST" >/dev/null 2>&1
     }
 
     runWithOptionalRegistryCredentials()
-}
-
-private String requiredOption(Map options, String name) {
-    String value = options[name] == null ? '' : options[name].toString().trim()
-    if (!value) {
-        error("Missing required javaToolchainBuild option: ${name}")
-    }
-    return value
 }
 
 private void runProjectCommands() {
