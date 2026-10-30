@@ -58,18 +58,24 @@ def call(Map options = [:]) {
     String mavenSettingsCredentialsId = (options.mavenSettingsCredentialsId ?: '').toString()
 
     // Fetch only the requested immutable platform revision into a dedicated directory.
-    dir('.ci-platform') {
-        deleteDir()
-        Map remote = [url: platformRepository]
-        if (platformCredentialsId) {
-            remote.credentialsId = platformCredentialsId
+    Map remote = [url: platformRepository]
+    if (platformCredentialsId) {
+        remote.credentialsId = platformCredentialsId
+    }
+    withEnv(["CI_PLATFORM_REF=${platformRef}"]) {
+        dir('.ci-platform') {
+            deleteDir()
+            checkout([
+                $class: 'GitSCM',
+                branches: [[name: '*/main']],
+                extensions: [[$class: 'CloneOption', shallow: false, noTags: true]],
+                userRemoteConfigs: [remote]
+            ])
+            sh '''#!/usr/bin/env bash
+set -euo pipefail
+git checkout --detach "$CI_PLATFORM_REF"
+'''
         }
-        checkout([
-            $class: 'GitSCM',
-            branches: [[name: platformRef]],
-            extensions: [[$class: 'CloneOption', shallow: true, noTags: true, depth: 1]],
-            userRemoteConfigs: [remote]
-        ])
     }
 
     String actualPlatformRef = sh(
