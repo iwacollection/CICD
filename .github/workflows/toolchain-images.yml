@@ -10,6 +10,12 @@ on:
       - "docker/toolchains/**"
       - "scripts/ci/toolchain_catalog.py"
       - "scripts/ci/supply_chain_policy.py"
+      - "scripts/ci/run_build.py"
+      - "scripts/ci/collect_build_metadata.py"
+      - "scripts/ci/resolve_toolchain.py"
+      - "scripts/ci/package_artifact.py"
+      - "scripts/ci/verify_artifact.py"
+      - "examples/java17-maven-service/**"
       - ".github/workflows/toolchain-images.yml"
   workflow_dispatch:
 
@@ -28,6 +34,8 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       count: ${{ steps.matrix.outputs.count }}
+      consumer_matrix: ${{ steps.consumers.outputs.consumer_matrix }}
+      consumer_count: ${{ steps.consumers.outputs.consumer_count }}
       relevant: ${{ steps.scope.outputs.relevant }}
     steps:
       - name: Checkout
@@ -56,7 +64,7 @@ jobs:
             relevant=false
             while IFS= read -r path; do
               case "$path" in
-                ci/toolchains.json|ci/supply-chain-policy.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|scripts/ci/supply_chain_policy.py|.github/workflows/toolchain-images.yml)
+                ci/toolchains.json|ci/supply-chain-policy.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|scripts/ci/supply_chain_policy.py|scripts/ci/run_build.py|scripts/ci/collect_build_metadata.py|scripts/ci/resolve_toolchain.py|scripts/ci/package_artifact.py|scripts/ci/verify_artifact.py|examples/java17-maven-service/*|examples/java17-maven-service/**|.github/workflows/toolchain-images.yml)
                   relevant=true
                   break
                   ;;
@@ -78,6 +86,23 @@ jobs:
           else
             echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
             echo 'count=0' >> "$GITHUB_OUTPUT"
+            echo '{"include":[]}'
+          fi
+
+      - name: Discover pinned candidate consumers
+        id: consumers
+        shell: bash
+        env:
+          RELEVANT: ${{ steps.scope.outputs.relevant }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEVANT" == "true" ]]; then
+            python3 scripts/ci/toolchain_catalog.py --consumer-matrix
+            echo "Raw consumer outputs:"
+            cat "$GITHUB_OUTPUT"
+          else
+            echo 'consumer_matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo 'consumer_count=0' >> "$GITHUB_OUTPUT"
             echo '{"include":[]}'
           fi
 
@@ -181,6 +206,8 @@ jobs:
           VERIFY_RESULT: ${{ needs.verify.result }}
           MATRIX_COUNT: ${{ needs.discover.outputs.count }}
           RELEVANT: ${{ needs.discover.outputs.relevant }}
+          CONSUMER_COUNT: ${{ needs.discover.outputs.consumer_count }}
+          CONSUMER_MATRIX: ${{ needs.discover.outputs.consumer_matrix }}
         run: |
           set -euo pipefail
           if [[ "$DISCOVER_RESULT" != "success" ]]; then
@@ -197,6 +224,168 @@ jobs:
             exit 1
           fi
           echo "Toolchain gate passed: relevant=$RELEVANT matrix_count=$MATRIX_COUNT verify_result=$VERIFY_RESULT"
+          echo "Candidate consumer count: $CONSUMER_COUNT"
+          echo "Candidate consumer matrix: $CONSUMER_MATRIX"
+
+  candidate-consumer:
+    name: Candidate consumer / ${{ matrix.toolchain }}
+    needs: [discover, gate]
+    if: always() && needs.discover.outputs.consumer_count != '0' && needs.gate.result == 'success'
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.consumer_matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Login GHCR read-only
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2 / Cosign v3.0.6
+
+      - name: Verify Candidate image signature
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.immutable_reference }}
+        run: |
+          set -euo pipefail
+          cosign verify "$IMAGE" \
+            --certificate-identity="https://github.com/${{ github.repository }}/.github/workflows/toolchain-images.yml@refs/heads/main" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+
+      - name: Pull exact Candidate digest
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.immutable_reference }}
+        run: |
+          set -euo pipefail
+          docker pull "$IMAGE"
+          expected="$(printf '%s' "$IMAGE" | awk -F@ '{print $2}')"
+          repo_digests="$(docker image inspect "$IMAGE" --format '{{json .RepoDigests}}')"
+          [[ "$repo_digests" == *"@$expected"* ]] || {
+            echo "Pulled image does not match central Candidate digest: $IMAGE" >&2
+            exit 1
+          }
+
+      - name: Build, test and run Java 17 consumer
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.immutable_reference }}
+          FIXTURE: ${{ matrix.consumer_fixture }}
+          EXPECTED_JDK_VERSION: ${{ matrix.jdk_version }}
+          EXPECTED_MAVEN_VERSION: ${{ matrix.maven_version }}
+        run: |
+          set -euo pipefail
+          expected_java_version="$(printf '%s' "$EXPECTED_JDK_VERSION" | cut -d+ -f1)"
+          build_command="$(cat <<'BUILD_COMMAND'
+          set -euo pipefail
+          actual_java_version="$(java -version 2>&1 | sed -n '1s/.*version "\([^"]*\)".*/\1/p')"
+          actual_java_spec="$(java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/^[[:space:]]*java.specification.version =/ { print $2; exit }')"
+          actual_maven_version="$(mvn --version 2>&1 | sed -n '1s/^Apache Maven \([^ ]*\).*/\1/p')"
+          test "$actual_java_version" = "$EXPECTED_JAVA_VERSION"
+          test "$actual_java_spec" = "17"
+          test "$actual_maven_version" = "$EXPECTED_MAVEN_VERSION"
+          mvn --batch-mode --no-transfer-progress clean verify
+          java -jar target/java17-maven-service-1.0.0.jar | grep -Fx java17-maven-consumer-ok
+          BUILD_COMMAND
+          )"
+          EXPECTED_JAVA_VERSION="$expected_java_version" \
+          EXPECTED_MAVEN_VERSION="$EXPECTED_MAVEN_VERSION" \
+          python3 scripts/ci/run_build.py \
+            --working-directory "$FIXTURE" \
+            --container-image "$IMAGE" \
+            --command "$build_command"
+
+      - name: Collect actual JDK and Maven metadata
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.immutable_reference }}
+          FIXTURE: ${{ matrix.consumer_fixture }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/collect_build_metadata.py \
+            --working-directory "$FIXTURE" \
+            --container-image "$IMAGE" \
+            --output build-environment.json
+
+      - name: Package Artifact Contract v2
+        id: package
+        shell: bash
+        env:
+          FIXTURE: ${{ matrix.consumer_fixture }}
+          TOOLCHAIN: ${{ matrix.toolchain }}
+          IMAGE: ${{ matrix.immutable_reference }}
+        run: |
+          set -euo pipefail
+          export SOURCE_DATE_EPOCH="$(git -C "$FIXTURE" show -s --format=%ct HEAD)"
+          python3 scripts/ci/package_artifact.py \
+            --project java17-maven-service \
+            --working-directory "$FIXTURE" \
+            --artifacts-json '["target/java17-maven-service-1.0.0.jar"]' \
+            --dependency-locks-json '["pom.xml"]' \
+            --soc generic \
+            --target-os linux \
+            --arch x86_64 \
+            --toolchain "$TOOLCHAIN" \
+            --execution-mode container \
+            --container-image "$IMAGE" \
+            --runner-labels-json '["ubuntu-latest"]' \
+            --build-metadata-file build-environment.json
+
+      - name: Verify Artifact Contract v2
+        shell: bash
+        env:
+          DIGEST: ${{ steps.package.outputs.digest }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/verify_artifact.py \
+            --directory dist \
+            --expected-sha256 "$DIGEST" \
+            --expected-source-sha "$GITHUB_SHA" \
+            --expected-run-id "$GITHUB_RUN_ID" \
+            --expected-repository "$GITHUB_REPOSITORY"
+
+      - name: Upload Java consumer evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: java-consumer-${{ matrix.toolchain }}-${{ github.sha }}
+          path: |
+            dist/*.tar.gz
+            dist/*.manifest.json
+            dist/*.sha256
+            build-environment.json
+            ${{ matrix.consumer_fixture }}/target/surefire-reports/**
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Consumer summary
+        env:
+          TOOLCHAIN: ${{ matrix.toolchain }}
+          IMAGE: ${{ matrix.immutable_reference }}
+          JDK: ${{ matrix.jdk_version }}
+          MAVEN: ${{ matrix.maven_version }}
+          ARTIFACT_DIGEST: ${{ steps.package.outputs.digest }}
+        run: |
+          {
+            echo "### Java Candidate consumer passed"
+            echo "- Toolchain: $TOOLCHAIN"
+            echo "- Candidate image: $IMAGE"
+            echo "- JDK: $JDK"
+            echo "- Maven: $MAVEN"
+            echo "- Artifact Contract v2 bundle SHA256: $ARTIFACT_DIGEST"
+            echo "- Status remains Candidate; this fixture is not a production project promotion."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     name: Publish / ${{ matrix.toolchain }}

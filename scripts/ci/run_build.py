@@ -49,6 +49,25 @@ def _ensure_source_date_epoch(workdir: Path) -> str:
 
 def _container_env_args(workdir: Path) -> list[str]:
     args: list[str] = []
+
+    # The Java toolchain image runs as UID 10001 and keeps its image-owned
+    # /home/ci directory for standalone smoke tests. Project builds map the
+    # container UID to the Runner UID so mounted outputs are not root-owned.
+    # Therefore, HOME and Maven's local repository must live on the writable
+    # workspace mount instead of the image-owned /home/ci path.
+    container_home = workdir / ".ci-home"
+    maven_repository = workdir / ".cache" / "maven" / "repository"
+    container_home.mkdir(parents=True, exist_ok=True)
+    maven_repository.mkdir(parents=True, exist_ok=True)
+    args.extend(
+        [
+            "-e",
+            "HOME=/workspace/.ci-home",
+            "-e",
+            "MAVEN_OPTS=-Dmaven.repo.local=/workspace/.cache/maven/repository",
+        ]
+    )
+
     upstream_root = os.environ.get("CI_UPSTREAM_ROOT", "")
     upstream_index = os.environ.get("CI_UPSTREAM_INDEX", "")
     if upstream_root:
@@ -74,7 +93,12 @@ def _container_env_args(workdir: Path) -> list[str]:
 
     # Reproducibility controls are intentionally allow-listed rather than
     # forwarding the Runner's complete environment into the toolchain image.
-    for key in ("SOURCE_DATE_EPOCH", "CCACHE_DISABLE"):
+    for key in (
+        "SOURCE_DATE_EPOCH",
+        "CCACHE_DISABLE",
+        "EXPECTED_JAVA_VERSION",
+        "EXPECTED_MAVEN_VERSION",
+    ):
         value = os.environ.get(key, "")
         if value:
             args.extend(["-e", f"{key}={value}"])
