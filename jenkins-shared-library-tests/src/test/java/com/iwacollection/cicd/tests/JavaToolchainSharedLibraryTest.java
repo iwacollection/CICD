@@ -76,10 +76,18 @@ public class JavaToolchainSharedLibraryTest {
         Class<?> spec = loader.loadClass("com.iwacollection.cicd.JavaToolchainSpec");
         Method parse = spec.getMethod("parseProjectConfig", String.class);
 
-        String invalidTestCommand = PROJECT_CONFIG.replace(
-                "\"test_command\": \"\",
-                "\"test_command\": 42,"
-        );
+        String invalidTestCommand = """
+                {
+                  "schema_version": 1,
+                  "project_name": "java17-maven-service",
+                  "toolchain": "java17-maven",
+                  "build_command": "mvn -B -ntp clean verify",
+                  "test_command": 42,
+                  "verify_command": "java -jar target/java17-maven-service-1.0.0.jar",
+                  "artifact_globs": ["target/java17-maven-service-1.0.0.jar"],
+                  "dependency_lock_files": ["pom.xml"]
+                }
+                """;
         try {
             parse.invoke(null, invalidTestCommand);
             fail("A numeric test_command must not silently disable tests");
@@ -87,10 +95,18 @@ public class JavaToolchainSharedLibraryTest {
             assertTrue(ex.getCause().getMessage().contains("test_command must be a string"));
         }
 
-        String invalidVerifyCommand = PROJECT_CONFIG.replace(
-                "\"verify_command\": \"java -jar target/java17-maven-service-1.0.0.jar\",
-                "\"verify_command\": false,"
-        );
+        String invalidVerifyCommand = """
+                {
+                  "schema_version": 1,
+                  "project_name": "java17-maven-service",
+                  "toolchain": "java17-maven",
+                  "build_command": "mvn -B -ntp clean verify",
+                  "test_command": "",
+                  "verify_command": false,
+                  "artifact_globs": ["target/java17-maven-service-1.0.0.jar"],
+                  "dependency_lock_files": ["pom.xml"]
+                }
+                """;
         try {
             parse.invoke(null, invalidVerifyCommand);
             fail("A boolean verify_command must not silently disable runtime verification");
@@ -382,6 +398,7 @@ public class JavaToolchainSharedLibraryTest {
 
         Map<String, Object> options = Map.of(
                 "projectDir", "examples/java17-maven-service"
+        );
         try {
             script.invokeMethod("call", options);
             fail("Pull Request builds must be rejected");
