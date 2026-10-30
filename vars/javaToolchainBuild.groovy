@@ -249,6 +249,7 @@ python3 .ci-platform/scripts/ci/verify_artifact.py \
                 allowEmptyResults: true
             )
         }
+        }
     }
 
     def runWithOptionalRegistryCredentials = {
