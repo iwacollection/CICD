@@ -269,10 +269,11 @@ class CiPlatformTests(unittest.TestCase):
             "ghcr.io/iwacollection/gcc-container@sha256:" + "a" * 64,
         )
 
-    def test_candidate_or_active_toolchain_is_buildable_but_planned_is_not(self) -> None:
+    def test_only_candidate_toolchains_are_built_and_published(self) -> None:
         matrix = build_publish_matrix(self.toolchains)
         ids = [item["toolchain"] for item in matrix["include"]]
-        self.assertIn("gcc-host-container-v1", ids)
+        self.assertIn("java17-maven", ids)
+        self.assertNotIn("gcc-host-container-v1", ids)
         self.assertNotIn("rk-sdk-2026.08", ids)
 
     def test_java17_toolchain_is_candidate_publishable_but_not_enabled_for_projects(self) -> None:
