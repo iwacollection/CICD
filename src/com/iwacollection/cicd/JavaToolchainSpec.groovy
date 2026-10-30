@@ -58,9 +58,19 @@ class JavaToolchainSpec implements Serializable {
         }
         locks.each { validateRelativePath(it.toString(), 'dependency_lock_files entry') }
 
-        String testCommand = config.test_command instanceof String ? config.test_command.trim() : ''
-        String verifyCommand = config.verify_command instanceof String ? config.verify_command.trim() : ''
-        String projectName = config.project_name instanceof String ? config.project_name.trim() : toolchain
+        if (config.containsKey('test_command') && !(config.test_command instanceof String)) {
+            throw new IllegalArgumentException('test_command must be a string when provided')
+        }
+        if (config.containsKey('verify_command') && !(config.verify_command instanceof String)) {
+            throw new IllegalArgumentException('verify_command must be a string when provided')
+        }
+        if (config.containsKey('project_name') && !(config.project_name instanceof String)) {
+            throw new IllegalArgumentException('project_name must be a string when provided')
+        }
+
+        String testCommand = config.containsKey('test_command') ? config.test_command.trim() : ''
+        String verifyCommand = config.containsKey('verify_command') ? config.verify_command.trim() : ''
+        String projectName = config.containsKey('project_name') ? config.project_name.trim() : toolchain
         if (!projectName) {
             throw new IllegalArgumentException('project_name must not be empty')
         }
@@ -117,6 +127,51 @@ class JavaToolchainSpec implements Serializable {
             jdk_version: resolved.jdk_version ?: '',
             maven_version: resolved.maven_version ?: ''
         ]
+    }
+
+    static String normalizeRepositorySlug(String gitUrl) {
+        String value = gitUrl == null ? '' : gitUrl.trim()
+        if (!value) {
+            throw new IllegalArgumentException('GIT_URL must not be empty')
+        }
+
+        String path = ''
+        try {
+            if (value ==~ /^[^@\\/]+@[^:]+:.+$/) {
+                // SCP-style SSH URL: git@github.com:owner/repo.git
+                path = value.substring(value.indexOf(':') + 1)
+            } else {
+                java.net.URI uri = new java.net.URI(value)
+                if (!uri.host) {
+                    throw new IllegalArgumentException('GIT_URL must include a repository host')
+                }
+                path = uri.path ?: ''
+            }
+        } catch (java.net.URISyntaxException ex) {
+            throw new IllegalArgumentException('GIT_URL is not a valid repository URL', ex)
+        }
+
+        path = path.replaceAll('^/+', '').replaceAll('/+
+        String path = value == null ? '' : value.trim().replace('\\', '/')
+        if (!path || path.startsWith('/') || path ==~ /^[A-Za-z]:.*/) {
+            throw new IllegalArgumentException("${fieldName} must be a non-empty relative path")
+        }
+        List parts = path.split('/') as List
+        if (parts.any { it == '..' || it == '' }) {
+            throw new IllegalArgumentException("${fieldName} contains an unsafe path segment")
+        }
+        return path
+    }
+}
+, '')
+        if (path.toLowerCase().endsWith('.git')) {
+            path = path.substring(0, path.length() - 4)
+        }
+        List<String> segments = path.split('/') as List<String>
+        if (segments.size() != 2 || segments.any { !it || it == '.' || it == '..' }) {
+            throw new IllegalArgumentException('GIT_URL must resolve to exactly owner/repository')
+        }
+        return segments[0] + '/' + segments[1]
     }
 
     static String validateRelativePath(String value, String fieldName) {
