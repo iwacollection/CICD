@@ -21,6 +21,12 @@ ARG TEMURIN_SHA256=8b9b611d917e3dfd8419d3566b5949226f69b052fed7e109c1368add1dfe8
 ARG MAVEN_VERSION=3.10.0
 ARG MAVEN_SHA512=908b1501bfb420bf7c8affb855534a9c407fd6099367bfb9f2f2dcb8e9799102bffb84518cde74c679bd76870247c6528683abdd620581bffa90f95d92d175aa
 
+# Maven 3.10.0's published dependency set contains Guava 33.7.1-jre.
+# CVE-2026-102554 is fixed in 33.7.2. Replace only that runtime library with
+# the upstream patch release, pinning the Maven Central artifact by SHA256.
+ARG GUAVA_VERSION=33.7.2-jre
+ARG GUAVA_SHA256=b530942257fb935f8b2cfaa5f8eb5bd59c555fd8e8d01b8ce98912e077ea606c
+
 RUN set -eux; \
     jdk_archive="OpenJDK17U-jdk_x64_linux_hotspot_${TEMURIN_VERSION}_${TEMURIN_BUILD}.tar.gz"; \
     jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-${TEMURIN_VERSION}%2B${TEMURIN_BUILD}/${jdk_archive}"; \
@@ -43,6 +49,16 @@ RUN set -eux; \
     mkdir -p /opt/maven; \
     tar -xzf "/tmp/${maven_archive}" --directory /opt/maven --strip-components=1 --no-same-owner; \
     rm -f "/tmp/${maven_archive}" "/tmp/${maven_archive}.sha512"; \
+    guava_archive="guava-${GUAVA_VERSION}.jar"; \
+    guava_url="https://repo.maven.apache.org/maven2/com/google/guava/guava/${GUAVA_VERSION}/${guava_archive}"; \
+    curl --fail --show-error --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 180 \
+      "${guava_url}" --output "/tmp/${guava_archive}"; \
+    printf '%s  %s\\n' "${GUAVA_SHA256}" "/tmp/${guava_archive}" | sha256sum --check -; \
+    set -- /opt/maven/lib/guava-*.jar; \
+    test "$#" -eq 1; \
+    rm -f "$1"; \
+    install -m 0644 "/tmp/${guava_archive}" "/opt/maven/lib/${guava_archive}"; \
+    rm -f "/tmp/${guava_archive}"; \
     mkdir -p /home/ci/.m2 /workspace; \
     chown -R 10001:10001 /home/ci /workspace; \
     chmod 0755 /opt/java /opt/java/openjdk /opt/maven
@@ -64,6 +80,7 @@ LABEL org.opencontainers.image.title="CICD Java 17 Maven toolchain" \
       org.opencontainers.image.base.name="ubuntu:24.04" \
       org.opencontainers.image.base.digest="sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517" \
       org.opencontainers.image.version="17.0.21+9-maven-3.10.0" \
+      org.opencontainers.image.maven.guava.version="33.7.2-jre" \
       org.opencontainers.image.vendor="Eclipse Temurin / Apache Maven"
 
 USER 10001:10001
