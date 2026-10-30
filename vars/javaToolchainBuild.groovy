@@ -182,7 +182,10 @@ rm -f "$CI_PROJECT_DIR/.ci-maven-settings.xml"
                     }
                 }
             } else {
-                runProjectCommands()
+                // Do not inherit an arbitrary MAVEN_ARGS value from a shared Agent.
+                withEnv(['MAVEN_ARGS=']) {
+                    runProjectCommands()
+                }
             }
 
             sh '''#!/usr/bin/env bash
