@@ -53,9 +53,10 @@ RUN set -eux; \
     guava_url="https://repo.maven.apache.org/maven2/com/google/guava/guava/${GUAVA_VERSION}/${guava_archive}"; \
     curl --fail --show-error --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 180 \
       "${guava_url}" --output "/tmp/${guava_archive}"; \
-    printf '%s  %s\\n' "${GUAVA_SHA256}" "/tmp/${guava_archive}" | sha256sum --check -; \
+    printf '%s  %s\n' "${GUAVA_SHA256}" "/tmp/${guava_archive}" | sha256sum --check -; \
     set -- /opt/maven/lib/guava-*.jar; \
     test "$#" -eq 1; \
+    test "$(basename "$1")" = "guava-33.7.1-jre.jar"; \
     rm -f "$1"; \
     install -m 0644 "/tmp/${guava_archive}" "/opt/maven/lib/${guava_archive}"; \
     rm -f "/tmp/${guava_archive}"; \
