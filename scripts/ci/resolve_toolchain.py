@@ -46,9 +46,10 @@ def resolve_toolchain(
 
     if expected_mode == "container":
         reference = immutable_reference(item)
-        if not expected_image:
-            raise ValueError("container consumer must provide the exact catalog image@sha256 reference")
-        if expected_image != reference:
+        # Project repositories normally declare only a Toolchain ID; in
+        # that mode the resolver returns the central immutable reference.
+        # Callers that also provide an image must match the Registry exactly.
+        if expected_image and expected_image != reference:
             raise ValueError(
                 f"consumer image does not match Active registry identity: "
                 f"expected={reference} actual={expected_image}"
