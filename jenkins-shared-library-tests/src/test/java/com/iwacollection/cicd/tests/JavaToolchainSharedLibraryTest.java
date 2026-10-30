@@ -77,8 +77,8 @@ public class JavaToolchainSharedLibraryTest {
         Method parse = spec.getMethod("parseProjectConfig", String.class);
 
         String invalidTestCommand = PROJECT_CONFIG.replace(
-                "\\"test_command\\": \\"\\",",
-                "\\"test_command\\": 42,"
+                "\"test_command\": \"",",
+                "\"test_command\": 42,"
         );
         try {
             parse.invoke(null, invalidTestCommand);
@@ -88,8 +88,8 @@ public class JavaToolchainSharedLibraryTest {
         }
 
         String invalidVerifyCommand = PROJECT_CONFIG.replace(
-                "\\"verify_command\\": \\"java -jar target/java17-maven-service-1.0.0.jar\\",",
-                "\\"verify_command\\": false,"
+                "\"verify_command\": \"java -jar target/java17-maven-service-1.0.0.jar\",",
+                "\"verify_command\": false,"
         );
         try {
             parse.invoke(null, invalidVerifyCommand);
@@ -173,6 +173,8 @@ public class JavaToolchainSharedLibraryTest {
         env.put("JOB_NAME", "java-service/main");
 
         List<String> shellCommands = new ArrayList<>();
+        List<String> environmentAssignments = new ArrayList<>();
+        List<String> credentialIds = new ArrayList<>();
         List<String> archived = new ArrayList<>();
         List<String> junit = new ArrayList<>();
         Binding binding = new Binding();
@@ -228,6 +230,7 @@ public class JavaToolchainSharedLibraryTest {
                 List<?> assignments = (List<?>) rawAssignments;
                 Map<String, Object> previous = new HashMap<>();
                 for (Object assignment : assignments) {
+                    environmentAssignments.add(assignment.toString());
                     String[] parts = assignment.toString().split("=", 2);
                     previous.put(parts[0], env.get(parts[0]));
                     env.put(parts[0], parts.length > 1 ? parts[1] : "");
@@ -247,6 +250,9 @@ public class JavaToolchainSharedLibraryTest {
         binding.setVariable("string", new groovy.lang.Closure<Object>(script) {
             public Object doCall(Object configuration) { return configuration; }
         });
+        binding.setVariable("string", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object configuration) { return configuration; }
+        });
         binding.setVariable("usernamePassword", new groovy.lang.Closure<Object>(script) {
             public Object doCall(Object configuration) { return configuration; }
         });
@@ -260,6 +266,7 @@ public class JavaToolchainSharedLibraryTest {
                 for (Object rawCredential : credentials) {
                     Map<?, ?> credential = (Map<?, ?>) rawCredential;
                     String id = String.valueOf(credential.get("credentialsId"));
+                    credentialIds.add(id);
                     if (credential.containsKey("variable")) {
                         String variable = String.valueOf(credential.get("variable"));
                         previous.put(variable, env.get(variable));
@@ -305,7 +312,6 @@ public class JavaToolchainSharedLibraryTest {
         Map<String, Object> options = new LinkedHashMap<>();
         options.put("projectDir", "examples/java17-maven-service");
         options.put("toolchainConfig", "ci/toolchain.json");
-        options.put("trustedBranch", "main");
         options.put("registryCredentialsId", "ghcr-readonly");
         options.put("mavenSettingsCredentialsId", "maven-settings-readonly");
 
@@ -322,6 +328,8 @@ public class JavaToolchainSharedLibraryTest {
         assertTrue(allCommands.contains("verify_artifact.py"));
         assertTrue(allCommands.contains("docker logout"));
         assertTrue(allCommands.contains("rm -f"));
+        assertTrue(credentialIds.contains("cicd-platform-sha"));
+        assertTrue(environmentAssignments.contains("GITHUB_REPOSITORY=example/java-service"));
         assertEquals(1, junit.size());
         assertEquals(1, archived.size());
     }
@@ -363,7 +371,6 @@ public class JavaToolchainSharedLibraryTest {
 
         Map<String, Object> options = Map.of(
                 "projectDir", "examples/java17-maven-service",
-                "trustedBranch", "main"
         );
         try {
             script.invokeMethod("call", options);
