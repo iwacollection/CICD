@@ -145,7 +145,7 @@ Runner Image Prewarm
 - `active`：已经批准的不可变镜像身份。新工具链的 PR 不能触发 Active 镜像重建或重新发布，也不能把 Active 的 digest 静默替换为新构建结果。
 - `retired`：不参与构建和消费，历史 digest 保留用于审计和恢复。
 
-这样可以避免一个新 Candidate 的提交触发全仓库 Active 镜像重建，也避免某个旧 Active 镜像的当前漏洞扫描结果阻塞无关的 Candidate 构建。Candidate 的 digest 为空表示尚待首次发布或经审批请求重建；发布后必须通过 PR 把真实 digest 和完整 build context SHA256 写回 Registry。后续矩阵会跳过已有 digest 的 Candidate，但在跳过之前会重新计算 Docker build context 的目录与文件内容摘要；只要 Dockerfile、上下文文件新增/删除/修改，摘要就会不匹配并让校验失败，而不是静默跳过。需要重新构建时，必须通过 PR 显式清空该 Candidate digest，再更新输入并重新走构建、扫描、签名和发布流程。
+这样可以避免一个新 Candidate 的提交触发全仓库 Active 镜像重建，也避免某个旧 Active 镜像的当前漏洞扫描结果阻塞无关的 Candidate 构建。Candidate 的 digest 为空表示尚待首次发布或经审批请求重建；发布后必须通过 PR 把真实 digest 和完整 build context SHA256 写回 Registry。后续矩阵会跳过已有 digest 的 Candidate，但在跳过之前会重新计算 Docker build context 的目录与文件内容摘要；只要 Dockerfile、上下文文件新增/删除/修改，或镜像地址、Dockerfile 路径、平台、smoke command 等目录定义字段变化，摘要/构建定义指纹就会不匹配并让校验失败，而不是静默跳过。需要重新构建时，必须通过 PR 显式清空该 Candidate digest，再更新输入并重新走构建、扫描、签名和发布流程。
 
 Active 镜像的持续漏洞复扫属于独立的 Registry/安全运营任务，应按 Active digest 扫描并触发准入阻断或升级流程；不能通过重新构建 Active 镜像来代替复扫。
 
