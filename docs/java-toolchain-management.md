@@ -902,6 +902,7 @@ Retired 表示停止新消费，不代表可以立即删除镜像。删除需要
 
 | 接口 | 输入 | 返回/副作用 | 必须拒绝的情况 |
 |---|---|---|---|
+| assertTrustedBuildContext | Jenkins Controller 提供的可信 Job/Revision 上下文 | 可信等级和来源身份 | 外部 PR、Fork、非受保护 Pipeline 定义 |
 | resolveToolchain | platform commit SHA、Toolchain ID | image、digest、JDK/Maven 元数据、状态 | ID 不存在、非 Active、未知仓库 |
 | verifyToolchain | image@digest、平台身份 | 验签和 provenance 结果 | 签名主体不可信、来源不匹配、摘要不一致 |
 | assertToolchainPolicy | Toolchain ID、项目身份 | 准入结果 | Retired、紧急 deny、超出项目授权 |
@@ -923,10 +924,11 @@ Retired 表示停止新消费，不代表可以立即删除镜像。删除需要
   "digest": "sha256:REPLACE_WITH_REAL_64_HEX_DIGEST",
   "jdk": {
     "vendor": "APPROVED_VENDOR",
-    "version": "17.0.x+build"
+    "version": "17.0.x+build",
+    "specificationVersion": "17"
   },
   "maven": {
-    "mode": "wrapper",
+    "mode": "image",
     "version": "3.9.x"
   },
   "platforms": ["linux/amd64"],
