@@ -284,6 +284,7 @@ class CiPlatformTests(unittest.TestCase):
         self.assertEqual(java17["execution_mode"], "container")
         self.assertEqual(java17["jdk_version"], "17.0.21+9")
         self.assertEqual(java17["maven_version"], "3.10.0")
+        self.assertEqual(java17["guava_version"], "33.7.2-jre")
         self.assertEqual(java17["digest"], "")
 
         publish_matrix = build_publish_matrix(self.toolchains)
