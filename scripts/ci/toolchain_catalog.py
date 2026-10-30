@@ -161,6 +161,21 @@ def build_context_sha256(repository_root: Path, context: str) -> str:
     return hasher.hexdigest()
 
 
+def candidate_build_definition_sha256(item: dict, build_context_digest: str) -> str:
+    """Fingerprint every catalog field that controls candidate build or verification."""
+    definition = {
+        "toolchain_id": item.get("id"),
+        "image": item.get("image"),
+        "dockerfile": item.get("dockerfile"),
+        "context": item.get("context"),
+        "platforms": item.get("platforms", ["linux/amd64"]),
+        "smoke_command": item.get("smoke_command"),
+        "build_context_sha256": build_context_digest,
+    }
+    canonical = json.dumps(definition, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def validate_published_candidate_context(item: dict, repository_root: Path) -> None:
     expected = item.get("build_context_sha256")
     if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
@@ -195,6 +210,18 @@ def validate_published_candidate_context(item: dict, repository_root: Path) -> N
         raise ValueError(
             f"published Candidate {item.get('id')} build context changed: "
             f"expected {expected}, got {actual}; clear digest in a reviewed PR before rebuilding"
+        )
+
+    expected_definition = item.get("build_definition_sha256")
+    if not isinstance(expected_definition, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_definition):
+        raise ValueError(
+            f"published Candidate {item.get('id')} requires a 64-character build_definition_sha256"
+        )
+    actual_definition = candidate_build_definition_sha256(item, actual)
+    if actual_definition != expected_definition:
+        raise ValueError(
+            f"published Candidate {item.get('id')} build definition changed; "
+            "clear digest in a reviewed PR before rebuilding"
         )
 
 
