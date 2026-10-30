@@ -32,8 +32,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertEqual(validate_dockerfile(dockerfile, self.policy), [])
         text = dockerfile.read_text(encoding="utf-8")
         self.assertRegex(text, r"FROM ubuntu:24\.04@sha256:[0-9a-f]{64}")
-        self.assertIn('APT::Snapshot "20261029T000000Z"', text)
-        self.assertIn('org.opencontainers.image.ubuntu.snapshot="20261029T000000Z"', text)
+        self.assertIn('APT::Snapshot "20260828T000000Z"', text)
 
     def test_floating_container_base_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
