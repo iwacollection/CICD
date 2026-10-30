@@ -1505,7 +1505,7 @@ RTO/RPO 必须根据实际 Harbor 规模、存储架构和业务要求通过演�
 | Java Toolchain Active | `java17-maven` 当前仍为 Candidate，没有业务项目引用 | 代表项目双跑、审批后晋级 | 不能把 Candidate 说成生产 Active |
 | Harbor 企业服务 | 当前仓库未配置企业 Harbor endpoint/Robot | 企业部署时接入 | Harbor HA、Robot、API 扫描适配器尚未接入 |
 | Harbor Scan Gate | 本方案定义适配器契约；当前实际跑通的是 GHCR + Trivy 工作流门禁 | 按所选 Harbor 版本开发和测试 | 不能声称 Harbor 异步扫描适配器已运行 |
-| Jenkins Shared Library | 文档定义目标接口；当前未配置企业 Jenkins Controller / Shared Library | 受保护 Shared Library 解析并消费 Active digest | 真实 Jenkins 接入尚未完成 |
+| Jenkins Shared Library | vars/javaToolchainBuild.groovy 与 Groovy Mock Pipeline 测试已加入当前 PR；尚未在企业 Jenkins Controller 执行 | 受保护 Shared Library 解析并消费 Active digest | 等待本 PR 合并、Jenkins 全局库/Agent/Credentials 配置和真实 Controller 调用 |
 | Java 代表项目 | 当前完成的是独立 smoke Maven 项目，不是企业业务项目 | 至少一个真实项目兼容性双跑 | 真实业务项目兼容性验收未完成 |
 | DR | 文档定义恢复范围和演练要求 | 实施备份、灾备和恢复演练 | 不能声称 RTO/RPO 已达成 |
 
