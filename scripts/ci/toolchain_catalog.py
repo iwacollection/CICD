@@ -258,11 +258,67 @@ def build_publish_matrix(data: dict, repository_root: Path | None = None) -> dic
     return {"include": include}
 
 
+def build_consumer_matrix(data: dict, repository_root: Path | None = None) -> dict:
+    """Build a test-only matrix for fixtures consuming pinned Candidate/Active images."""
+    repository_root = (repository_root or Path.cwd()).resolve()
+    include: list[dict] = []
+    for item in data.get("toolchains", []):
+        if not isinstance(item, dict) or not item.get("consumer_fixture"):
+            continue
+        if item.get("status") not in {"candidate", "active"}:
+            continue
+        if item.get("execution_mode") != "container":
+            raise ValueError(f"consumer fixture {item.get('id')} must use a container toolchain")
+        if not item.get("digest"):
+            raise ValueError(f"consumer fixture {item.get('id')} requires a published immutable digest")
+
+        validate_published_candidate_context(item, repository_root)
+        fixture = Path(str(item["consumer_fixture"]))
+        if fixture.is_absolute() or ".." in fixture.parts:
+            raise ValueError(f"consumer fixture path is unsafe for {item.get('id')}: {fixture}")
+        fixture_root = (repository_root / fixture).resolve()
+        if repository_root not in fixture_root.parents or not fixture_root.is_dir():
+            raise ValueError(f"consumer fixture directory does not exist inside repository: {fixture}")
+        project_config = fixture_root / "ci" / "toolchain.json"
+        pom = fixture_root / "pom.xml"
+        if not project_config.is_file() or not pom.is_file():
+            raise ValueError(
+                f"consumer fixture {fixture} requires ci/toolchain.json and pom.xml"
+            )
+        try:
+            declared = json.loads(project_config.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"cannot read consumer fixture declaration {project_config}: {exc}") from exc
+        if not isinstance(declared, dict) or declared.get("toolchain") != item.get("id"):
+            raise ValueError(
+                f"consumer fixture {fixture} must declare toolchain {item.get('id')}"
+            )
+
+        include.append(
+            {
+                "toolchain": item["id"],
+                "status": item["status"],
+                "image": item["image"],
+                "digest": item["digest"],
+                "immutable_reference": immutable_reference(item),
+                "consumer_fixture": fixture.as_posix(),
+                "jdk_vendor": item.get("jdk_vendor", ""),
+                "jdk_version": item.get("jdk_version", ""),
+                "maven_version": item.get("maven_version", ""),
+                "platform": item.get("platforms", ["linux/amd64"])[0],
+            }
+        )
+    return {"include": include}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", default="ci/toolchains.json")
     parser.add_argument("--matrix", action="store_true")
+    parser.add_argument("--consumer-matrix", action="store_true")
     args = parser.parse_args()
+    if args.matrix and args.consumer_matrix:
+        parser.error("--matrix and --consumer-matrix are mutually exclusive")
 
     try:
         data = load_catalog(Path(args.catalog))
@@ -276,12 +332,16 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
-    if not args.matrix:
+    if not args.matrix and not args.consumer_matrix:
         print(f"OK: {len(data['toolchains'])} toolchain definitions validated")
         return 0
 
     try:
-        matrix = build_publish_matrix(data, Path.cwd())
+        matrix = (
+            build_consumer_matrix(data, Path.cwd())
+            if args.consumer_matrix
+            else build_publish_matrix(data, Path.cwd())
+        )
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -291,8 +351,9 @@ def main() -> int:
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
         with open(output, "a", encoding="utf-8") as handle:
-            handle.write(f"matrix={encoded}\n")
-            handle.write(f"count={len(matrix['include'])}\n")
+            prefix = "consumer_" if args.consumer_matrix else ""
+            handle.write(f"{prefix}matrix={encoded}\n")
+            handle.write(f"{prefix}count={len(matrix['include'])}\n")
     return 0
 
 
