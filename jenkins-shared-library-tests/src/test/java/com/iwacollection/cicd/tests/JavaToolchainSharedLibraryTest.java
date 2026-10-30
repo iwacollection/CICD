@@ -264,11 +264,17 @@ public class JavaToolchainSharedLibraryTest {
 
         Binding binding = new Binding();
         binding.setVariable("env", env);
-        binding.setVariable("error", (groovy.lang.Closure<Object>) args -> {
-            throw new IllegalStateException(String.valueOf(args[0]));
+        binding.setVariable("error", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object message) {
+                throw new IllegalStateException(String.valueOf(message));
+            }
         });
-        binding.setVariable("fileExists", (groovy.lang.Closure<Boolean>) args -> true);
-        binding.setVariable("readFile", (groovy.lang.Closure<String>) args -> PROJECT_CONFIG);
+        binding.setVariable("fileExists", new groovy.lang.Closure<Boolean>(script) {
+            public Boolean doCall(Object path) { return true; }
+        });
+        binding.setVariable("readFile", new groovy.lang.Closure<String>(script) {
+            public String doCall(Object path) { return PROJECT_CONFIG; }
+        });
         binding.setVariable("sh", new groovy.lang.Closure<Object>(script) {
             public Object doCall(Object rawOptions) {
                 commands.add(String.valueOf(((Map<?, ?>) rawOptions).get("script")));
