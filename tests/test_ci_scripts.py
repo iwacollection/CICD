@@ -18,6 +18,7 @@ from discover_matrix import build_matrix  # noqa: E402
 from impact_analysis import analyze_impact  # noqa: E402
 from toolchain_catalog import (  # noqa: E402
     build_context_sha256,
+    candidate_build_definition_sha256,
     build_publish_matrix,
     immutable_reference,
     load_toolchain_catalog,
@@ -301,6 +302,16 @@ class CiPlatformTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "build context changed.*clear digest"):
             build_publish_matrix(published)
 
+    def test_published_candidate_build_definition_mismatch_fails_closed(self) -> None:
+        published = deepcopy(self.toolchains)
+        java17 = next(
+            item for item in published["toolchains"]
+            if item["id"] == "java17-maven"
+        )
+        java17["smoke_command"] = "bash /usr/local/bin/skip-smoke"
+        with self.assertRaisesRegex(ValueError, "build definition changed.*clear digest"):
+            build_publish_matrix(published)
+
     def test_build_context_hash_covers_paths_and_file_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -330,6 +341,10 @@ class CiPlatformTests(unittest.TestCase):
         self.assertEqual(
             java17["build_context_sha256"],
             "156feed5a12816cd87b77009bf0519f84d85e4d2959f2d3fc3f9ab10fa13fd37",
+        )
+        self.assertEqual(
+            java17["build_definition_sha256"],
+            "d3b6001d106ea4bd7f51678dd9958c066d873089939029f9ca1cc33979e5300d",
         )
         self.assertEqual(
             java17["image"],
