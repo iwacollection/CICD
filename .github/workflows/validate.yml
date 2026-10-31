@@ -59,6 +59,9 @@ jobs:
       - name: Validate progressive release policy
         run: python3 scripts/ci/release_strategy.py validate
 
+      - name: Validate Argo Rollouts integration contract
+        run: python3 scripts/ci/argo_rollouts_contract.py --validate
+
       - name: Validate repository governance policy
         run: >-
           python3 scripts/ci/repository_governance.py
