@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CICD Argo Rollouts Integration Contract",
+  "description": "安全默认值：只读观察；未显式配置时不允许任何集群写操作。",
+  "version": 1,
+  "defaults": {
+    "mode": "observe-only",
+    "traffic_owner": "none",
+    "allow_promote": false,
+    "allow_abort": false,
+    "allow_production": false,
+    "fail_closed_on_inconclusive": true,
+    "require_immutable_image_digest": true,
+    "require_human_approval_for_production": true
+  },
+  "traffic_owners": [
+    "none",
+    "cicd-renderer",
+    "argo-rollouts"
+  ],
+  "modes": [
+    "observe-only",
+    "local-lab",
+    "non-production",
+    "production"
+  ],
+  "ownership_rules": {
+    "single_writer_per_route": true,
+    "cicd_renderer_and_argo_rollouts_must_not_both_write_weights": true,
+    "rollouts_status_is_controller_owned": true,
+    "gitops_declares_rollout_spec": true,
+    "observer_is_read_only": true
+  },
+  "analysis_policy": {
+    "successful_requires_all_queries_valid": true,
+    "inconclusive_on_missing_samples": true,
+    "inconclusive_on_empty_or_nan_values": true,
+    "inconclusive_on_prometheus_unavailable": true,
+    "inconclusive_on_query_error": true,
+    "timeout_is_not_success": true
+  },
+  "promotion_policy": {
+    "require_artifact_contract_v2": true,
+    "require_verified_bundle_sha256": true,
+    "require_image_digest_match": true,
+    "require_pinned_cluster_set": true,
+    "require_previous_wave_success": true
+  },
+  "credential_policy": {
+    "ci_build_has_cluster_write": false,
+    "gitops_writer_has_cluster_admin": false,
+    "observer_has_write_access": false,
+    "prefer_oidc_and_short_lived_credentials": true,
+    "forbid_plaintext_kubeconfig_in_repository": true
+  },
+  "environments": [],
+  "notes": [
+    "该文件是接入契约和安全默认值，不是 Kubernetes 部署清单。",
+    "environments 为空表示没有任何集群或应用被授权接入。",
+    "启用生产模式前必须补充环境配置、Schema 校验、审批、权限与真实集群验收。",
+    "不得将 synthetic scenario evidence 作为生产 Analysis 证据。"
+  ]
+}
