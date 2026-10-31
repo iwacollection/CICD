@@ -14,9 +14,9 @@
     "require_human_approval_for_production": true
   },
   "traffic_owners": [
-    "none",
+    "argo-rollouts",
     "cicd-renderer",
-    "argo-rollouts"
+    "none"
   ],
   "modes": [
     "observe-only",
