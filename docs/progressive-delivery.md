@@ -723,7 +723,7 @@ python3 -c 'import json,pathlib; print(json.dumps(json.loads(pathlib.Path("relea
 synthetic analysis is not production evidence
 ```
 
-它用来渲染最终期望状态，供人对照第 7 节或第 9 节的最后一行。不要把 artifact 交给生产控制器。生产切流只消费 `advance` 或 `abort` 之后、证据标记为 `operator` 的渲染结果。
+它用来渲染最终期望状态，供人对照第 7 节或第 9 节的最后一行。不要把 artifact 交给生产控制器。当前仓库没有生产流量控制器，因此不存在可直接用于生产切流的渲染结果。未来控制器只能在独立验证证据来源、状态完整性、目标集群和审批后，消费经过认证的期望状态；`operator` 标签本身不构成准入条件。
 
 ## 14. 外部控制器合同
 
