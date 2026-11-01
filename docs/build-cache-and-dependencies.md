@@ -213,7 +213,26 @@ Upload
 
 对应实现可在 `.github/workflows/dag-node.yml` 的 `Verify and stage declared upstream artifacts`、`Compute declared cache fingerprint`、`Restore build cache` 和 `Package immutable Artifact Contract v2` 步骤中逐项对照。
 
-### 10.2 缓存命中不等于构建可信
+### 10.2 锁文件与缓存键不是同一个配置
+
+`ci/projects.json` 中有两个容易混淆的字段：
+
+- `dependency_lock_files`：告诉打包器哪些锁文件需要写入 Artifact Contract v2 的 `Manifest.dependencies.locks`，用于记录依赖基线；
+- `cache_key_files`：告诉 `cache_fingerprint.py` 哪些文件内容变化时必须改变缓存 fingerprint。
+
+工作流 `.github/workflows/dag-node.yml` 的 `Compute declared cache fingerprint` 步骤实际读取的是 `cache_key_files_json`，并不会自动把 `dependency_lock_files` 合并进去。因此，**如果锁文件变化必须触发缓存失效，就必须把该锁文件也显式列入同一 target 的 `cache_key_files`**。只列入 `dependency_lock_files` 只能保证 Manifest 记录它，不能保证 cache key 随它变化。
+
+当前示例配置的实际情况：
+
+| 项目/目标 | dependency_lock_files | cache_key_files | 当前含义 |
+|---|---|---|---|
+| `hello-lib` | 空数组 | `CMakeLists.txt`、头文件、源文件 | 以源代码/构建配置变化作为缓存输入；该示例没有依赖锁文件 |
+| `hello-cpp` | 空数组 | `CMakeLists.txt`、`src/main.cpp` | 以源代码/构建配置变化作为缓存输入；该示例没有依赖锁文件 |
+| RK/Qualcomm/MediaTek 模板 | `deps.lock`、`toolchain.lock` | 同样的两个 lock 文件 | 锁文件变化会改变 fingerprint；这些硬件 target 当前是 disabled 模板 |
+
+新增真实项目时，建议把依赖锁文件、工具链描述文件和影响编译结果的构建配置都列入 `cache_key_files`。如果使用 glob pattern，fingerprint 工具会逐条检查 pattern；任意一条 pattern 没有匹配文件就失败，避免悄悄生成不完整的 key。
+
+### 10.3 缓存命中不等于构建可信
 
 当前 GitHub Actions 缓存配置使用精确 key，并提供同一项目/目标/工具链/上游 fingerprint 前缀的 restore key。restore key 可能恢复一个较旧的缓存，因此必须满足两个条件：
 
@@ -222,7 +241,7 @@ Upload
 
 不要把“cache hit”写进制品 Manifest 当成可信证明，也不要因为缓存命中就跳过测试。
 
-### 10.3 常见故障：证据、止血、恢复
+### 10.4 常见故障：证据、止血、恢复
 
 | 故障 | 证据 | 止血 | 恢复与验证 |
 |---|---|---|---|
@@ -233,7 +252,7 @@ Upload
 | 磁盘空间耗尽 | Runner 磁盘使用、inode、缓存目录大小 | 停止新任务进入故障 Runner；只清理可重建缓存 | 释放空间后检查文件系统，再跑一个冷构建 |
 | 依赖代理不可用 | 代理仓库健康、上游源连接、HTTP 状态、DNS/TLS | 暂停依赖版本变更和生产晋级 | 恢复代理后按锁文件拉取，核对包摘要；不要随意切换公共源 |
 
-### 10.4 安全清理顺序
+### 10.5 安全清理顺序
 
 发生磁盘压力时，不要直接执行 `rm -rf /mnt/ci-cache/*`，因为这可能删除正在使用的缓存或误删工具链/制品。
 
@@ -247,7 +266,7 @@ Upload
 
 GitHub-hosted Runner 的缓存由 Actions 管理，不要假设可以登录宿主机手工清理；应通过仓库缓存管理策略或调整 key/缓存配置处理。
 
-### 10.5 验收：证明缓存只是加速
+### 10.6 验收：证明缓存只是加速
 
 至少做以下对照：
 
