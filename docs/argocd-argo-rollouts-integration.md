@@ -4,6 +4,8 @@
 >
 > 本文定义如何把现有 CICD 发布控制面接入 Argo CD 与 Argo Rollouts。它不代表仓库已经连接真实 Kubernetes 集群，也不代表任何生产流量已经由 Rollouts 接管。
 
+> 完整端到端架构请先阅读：[CI/CD 完整闭环架构](cicd-closed-loop-architecture.md)。本文聚焦 Argo CD / Rollouts 的接入契约、职责边界和安全实施顺序；完整架构文档负责串联 CI 制品治理、GitOps、Prometheus Analysis、自动决策和双回滚。
+
 ## 1. 目标与非目标
 
 目标是复用现有 `scripts/ci/release_strategy.py` 的制品身份、环境晋级、区域顺序和发布状态规则，再由 Argo CD 同步声明式资源、由 Argo Rollouts 执行单个 Kubernetes 集群内的渐进式发布，并把真实 Rollout / AnalysisRun 状态反馈给发布控制面。
