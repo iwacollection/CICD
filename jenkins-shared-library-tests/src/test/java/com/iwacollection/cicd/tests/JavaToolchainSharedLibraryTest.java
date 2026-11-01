@@ -362,6 +362,52 @@ public class JavaToolchainSharedLibraryTest {
     }
 
     @Test
+    public void sharedLibraryRejectsMissingBranchIdentityBeforeAnyCredentialOrDockerCall() throws Exception {
+        GroovyClassLoader loader = newLoader();
+        Path vars = Paths.get("../vars/javaToolchainBuild.groovy").toAbsolutePath().normalize();
+        Class<?> scriptClass = loader.parseClass(vars.toFile());
+        Script script = (Script) scriptClass.getDeclaredConstructor().newInstance();
+
+        Map<String, Object> env = new HashMap<>();
+        env.put("GIT_COMMIT", "b".repeat(40));
+        env.put("GIT_URL", "https://github.com/example/java-service.git");
+        List<String> credentialCalls = new ArrayList<>();
+        List<String> commands = new ArrayList<>();
+
+        Binding binding = new Binding();
+        binding.setVariable("env", env);
+        binding.setVariable("error", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object message) {
+                throw new IllegalStateException(String.valueOf(message));
+            }
+        });
+        binding.setVariable("withCredentials", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object rawCredentials, Object body) {
+                credentialCalls.add(String.valueOf(rawCredentials));
+                ((groovy.lang.Closure<?>) body).call();
+                return null;
+            }
+        });
+        binding.setVariable("sh", new groovy.lang.Closure<Object>(script) {
+            public Object doCall(Object rawOptions) {
+                commands.add(String.valueOf(rawOptions));
+                return 0;
+            }
+        });
+        script.setBinding(binding);
+
+        try {
+            script.invokeMethod("call", Map.of("projectDir", "examples/java17-maven-service"));
+            fail("Missing branch identity must be rejected");
+        } catch (IllegalStateException ex) {
+            assertTrue(ex.getMessage().contains("<unset>"));
+            assertTrue(ex.getMessage().contains("trusted branch 'main'"));
+        }
+        assertTrue("No credential may be accessed before branch identity is trusted", credentialCalls.isEmpty());
+        assertTrue("No shell command may run for an unidentified branch", commands.isEmpty());
+    }
+
+    @Test
     public void sharedLibraryRejectsPullRequestBuildBeforeAnyRegistryOrDockerCall() throws Exception {
         GroovyClassLoader loader = newLoader();
         Path vars = Paths.get("../vars/javaToolchainBuild.groovy").toAbsolutePath().normalize();
