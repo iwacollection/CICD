@@ -367,7 +367,7 @@ Rollback 不走 `dev -> staging -> production` 前向策略。
 它的边界是：
 
 ```text
-只能恢复目标环境自己的历史 successful promotion pointer
+设计上应只恢复目标环境曾经成功晋级的历史 pointer；但当前实现尚未在 rollback 路径验证该 Deployment 是否存在 success status
 ```
 
 流程：
@@ -376,6 +376,7 @@ Rollback 不走 `dev -> staging -> production` 前向策略。
 找到历史 Deployment
   |
   +-- 必须属于同一个 environment
+  +-- 当前代码只检查 Deployment payload 格式，没有检查 statuses 中是否曾有 success（待修复）
   |
   v
 读取历史 artifact_name + digest + release_tag
@@ -415,6 +416,16 @@ A -> B -> A
 ```
 
 旧记录不会被修改。
+
+### 11.1 当前实现的两个回滚/晋级边界缺口
+
+对照 `rollback.yml` 和 `scripts/ci/deployment_pointer.py`：
+
+- `rollback.yml` 调用 `deployment_pointer.py inspect` 读取 Deployment payload；`inspect_pointer()` 当前只验证 payload 字段，不读取该 Deployment 的 status 历史。因此 workflow 还没有证明被选择的历史记录曾经有过 `success` status。它会继续验证原始 Build Run、归档 bytes、Manifest、供应链报告、Attestation 和 Cosign，但这些校验不能替代“这条环境记录曾经成功晋级”的状态校验。
+- 正确修复应是检查该 Deployment 的完整 status 历史中至少存在一条 `success`。注意旧 pointer 后续可能被 GitHub 标记为 `inactive`，这不应抹掉它曾经成功晋级的历史；不能简单要求“最新状态必须等于 success”。
+- `deployment_pointer.py current` 和 `promotion_policy.py find_successful_prerequisite` 当前都只请求 Deployments 的第一页（`per_page=100`），没有跟随 GitHub API 的分页链接。部署历史超过 100 条后，当前指针或较早的前置晋级记录可能被漏掉。生产规模使用前应补全分页，并为超过 100 条历史的场景增加测试。
+
+在这些代码缺口修复并通过测试前，文档不能把 rollback 描述为已严格保证“只恢复曾经成功晋级的历史版本”，也不能假设晋级历史可以无限增长而无需分页。
 
 ## 12. 为什么 Rollback 不要求重新经过 staging
 
