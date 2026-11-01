@@ -190,7 +190,7 @@ Artifact Contract 的目的不是“多生成一个 JSON”，而是让接手制
 python3 scripts/ci/package_artifact.py \
   --project hello-cpp \
   --working-directory examples/cpp-app \
-  --artifacts-json '["build/hello-cpp"]' \
+  --artifacts-json '["build/hello-ci"]' \
   --dependency-locks-json '[]' \
   --soc generic \
   --target-os linux \
