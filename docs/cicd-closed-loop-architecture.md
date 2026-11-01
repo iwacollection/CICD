@@ -575,7 +575,7 @@ Rollouts step 决策
 ~~~promql
 sum(rate(http_requests_total{service="checkout",status=~"5.."}[5m]))
 /
-clamp_min(sum(rate(http_requests_total{service="checkout"}[5m])), 1)
+sum(rate(http_requests_total{service="checkout"}[5m]))
 ~~~
 
 P95 延迟：
@@ -604,7 +604,7 @@ sum(increase(http_requests_total{
 2. Histogram 必须有正确 bucket 才能计算 quantile。
 3. P95/P99 应按集群、服务和版本隔离，避免稳定版本流量稀释候选版本坏指标。
 4. 错误率分子和分母必须使用相同时间窗口、服务范围和版本过滤。
-5. clamp_min 只能防止除零，不能把零请求解释成健康；必须额外检查请求量。
+5. 错误率必须用实际错误请求速率除以实际总请求速率，不能用固定的 1 次/秒替换真实分母；零请求或无样本必须单独判为证据不足，不能算成 0% 错误率。
 6. 低流量下 P95 是不稳定估计，必须有样本门槛。
 
 ### 7.4 AnalysisTemplate 结构示例
@@ -652,10 +652,10 @@ spec:
               status=~"5.."
             }[5m]))
             /
-            clamp_min(sum(rate(http_requests_total{
+            sum(rate(http_requests_total{
               service="{{args.service}}",
               version="{{args.candidate-version}}"
-            }[5m])), 1)
+            }[5m]))
     - name: candidate-p95
       interval: 1m
       count: 5
@@ -675,6 +675,10 @@ spec:
               )
             )
 ~~~
+
+错误率查询不能用 `clamp_min(总请求速率, 1)` 作为分母。低流量时总请求速率可能小于每秒 1 次，这种写法会把真实错误率压低。例如 5 分钟内 50 个请求、3 个错误，真实错误率是 6%；若把约 0.17 次/秒的分母强行替换为 1，结果会错误地接近 1%。
+
+因此必须把“请求量是否足够”作为独立门槛：先确认候选版本在观察窗口内有足够请求，再判断错误率。若分母为零、查询无结果或返回 NaN，Analysis 必须按证据不足/执行异常处理，不得当作成功。
 
 生产前必须验证：
 
