@@ -168,6 +168,25 @@ examples/              可跑通的最小示例
  docs/                  架构、缓存、制品、安全、排障文档
 ```
 
+### 8.1 技术专题的职责边界
+
+为避免同一个流程在多份文档里出现不同版本，后续维护按下面的“主文档”分工：
+
+| 文档 | 唯一主要职责 | 不应重复维护的内容 |
+|---|---|---|
+| 本文 `architecture.md` | 平台总体分层、配置/执行面、构建唯一性和故障域 | 不展开每个组件的操作手册 |
+| `cicd-closed-loop-architecture.md` | 从制品到 GitOps、Argo CD、Rollouts、指标和回滚的目标架构及接入边界 | 不把目标架构描述成当前已部署能力 |
+| `artifacts-promotion-and-rollback.md` | Artifact Contract、归档、Promotion pointer 和制品回滚 | 不描述真实 Kubernetes 流量切换 |
+| `progressive-delivery.md` | release strategy 状态机、权重/槽位、输入输出和操作限制 | 不重复定义 Promotion 身份和制品归档 |
+| `containerized-build-environments.md` | 容器运行边界、镜像构建/消费和缓存关系 | 不维护 Java 专属工具链参数 |
+| `java-toolchain-management.md` | JDK 镜像生命周期、Java 项目接入、Maven/Gradle 规范 | Jenkins Shared Library 的具体调用以专门文档为准 |
+| `jenkins-shared-library.md` | Jenkins Controller/Agent 配置、凭据、Jenkinsfile 调用和验收 | 不复制整套 Java 工具链生命周期 |
+| `multi-soc-and-firmware.md` | RK/Qualcomm/MediaTek 的总体治理模型和激活顺序 | 硬件执行命令、租约和 preflight 以硬件集成文档为准 |
+| `hardware-runner-integration.md` | Hardware Profile、SDK identity、License/HIL lease 和执行适配器 | 不重复解释全部 SoC 业务架构 |
+| `repository-governance.md` | GitHub Ruleset 期望状态和只读漂移审计 | 不代表 Jenkins、Runner、云 RBAC 或灾备已纳入审计 |
+
+如果专题需要增加新细节，优先更新其主文档，再从其他文档链接过去；不要在多处复制同一套命令、阈值和状态表。
+
 ## 10. 制品晋级与发布控制：必须区分“授权”和“上线”
 
 当前仓库有两条不同的控制链：
