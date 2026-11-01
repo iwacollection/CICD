@@ -795,7 +795,7 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertIn("deployment_pointer.py current", workflow)
         self.assertIn("check-pointer", workflow)
         self.assertIn("synthetic analysis is not production evidence", workflow)
-        self.assertNotIn("deployments: write", workflow)
+        self.assertIn("deployments: write", workflow)
         self.assertNotIn("run_build.py", workflow)
         self.assertLess(
             workflow.index("check-pointer"),
