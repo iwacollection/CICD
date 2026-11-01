@@ -262,3 +262,59 @@ release-state.json 的 status
 长期治理
  -> 基线、容量、缓存、权限、监控、自动化门禁
 ```
+
+
+---
+
+## 17. 常用诊断命令与恢复证据
+
+以下命令从仓库根目录执行。它们用于定位配置、依赖和制品问题；不会替代 GitHub Actions 中真实 Runner 的执行记录。
+
+### 17.1 配置或工具链目录异常
+
+```bash
+python3 scripts/ci/validate_config.py
+python3 scripts/ci/toolchain_catalog.py
+python3 scripts/ci/supply_chain_policy.py
+```
+
+任一失败时，先处理输出中的具体 catalog/policy 错误。不要手工绕过校验直接触发硬件或发布 Job。
+
+### 17.2 DAG 规划异常
+
+```bash
+python3 scripts/ci/dependency_plan.py
+python3 scripts/ci/dag_plan.py --projects-json '["hello-cpp"]' --lane fast
+```
+
+第一条检查依赖关系；第二条输出目标项目对应的执行层级。若出现循环依赖、目标不匹配或层数超限，应修正项目声明，而不是手工改 workflow 的 needs 顺序。
+
+### 17.3 制品校验失败
+
+对从同一个可信 Workflow Run 下载的完整制品目录执行：
+
+```bash
+python3 scripts/ci/verify_artifact.py --directory ./dist
+```
+
+如果校验失败：
+
+- 不要 Promotion；
+- 保留原始 bundle、Manifest、checksum 和失败日志；
+- 从可信运行记录重新下载；
+- 同时提供独立可信的 source SHA、repository 和 digest，再做身份校验；
+- 如果可信来源记录也无法确认，重新构建比猜测哪个文件正确更安全。
+
+### 17.4 事故关闭条件
+
+故障处理不能以“Job 变绿”作为唯一关闭标准。至少记录：
+
+1. 影响范围和起止时间；
+2. 首个失败阶段及原始错误证据；
+3. 根因属于代码、工具链、Runner、依赖服务、制品存储还是发布控制；
+4. 止血动作及其权限/数据风险；
+5. 恢复后重新执行的测试和校验；
+6. 最终制品 digest 是否与预期一致；
+7. 是否需要补充监控、容量、权限或自动化门禁。
+
+对于 digest 不匹配、签名来源异常、疑似 Runner 凭据泄露等安全事件，应先隔离制品/Runner 和阻断发布，再进行调查；不能为了恢复速度删除审计记录。
