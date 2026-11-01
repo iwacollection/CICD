@@ -19,8 +19,8 @@ def call(Map options = [:]) {
     if (env.CHANGE_ID?.toString()?.trim()) {
         error('javaToolchainBuild is a trusted-branch step; Pull Requests must use the hosted untrusted validation lane')
     }
-    if (branch && branch != 'main') {
-        error("javaToolchainBuild only permits trusted branch 'main', got '${branch}'")
+    if (branch != 'main') {
+        error("javaToolchainBuild only permits trusted branch 'main', got '${branch ?: '<unset>'}'")
     }
 
     // The platform ref is controller-managed and must match the Global
