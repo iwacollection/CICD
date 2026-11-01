@@ -258,17 +258,37 @@ my-app:latest
 
 ### 11.3 C/C++ 示例：从源码到可校验制品
 
-以仓库中的 `examples/cpp-app` 为例：
+以仓库中的 `examples/cpp-lib` 和 `examples/cpp-app` 为例。**先构建上游库，再把上游制品按 DAG 交接目录结构暂存，最后构建下游应用。** 不能直接构建 `cpp-app`，因为它会拒绝从本机系统路径或源码目录猜测上游库。
+
+下面是一组可在仓库根目录执行的 Bash 命令：
 
 ```bash
-cmake -S examples/cpp-app -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel 4
-ctest --test-dir build --output-on-failure
+set -euo pipefail
+
+# 1. 构建上游 hello-lib
+cmake -S examples/cpp-lib -B build/hello-lib -DCMAKE_BUILD_TYPE=Release
+cmake --build build/hello-lib --parallel 2
+
+# 2. 模拟 DAG 上游制品交接
+#    目录名必须是 hello-lib，内部必须包含 build/libhello-lib.a 和 include/hello_lib.h
+export CI_UPSTREAM_ROOT="$PWD/.ci-local-upstream"
+mkdir -p "$CI_UPSTREAM_ROOT/hello-lib/build" "$CI_UPSTREAM_ROOT/hello-lib/include"
+install -m 0644 build/hello-lib/libhello-lib.a "$CI_UPSTREAM_ROOT/hello-lib/build/libhello-lib.a"
+install -m 0644 examples/cpp-lib/include/hello_lib.h "$CI_UPSTREAM_ROOT/hello-lib/include/hello_lib.h"
+
+# 3. 构建下游 hello-cpp
+cmake -S examples/cpp-app -B build/hello-cpp -DCMAKE_BUILD_TYPE=Release
+cmake --build build/hello-cpp --parallel 2
+
+# 4. 执行 ci/projects.json 中声明的真实测试命令
+./build/hello-cpp/hello-ci | grep -F enterprise-ci-platform-ok
 ```
 
-真实接入时还要确认应用使用的是 DAG 交接的上游库，而不是本机残留文件。当前示例通过 `CI_UPSTREAM_ROOT` 查找 `hello-lib` 的头文件和静态库；缺少上游文件时 CMake 应直接失败。
+**不要使用 `ctest` 验证这个示例。** 当前 `examples/cpp-app/CMakeLists.txt` 没有注册 CTest 测试（没有启用 CTest，也没有调用 `add_test()`）。平台配置 `ci/projects.json` 中 `hello-cpp` 的真实测试命令是运行 `hello-ci` 并检查输出字符串；所以上面的最后一条命令才与 CI 一致。由于启用了 `set -o pipefail`，应用执行失败也会使整条测试命令失败，不会被后面的 `grep` 掩盖。
 
-输出目录应与项目配置中的 artifact paths 一致。不要把整个工作目录、缓存目录或临时文件夹打进发布包。
+在 GitHub Actions DAG 中，`resolve_upstream_artifacts.py` 会先验证上游 Manifest、bundle digest 和文件清单，再把上游文件解压到下游项目的 `.ci-upstream/hello-lib/`；该目录通过 `CI_UPSTREAM_ROOT` 传给 CMake。上面的本地暂存步骤只是模拟同一目录契约，不是绕过上游制品校验的生产流程。
+
+输出目录应与 `ci/projects.json` 中的 artifact paths 一致：`hello-lib` 输出静态库和头文件，`hello-cpp` 输出 `build/hello-ci`。不要把整个工作目录、缓存目录或临时文件夹打进发布包。
 
 ### 11.4 失败时先判断哪一层出错
 
