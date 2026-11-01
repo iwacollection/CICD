@@ -1505,7 +1505,7 @@ RTO/RPO 必须根据实际 Harbor 规模、存储架构和业务要求通过演�
 | Java Toolchain Active | `java17-maven` 当前仍为 Candidate，没有业务项目引用 | 代表项目双跑、审批后晋级 | 不能把 Candidate 说成生产 Active |
 | Harbor 企业服务 | 当前仓库未配置企业 Harbor endpoint/Robot | 企业部署时接入 | Harbor HA、Robot、API 扫描适配器尚未接入 |
 | Harbor Scan Gate | 本方案定义适配器契约；当前实际跑通的是 GHCR + Trivy 工作流门禁 | 按所选 Harbor 版本开发和测试 | 不能声称 Harbor 异步扫描适配器已运行 |
-| Jenkins Shared Library | 文档定义目标接口；当前未配置企业 Jenkins Controller / Shared Library | 受保护 Shared Library 解析并消费 Active digest | 真实 Jenkins 接入尚未完成 |
+| Jenkins Shared Library | vars/javaToolchainBuild.groovy 已实现；GitHub Actions 在 Java 17 容器中编译并执行 Mock Pipeline，8/8 测试通过（run #159） | 受保护 Shared Library 解析并消费 Active digest | PR #48 尚未合并；企业 Jenkins Controller/Agent/Global Library/Credentials 尚未接入，真实 Controller 调用未验收 |
 | Java 代表项目 | 当前完成的是独立 smoke Maven 项目，不是企业业务项目 | 至少一个真实项目兼容性双跑 | 真实业务项目兼容性验收未完成 |
 | DR | 文档定义恢复范围和演练要求 | 实施备份、灾备和恢复演练 | 不能声称 RTO/RPO 已达成 |
 
@@ -1546,3 +1546,35 @@ RTO/RPO 必须根据实际 Harbor 规模、存储架构和业务要求通过演�
 - 以文档、静态检查或 PR 合并代替真实环境验收。
 
 生产完成的定义不是“文档写完”，而是：**同一个 Toolchain ID 能从中央 Registry 解析到 Active digest；该 digest 可验签、可扫描、可从灾备恢复；项目可在隔离 Agent 上消费；最终业务制品有完整来源和摘要；版本可升级、可退役、可回滚；每个环节都有可审计证据。**
+
+
+## 25. Jenkins Shared Library 的实际实现状态
+
+仓库内的 Shared Library 入口现位于：
+
+- vars/javaToolchainBuild.groovy：受信分支构建入口；
+- src/com/iwacollection/cicd/JavaToolchainSpec.groovy：项目声明、相对路径、Active digest 验证；
+- examples/java17-maven-service/Jenkinsfile：示例消费者；
+- jenkins-shared-library-tests：Groovy 源码编译和 Mock Pipeline 测试。
+
+执行逻辑固定为：
+
+1. 检查 CHANGE_ID、分支、source commit 和 source repository；
+2. 读取项目 ci/toolchain.json，只获得 Toolchain ID 和构建命令；
+3. 检出精确 platformRef 的 CICD 仓库并核对 checkout SHA；
+4. 调用 scripts/ci/resolve_toolchain.py，从中央 Registry 解析 image@sha256，要求 status=active；
+5. 使用 Cosign 验签、docker pull 和 RepoDigests 精确比对；
+6. 通过 run_build.py 在容器内运行 build/test/verify；
+7. 采集实际 JDK/Maven 元数据，生成并校验 Artifact Contract v2；
+8. 发布 JUnit 测试报告和归档制品；
+9. 清理 Maven settings 临时文件并退出 Registry 登录。
+
+项目只声明 Toolchain ID，不允许把镜像地址或 digest 作为业务仓库覆盖项。Maven 私服凭据通过 Jenkins Secret File 临时注入，不能写入项目仓库。
+
+### 25.1 当前尚未完成的企业验收
+
+当前 Java 17 仍是 Candidate，因此正式 Shared Library 会拒绝消费。这是正确的安全门禁。当前没有已连接的企业 Jenkins Controller、Agent、全局 Shared Library 配置或企业 Credentials，也没有发现可接入的真实 Java 业务仓库。
+
+本仓库的 Jenkins Shared Library 测试使用 Mock Pipeline DSL 验证调用顺序和失败关闭行为；在 2026-10-30 的 GitHub Actions Toolchain Supply Chain run #159 中，Java 17 Maven 示例 2/2 测试通过，Shared Library Mock Pipeline 8/8 测试通过，Artifact Contract v2 校验通过。Mock 通过不代表真实 Jenkins 集成通过；当前仍未连接企业 Jenkins Controller/Agent，也未接入真实业务 Java 仓库。
+
+详见：[Jenkins Java Toolchain Shared Library 实施与接入](jenkins-shared-library.md)。

@@ -98,6 +98,7 @@ def _container_env_args(workdir: Path) -> list[str]:
         "CCACHE_DISABLE",
         "EXPECTED_JAVA_VERSION",
         "EXPECTED_MAVEN_VERSION",
+        "MAVEN_ARGS",
     ):
         value = os.environ.get(key, "")
         if value:

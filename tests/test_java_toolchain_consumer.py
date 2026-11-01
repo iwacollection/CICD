@@ -51,6 +51,17 @@ class ResolveToolchainTests(unittest.TestCase):
         self.assertEqual(resolved["image"], f"{self.image}@{self.digest}")
         self.assertEqual(resolved["identity"], self.digest)
 
+    def test_project_may_resolve_image_from_toolchain_id_only(self) -> None:
+        resolved = resolve_toolchain(
+            self.catalog,
+            "java17-maven",
+            expected_mode="container",
+        )
+        self.assertEqual(
+            resolved["image"],
+            f"{self.image}@{self.digest}",
+        )
+
     def test_candidate_is_never_consumable_by_general_build(self) -> None:
         candidate = json.loads(json.dumps(self.catalog))
         candidate["toolchains"][0]["status"] = "candidate"
@@ -111,6 +122,14 @@ class ContainerHomeTests(unittest.TestCase):
                 "MAVEN_OPTS=-Dmaven.repo.local=/workspace/.cache/maven/repository",
                 command,
             )
+            with patch.dict("os.environ", {"MAVEN_ARGS": "-s /workspace/.ci-maven-settings.xml"}):
+                with patch("run_build.shutil.which", return_value="/usr/bin/docker"):
+                    command_with_settings = container_command(
+                        workdir,
+                        "mvn --batch-mode clean verify",
+                        "ghcr.io/iwacollection/cicd-toolchain-java17-maven@sha256:" + "a" * 64,
+                    )
+            self.assertIn("MAVEN_ARGS=-s /workspace/.ci-maven-settings.xml", command_with_settings)
 
 
 class CandidateConsumerMatrixTests(unittest.TestCase):
