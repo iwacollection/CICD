@@ -736,7 +736,9 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         validate = (ROOT / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
         jenkins = (ROOT / "ops" / "Jenkinsfile").read_text(encoding="utf-8")
-        for text in (readme, guide):
+        # Operator-level release details belong in the dedicated runbook,
+        # not in the repository homepage.
+        for text in (guide,):
             self.assertIn("HTTPRoute", text)
             self.assertIn("VirtualService", text)
             self.assertIn("PlacementDecision", text)
@@ -784,7 +786,6 @@ class ProgressiveDeliveryTests(unittest.TestCase):
             self.assertIn(f"- {name}", strategy_options)
         self.assertNotIn("canary-clusters", guide)
         self.assertNotIn("production-gateway", guide)
-        self.assertIn("docs/progressive-delivery.md", readme)
         self.assertIn("progressive-delivery.md", index)
         self.assertIn("release_strategy.py validate", validate)
         self.assertIn("deployment_pointer.py current", workflow)
@@ -816,7 +817,6 @@ class ProgressiveDeliveryTests(unittest.TestCase):
             "candidate digest must match the environment pointer",
         )
         for phrase in shared:
-            self.assertIn(phrase, readme, phrase)
             self.assertIn(phrase, guide, phrase)
         for phrase in (
             "COMMAND",
@@ -828,8 +828,9 @@ class ProgressiveDeliveryTests(unittest.TestCase):
             "confirm",
         ):
             self.assertIn(phrase, guide, phrase)
-        self.assertIn("action=abort", readme)
-        self.assertIn("不执行 `kubectl apply`", readme)
+        # The homepage links to the learning navigation; operational
+        # commands and release boundaries stay in the dedicated runbook.
+        self.assertIn("docs/README.md", readme)
         self.assertLess(guide.index("怎么选方法"), guide.index("分析证据"))
         self.assertLess(guide.index("GitHub Actions"), guide.index("Jenkins 是可选调用方"))
 
