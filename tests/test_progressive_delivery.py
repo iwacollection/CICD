@@ -764,7 +764,11 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertIn("VirtualService", workflow)
         self.assertIn("check-pointer", workflow)
         self.assertIn("inputs.analysis", workflow)
-        self.assertIn("inputs.state", workflow)
+        self.assertNotIn("inputs.state", workflow)
+        self.assertIn("release_state_store.py", workflow)
+        self.assertIn("              load \\\n", workflow)
+        self.assertIn("            publish \\\n", workflow)
+        self.assertIn("deployments: write", workflow)
         self.assertIn("smoke", workflow)
         self.assertIn("readiness", workflow)
         self.assertIn("error_rate", workflow)
@@ -791,7 +795,7 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertIn("deployment_pointer.py current", workflow)
         self.assertIn("check-pointer", workflow)
         self.assertIn("synthetic analysis is not production evidence", workflow)
-        self.assertNotIn("deployments: write", workflow)
+        self.assertIn("deployments: write", workflow)
         self.assertNotIn("run_build.py", workflow)
         self.assertLess(
             workflow.index("check-pointer"),

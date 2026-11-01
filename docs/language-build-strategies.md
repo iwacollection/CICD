@@ -213,3 +213,104 @@ my-app:latest
 ```
 
 语言自己的包管理器、编译器和测试框架放在 Build/Test 阶段内部。
+
+
+---
+
+## 11. 把“语言支持”落到一次真实构建
+
+前面的表格告诉你选什么工具；本节说明项目接入时，流水线实际要完成什么。平台不会替项目猜测构建命令，项目必须把构建、测试和最终输出目录明确声明在项目配置中。
+
+### 11.1 每种语言都遵守同一个外层流程
+
+```text
+检出固定 commit
+  -> 解析工具链身份（版本/镜像 digest）
+  -> 恢复隔离的依赖缓存
+  -> 下载锁文件指定的依赖
+  -> 执行项目 build 命令
+  -> 执行 test 命令
+  -> 检查声明的输出文件确实存在
+  -> 打包为 Artifact Contract v2
+  -> 校验 Manifest、文件清单和 SHA256
+  -> 上传制品与安全证据
+```
+
+平台统一的是输入、证据和制品规则；语言构建工具仍由项目选择。**只执行了编译命令但没有测试、没有明确产物路径，不算完成一次可交付构建。**
+
+### 11.2 常见语言的实际命令与关键输入
+
+以下是可作为项目 build/test 命令起点的示例。路径和任务名必须按实际项目调整，不能把示例直接当成所有项目的固定配置。
+
+| 类型 | Build 示例 | Test 示例 | 必须固定的关键输入 |
+|---|---|---|---|
+| C/C++ | `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel 4` | `ctest --test-dir build --output-on-failure` | 编译器、CMake/Ninja、系统头文件、目标三元组、依赖锁 |
+| Java/Maven | `mvn -B -ntp -DskipTests package` | `mvn -B -ntp test` | JDK vendor/版本、Maven Wrapper/版本、pom、settings 来源、依赖版本 |
+| Java/Gradle | `./gradlew --no-daemon assemble` | `./gradlew --no-daemon test` | JDK、Gradle Wrapper、插件版本、依赖锁、构建缓存配置 |
+| Node.js | `npm ci` 后执行项目 build script | `npm test` | Node 版本、包管理器版本、lock 文件、操作系统/架构 |
+| Python | `uv sync --frozen` 后执行项目打包命令 | `uv run pytest` | Python 版本、uv/Poetry 版本、锁文件、系统 wheel 兼容性 |
+| Go | `go build ./...` | `go test ./...` | Go 版本、go.mod/go.sum、GOOS/GOARCH、CGO 和 C 编译器 |
+| Rust | `cargo build --locked --release` | `cargo test --locked` | rust-toolchain、Cargo.lock、target triple、features |
+| Android App | `./gradlew --no-daemon assembleRelease` | `./gradlew --no-daemon test` | JDK、Gradle/AGP、SDK/NDK、ABI、签名身份 |
+| Android BSP | 项目提供的 Soong/Make build target | 项目提供的单元/集成/HIL 测试 | BSP commit、厂商 SDK、内核配置、设备目标、专用 Runner |
+
+注意：Maven 示例中的 `-DskipTests package` 只用于把打包和测试阶段拆开观察；正式流水线必须在同一次受控构建中执行测试门禁，不能把跳过测试的命令作为最终成功条件。若项目需要一次命令完成，可使用 `mvn -B -ntp verify`。
+
+### 11.3 C/C++ 示例：从源码到可校验制品
+
+以仓库中的 `examples/cpp-lib` 和 `examples/cpp-app` 为例。**先构建上游库，再把上游制品按 DAG 交接目录结构暂存，最后构建下游应用。** 不能直接构建 `cpp-app`，因为它会拒绝从本机系统路径或源码目录猜测上游库。
+
+下面是一组可在仓库根目录执行的 Bash 命令：
+
+```bash
+set -euo pipefail
+
+# 1. 构建上游 hello-lib
+cmake -S examples/cpp-lib -B build/hello-lib -DCMAKE_BUILD_TYPE=Release
+cmake --build build/hello-lib --parallel 2
+
+# 2. 模拟 DAG 上游制品交接
+#    目录名必须是 hello-lib，内部必须包含 build/libhello-lib.a 和 include/hello_lib.h
+export CI_UPSTREAM_ROOT="$PWD/.ci-local-upstream"
+mkdir -p "$CI_UPSTREAM_ROOT/hello-lib/build" "$CI_UPSTREAM_ROOT/hello-lib/include"
+install -m 0644 build/hello-lib/libhello-lib.a "$CI_UPSTREAM_ROOT/hello-lib/build/libhello-lib.a"
+install -m 0644 examples/cpp-lib/include/hello_lib.h "$CI_UPSTREAM_ROOT/hello-lib/include/hello_lib.h"
+
+# 3. 构建下游 hello-cpp
+cmake -S examples/cpp-app -B build/hello-cpp -DCMAKE_BUILD_TYPE=Release
+cmake --build build/hello-cpp --parallel 2
+
+# 4. 执行 ci/projects.json 中声明的真实测试命令
+./build/hello-cpp/hello-ci | grep -F enterprise-ci-platform-ok
+```
+
+**不要使用 `ctest` 验证这个示例。** 当前 `examples/cpp-app/CMakeLists.txt` 没有注册 CTest 测试（没有启用 CTest，也没有调用 `add_test()`）。平台配置 `ci/projects.json` 中 `hello-cpp` 的真实测试命令是运行 `hello-ci` 并检查输出字符串；所以上面的最后一条命令才与 CI 一致。由于启用了 `set -o pipefail`，应用执行失败也会使整条测试命令失败，不会被后面的 `grep` 掩盖。
+
+在 GitHub Actions DAG 中，`resolve_upstream_artifacts.py` 会先验证上游 Manifest、bundle digest 和文件清单，再把上游文件解压到下游项目的 `.ci-upstream/hello-lib/`；该目录通过 `CI_UPSTREAM_ROOT` 传给 CMake。上面的本地暂存步骤只是模拟同一目录契约，不是绕过上游制品校验的生产流程。
+
+输出目录应与 `ci/projects.json` 中的 artifact paths 一致：`hello-lib` 输出静态库和头文件，`hello-cpp` 输出 `build/hello-ci`。不要把整个工作目录、缓存目录或临时文件夹打进发布包。
+
+### 11.4 失败时先判断哪一层出错
+
+| 现象 | 优先证据 | 处理方式 | 恢复验证 |
+|---|---|---|---|
+| 依赖下载失败 | 包管理器日志、代理仓库状态、DNS/TLS | 检查依赖代理和凭据；不要临时改成公网未锁定版本 | 使用锁文件重新下载，核对依赖版本/摘要 |
+| 编译器版本不一致 | 构建环境元数据、工具链镜像 digest | 停止发布，修正 Toolchain ID 或镜像引用 | Manifest 中工具链 identity 与批准版本一致 |
+| 单元测试失败 | JUnit/测试日志、失败用例 | 修复代码或测试环境，不得仅删除失败测试 | 同一 commit 重新执行完整测试 |
+| 找不到输出文件 | 项目 artifact paths、构建目录 | 修正 build 输出路径或制品声明 | 打包器找到预期文件，Manifest.files 包含它 |
+| 不同 Runner 结果不同 | Runner OS/arch、编译器、依赖锁、环境变量 | 固定容器镜像和依赖；排除宿主机隐式依赖 | 两次独立构建比较产物 digest |
+| 签名失败 | 签名任务身份、密钥服务审计、证书有效期 | 隔离签名权限，禁止把密钥写入仓库或日志 | 验证签名主体、制品 digest 和证书链 |
+
+### 11.5 项目接入的完成定义
+
+一个语言模板只有同时满足以下条件，才能标记为“已验证”：
+
+1. 固定 commit 和工具链版本可被记录；
+2. 依赖锁文件存在且进入 Manifest；
+3. build 命令真实执行并产生声明的文件；
+4. test 命令真实执行，失败会让 Job 失败；
+5. Artifact Contract v2 校验通过；
+6. 缓存关闭或清空后仍能完成构建；
+7. 负向测试证明错误工具链、缺失产物或错误 digest 会被拒绝。
+
+仅有配置样例、Dockerfile 或模板 workflow，只能称为“已定义/待接入”，不能称为真实项目已通过。

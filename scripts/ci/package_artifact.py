@@ -36,13 +36,29 @@ def _load_json_list(raw: str, field: str) -> list[str]:
 
 
 def _expand_files(workdir: Path, patterns: list[str], *, field: str, required: bool) -> list[Path]:
-    matches: list[Path] = []
+    """Expand every declared pattern independently; never accept a partial lock set."""
+    root = workdir.resolve()
+    files: set[Path] = set()
     for pattern in patterns:
-        matches.extend(Path(p).resolve() for p in glob.glob(str(workdir / pattern), recursive=True))
-    files = sorted({path for path in matches if path.is_file()})
+        candidate = Path(pattern)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise SystemExit(f"{field} pattern must stay inside working directory: {pattern}")
+        matches = [
+            Path(item).resolve()
+            for item in glob.glob(str(root / pattern), recursive=True)
+            if Path(item).is_file()
+        ]
+        if required and not matches:
+            raise SystemExit(f"{field} pattern matched no files: {pattern}")
+        for path in matches:
+            try:
+                path.relative_to(root)
+            except ValueError as exc:
+                raise SystemExit(f"{field} pattern resolves outside working directory: {pattern}") from exc
+            files.add(path)
     if required and patterns and not files:
         raise SystemExit(f"{field} matched no files: {patterns}")
-    return files
+    return sorted(files)
 
 
 def _identity_suffix(identity: str) -> str:

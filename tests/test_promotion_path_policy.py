@@ -8,7 +8,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
-from deployment_pointer import create_pointer  # noqa: E402
+from deployment_pointer import create_pointer, inspect_pointer, current_pointer  # noqa: E402
 from promotion_policy import (  # noqa: E402
     find_successful_prerequisite,
     load_policy,
@@ -66,7 +66,7 @@ class PromotionPathPolicyTests(unittest.TestCase):
         find_prerequisite.assert_not_called()
 
     @patch("promotion_policy.inspect_pointer")
-    @patch("promotion_policy._request")
+    @patch("promotion_policy._list_all_pages")
     def test_staging_accepts_exact_historical_successful_dev_deployment(self, request, inspect_pointer) -> None:
         request.side_effect = [
             [{"id": 77}, {"id": 66}],
@@ -88,7 +88,7 @@ class PromotionPathPolicyTests(unittest.TestCase):
         self.assertEqual(result["prerequisite_deployment_id"], "77")
 
     @patch("promotion_policy.inspect_pointer")
-    @patch("promotion_policy._request")
+    @patch("promotion_policy._list_all_pages")
     def test_exact_identity_prevents_promoting_different_digest(self, request, inspect_pointer) -> None:
         request.side_effect = [
             [{"id": 77}],
@@ -109,12 +109,10 @@ class PromotionPathPolicyTests(unittest.TestCase):
             )
 
     @patch("promotion_policy.inspect_pointer")
-    @patch("promotion_policy._request")
+    @patch("promotion_policy._list_all_pages")
     def test_failed_prerequisite_deployment_is_not_accepted(self, request, inspect_pointer) -> None:
-        request.side_effect = [
-            [{"id": 77}],
-            [{"state": "failure"}],
-        ]
+        request.side_effect = [[{"id": 77}]]
+        inspect_pointer.side_effect = ValueError("deployment 77 has no historical success")
         with self.assertRaisesRegex(ValueError, "no successful deployment"):
             find_successful_prerequisite(
                 api_url="https://api.github.com",
@@ -123,7 +121,7 @@ class PromotionPathPolicyTests(unittest.TestCase):
                 prerequisite_environment="staging",
                 identity=self.identity,
             )
-        inspect_pointer.assert_not_called()
+        inspect_pointer.assert_called_once()
 
     @patch("deployment_pointer._request")
     def test_promotion_pointer_records_verified_prerequisite_deployment(self, request) -> None:
@@ -154,6 +152,69 @@ class PromotionPathPolicyTests(unittest.TestCase):
         self.assertIn("ci/promotion-policy.json", workflow)
         self.assertIn("--promoted-from-deployment-id", workflow)
         self.assertIn("steps.promotion_path.outputs.prerequisite_deployment_id", workflow)
+
+
+    @patch("deployment_pointer._request")
+    def test_inspect_requires_historical_success_even_when_latest_status_is_inactive(self, request) -> None:
+        request.side_effect = [
+            {"id": 901, "environment": "production", "payload": {
+                "schema_version": 1, "artifact_contract": 2,
+                "artifact_name": self.identity["artifact_name"],
+                "bundle_sha256": self.identity["bundle_sha256"],
+                "source_sha": self.identity["source_sha"],
+                "source_run_id": self.identity["source_run_id"],
+                "release_tag": self.identity["release_tag"],
+            }},
+            [{"state": "inactive"}, {"state": "success"}],
+        ]
+        pointer = inspect_pointer(
+            api_url="https://api.github.com", repository="example/repo",
+            token="token", deployment_id="901",
+        )
+        self.assertEqual(pointer["deployment_id"], "901")
+
+    @patch("deployment_pointer._request")
+    def test_inspect_rejects_deployment_without_historical_success(self, request) -> None:
+        request.side_effect = [
+            {"id": 902, "environment": "production", "payload": {
+                "schema_version": 1, "artifact_contract": 2,
+                "artifact_name": self.identity["artifact_name"],
+                "bundle_sha256": self.identity["bundle_sha256"],
+                "source_sha": self.identity["source_sha"],
+                "source_run_id": self.identity["source_run_id"],
+                "release_tag": self.identity["release_tag"],
+            }},
+            [{"state": "failure"}, {"state": "inactive"}],
+        ]
+        with self.assertRaisesRegex(ValueError, "no historical success"):
+            inspect_pointer(
+                api_url="https://api.github.com", repository="example/repo",
+                token="token", deployment_id="902",
+            )
+
+    @patch("deployment_pointer._request")
+    def test_current_pointer_reads_past_first_hundred_deployments(self, request) -> None:
+        first_page = [{"id": i} for i in range(1000, 1100)]
+        second_page = [{"id": 77}]
+        payload = {
+            "schema_version": 1, "artifact_contract": 2,
+            "artifact_name": self.identity["artifact_name"],
+            "bundle_sha256": self.identity["bundle_sha256"],
+            "source_sha": self.identity["source_sha"],
+            "source_run_id": self.identity["source_run_id"],
+            "release_tag": self.identity["release_tag"],
+        }
+        request.side_effect = [
+            first_page, second_page,
+            {"id": 77, "environment": "dev", "payload": payload},
+            [{"state": "success"}],
+        ]
+        result = current_pointer(
+            api_url="https://api.github.com", repository="example/repo",
+            token="token", environment="dev",
+        )
+        self.assertEqual(result["deployment_id"], "77")
+        self.assertIn("page=2", request.call_args_list[1].args[0])
 
     def test_rollback_remains_same_environment_history_not_forward_promotion(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "rollback.yml").read_text(encoding="utf-8")

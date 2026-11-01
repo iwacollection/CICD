@@ -180,27 +180,19 @@ Identity 应描述：
 - 原始 SDK/BSP package digest；
 - 企业/厂商 patchset digest。
 
-平台计算：
+当前 `scripts/ci/hardware_execute.py` 的实际校验是：
 
 ```text
-sha256(.ci/sdk-identity.json)
+sha256(<SDK_ROOT>/.ci/sdk-identity.json)
+    ==
+ci/hardware-profiles.json: sdk.expected_sha256
 ```
 
-并要求：
+Catalog 校验还要求 Toolchain 的 `host_identity` 与 Profile 的预期 identity 一致。**但这只校验 identity JSON 文件本身的字节，不会递归计算整个 SDK/BSP 目录，也不会自动证明 JSON 中填写的原始 SDK 包 digest 与磁盘上的全部 SDK 文件一致。**
 
-```text
-ci/hardware-profiles.json
-sdk.expected_sha256
-        ==
-ci/toolchains.json
-host_identity
-        ==
-Runner 实际 SDK identity
-```
+因此，当前 identity 文件是“受控声明”，不是完整 SDK 目录的内容证明。如果 SDK 目录中的编译器、脚本或头文件被替换，而 identity JSON 没有同步变化，当前校验可能发现不了。生产级 SDK 完整性还需要至少一种可信机制：由可信入库流程生成并签名的文件级 Manifest、只读/不可变 SDK 镜像或快照、关键工具二进制摘要校验，以及定期漂移扫描。完成前，文档和状态报告必须写“identity marker 校验”，不能写“整个 SDK 内容已验证”。
 
-只有三者一致，才允许完整构建。
-
-SDK 内容本身不提交到 Git，只提交 identity digest。
+SDK 内容本身不提交到 Git；仓库只保存经过审核的身份声明和摘要。
 
 ---
 
@@ -282,6 +274,10 @@ CI_HIL_DEVICE_ID
 同一个 HIL Device 在 lease 有效期间不能被第二个 Job 同时占用。
 
 ---
+
+### 7.1 Resource Broker 的真实边界
+
+仓库中的 `resource_broker.py` 是 License/HIL 租约客户端：它向外部服务调用 `POST /v1/leases`，执行结束后调用 `DELETE /v1/leases/{lease_id}`，并在申请或释放失败时 fail closed。仓库中的本地 HIL Broker/服务文件可用于开发和实验室集成验证，但它们不能证明企业级高可用 Broker、真实许可证服务器或真实设备池已经部署。生产接入还要验证并发互斥、租约过期回收、Broker 故障恢复、设备掉线、断电和异常进程退出后的资源释放。
 
 ## 8. Vendor Adapter 和产品 Recipe
 
@@ -454,7 +450,7 @@ MediaTek    planned
 
 ```text
 硬件 CI 执行契约     ✅
-RK 平台执行面        ✅ Ready
+RK 工作流/适配器骨架  ✅ 已实现；Hardware Profile/Toolchain 仍为 planned
 RK 物理真机闭环      ⏸
 Qcom/MTK 物理闭环    ⏸
 ```

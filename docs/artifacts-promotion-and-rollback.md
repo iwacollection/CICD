@@ -183,8 +183,8 @@ production
 
 ```text
 dev        -> 无前置环境
-staging    -> 必须先在 dev 成功部署同一 artifact identity
-production -> 必须先在 staging 成功部署同一 artifact identity
+staging    -> 必须先有 dev 环境同一 artifact identity 的成功晋级 pointer
+production -> 必须先有 staging 环境同一 artifact identity 的成功晋级 pointer
 ```
 
 不能：
@@ -197,7 +197,7 @@ dev digest-A -> staging digest-B   X
 
 ## 7. “同一份制品”怎么证明
 
-晋级前不是只比较版本号或文件名，而是要求前置环境存在一个 successful GitHub Deployment，并且下面五个字段全部一致：
+晋级前不是只比较版本号或文件名，而是要求前置环境存在一个状态为 successful 的 GitHub Deployment pointer（晋级记录），并且下面五个字段全部一致：
 
 ```text
 artifact_name
@@ -237,9 +237,9 @@ Promotion Path Policy
   |
   +-- dev: root allowed
   |
-  +-- staging: 查 dev successful deployment history
+  +-- staging: 查 dev successful promotion-pointer history
   |
-  `-- production: 查 staging successful deployment history
+  `-- production: 查 staging successful promotion-pointer history
   |
   v
 重新验证 bundle + manifest
@@ -257,9 +257,9 @@ Promotion Path Policy
 创建 GitHub Deployment pointer
 ```
 
-Promotion Policy 查询的是**历史 successful deployment**，而不是只看前置环境当前版本。
+Promotion Policy 查询的是**历史 successful promotion pointer**，而不是只看前置环境当前版本。这里的 successful 是 `deployment_pointer.py` 创建 GitHub Deployment 后写入的状态，代表制品晋级门禁通过，不代表 Kubernetes 工作负载部署成功或业务流量健康。
 
-所以即使 dev 后来已经前进到 digest-B，只要 digest-A 曾经在 dev 真实成功部署过，仍然可以按变更流程把经过验证的 digest-A 晋级到 staging。
+所以即使 dev 后来已经前进到 digest-B，只要 digest-A 曾经在 dev 通过晋级门禁并创建成功 pointer，仍然可以按变更流程把经过验证的 digest-A 晋级到 staging。
 
 ## 9. GitHub Deployment 是环境 digest pointer + 审计链
 
@@ -310,6 +310,20 @@ production 140
 
 形成可审计晋级链。
 
+### 9.1 关键语义：pointer success 不是 runtime success
+
+当前 `promote.yml` 在完成来源、归档、digest、供应链、Attestation 和 Cosign 校验，并通过 GitHub Environment 审批后，调用 `deployment_pointer.py create`。该脚本创建 GitHub Deployment，并立即写入 `state=success`。
+
+因此：
+
+| 状态/记录 | 当前能证明什么 | 当前不能证明什么 |
+|---|---|---|
+| Promotion pointer = success | 制品身份通过晋级门禁，已被登记到目标环境 | 没有证明应用已部署、Pod Ready、探针通过或用户流量正常 |
+| Progressive release state = completed | 本地状态机按输入证据走完策略步骤 | 没有证明外部控制器已应用路由或真实流量已切换 |
+| Rollback pointer = success | 环境认可的制品 digest 已恢复为历史版本 | 没有自动恢复集群路由、Argo CD Git revision 或数据库状态 |
+
+如果未来要把“部署成功”纳入晋级条件，必须增加独立的 runtime deployment record：由真实部署控制器写入集群、应用、GitOps revision、Rollout/AnalysisRun 和健康证据，并让 Promotion Policy 校验该记录。不能复用当前 pointer 的 `success` 语义。
+
 ## 10. 为什么 Environment Approval 仍然需要
 
 Promotion Path Policy 解决的是：
@@ -353,7 +367,7 @@ Rollback 不走 `dev -> staging -> production` 前向策略。
 它的边界是：
 
 ```text
-只能恢复目标环境自己的历史 successful deployment
+设计上应只恢复目标环境曾经成功晋级的历史 pointer；但当前实现尚未在 rollback 路径验证该 Deployment 是否存在 success status
 ```
 
 流程：
@@ -362,6 +376,7 @@ Rollback 不走 `dev -> staging -> production` 前向策略。
 找到历史 Deployment
   |
   +-- 必须属于同一个 environment
+  +-- 当前代码只检查 Deployment payload 格式，没有检查 statuses 中是否曾有 success（待修复）
   |
   v
 读取历史 artifact_name + digest + release_tag
@@ -401,6 +416,16 @@ A -> B -> A
 ```
 
 旧记录不会被修改。
+
+### 11.1 当前实现的两个回滚/晋级边界缺口
+
+对照 `rollback.yml` 和 `scripts/ci/deployment_pointer.py`：
+
+- `rollback.yml` 调用 `deployment_pointer.py inspect` 读取 Deployment payload；`inspect_pointer()` 当前只验证 payload 字段，不读取该 Deployment 的 status 历史。因此 workflow 还没有证明被选择的历史记录曾经有过 `success` status。它会继续验证原始 Build Run、归档 bytes、Manifest、供应链报告、Attestation 和 Cosign，但这些校验不能替代“这条环境记录曾经成功晋级”的状态校验。
+- 正确修复应是检查该 Deployment 的完整 status 历史中至少存在一条 `success`。注意旧 pointer 后续可能被 GitHub 标记为 `inactive`，这不应抹掉它曾经成功晋级的历史；不能简单要求“最新状态必须等于 success”。
+- `deployment_pointer.py current` 和 `promotion_policy.py find_successful_prerequisite` 当前都只请求 Deployments 的第一页（`per_page=100`），没有跟随 GitHub API 的分页链接。部署历史超过 100 条后，当前指针或较早的前置晋级记录可能被漏掉。生产规模使用前应补全分页，并为超过 100 条历史的场景增加测试。
+
+在这些代码缺口修复并通过测试前，文档不能把 rollback 描述为已严格保证“只恢复曾经成功晋级的历史版本”，也不能假设晋级历史可以无限增长而无需分页。
 
 ## 12. 为什么 Rollback 不要求重新经过 staging
 

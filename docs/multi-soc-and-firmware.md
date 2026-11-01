@@ -624,9 +624,9 @@ signed artifact
 因此当前正确表述是：
 
 ```text
-多 SoC CI 管理模型      ✅ 已实现
-RK 执行面               ✅ 平台 Ready
-RK 真实物理闭环         ⏸ 等真实主机/SDK/板卡
+多 SoC CI 管理模型      ✅ 配置、校验和执行契约已实现
+RK 工作流/适配器骨架    ✅ 已实现，Profile/Toolchain 仍为 planned
+RK 真实物理闭环         ⏸ 等真实主机/SDK/板卡及身份完整性验证
 Qualcomm / MTK          ⏸ 保持 planned
 ```
 

@@ -268,3 +268,36 @@ Repository Governance
 ```
 
 两个能力共同构成 CI 平台的生产运维面。
+
+
+---
+
+## 11. 审计覆盖范围与当前未覆盖的控制面
+
+当前 `repository-governance.yml` 调用 `repository_governance.py`，读取 GitHub Repository Ruleset 并与 `ci/repository-governance-policy.json` 对比。它是**只读漂移审计**，不会自动修复 Ruleset，也不会替管理员配置 GitHub Settings。
+
+它当前不能单独证明以下事项已经安全：
+
+- Organization/Repository Runner Group 是否禁止不可信仓库访问 Self-hosted Runner；
+- GitHub Environment 的 Required Reviewers、分支限制和 Environment Secrets 是否正确；
+- OIDC 云端 Federated Credential / Azure RBAC 是否符合最小权限；
+- Jenkins Controller、Agent、Credentials、Harbor Robot 和 License Broker 的权限是否正确；
+- GitHub App、PAT、外部仓库和组织级成员权限是否符合公司身份治理要求；
+- GitHub Release/制品归档是否有独立备份、跨区域恢复和定期恢复演练。
+
+另外，Rulesets API 的可见性受审计 Token 权限影响。若 API 不返回 bypass actor 等字段，报告必须保留 limited-visibility 状态；不能把“看不到”解释成“没有”。应使用专门只读审计身份并确认其实际 API 可见范围，而不是为日常 Workflow 盲目授予管理写权限。
+
+### 11.1 灾备与故障演练状态
+
+当前仓库有 GitHub Release 长期归档、Artifact Contract、签名/Attestation 和治理报告，但这不等于整个 CI/CD 平台已有独立灾备。当前没有可证明的企业 Harbor、Jenkins、Runner Pool、License Broker、HIL Lab 或 GitOps Controller 的备份恢复记录，也没有可引用的 RTO/RPO 实测值。
+
+生产治理至少要分别演练：
+
+1. GitHub 仓库/Release 归档不可用时，如何从独立备份恢复源码、制品和审计证据；
+2. Jenkins Controller 丢失时，如何恢复 Job 配置、Library 版本、Credentials 引用和 Agent 调度；
+3. Harbor/Registry 丢失时，如何恢复镜像 blob、数据库、配置、证书和权限；
+4. Runner 池整体故障时，如何隔离旧 Runner、重新注册干净 Runner 并验证 SDK/工具链身份；
+5. License/HIL Broker 故障时，如何回收过期租约、避免设备或许可证被双重分配；
+6. GitOps/Argo CD 控制面故障时，如何确认集群现状、恢复期望状态并避免错误自动同步。
+
+每次演练都要记录故障注入、影响范围、恢复步骤、实际 RTO/RPO、制品 digest/配置版本校验和遗留问题。没有演练记录就标记为“设计要求/待演练”，不要写成灾备已验收。

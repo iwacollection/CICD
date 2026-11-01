@@ -216,7 +216,7 @@ analysis latency_p95 exceeds threshold
 synthetic analysis is not production evidence
 ```
 
-生产推进只能使用 `advance`，并且证据来自真实流量或真实探活。GitHub Actions 的 `analysis` 输入就是这份 JSON 字符串。Job 把它写入 `analysis.json` 后交给 `release_strategy.py advance`，不会在 workflow 里填一份合成的通过结果。
+当前实现只证明 JSON 字段、类型、请求数和阈值满足策略；它**不验证证据来源**。GitHub Actions 的 `analysis` 输入是操作者手工提供的 JSON 字符串，Job 原样写入 `analysis.json` 后交给 `release_strategy.py advance`。程序不会查询 Prometheus，也不会验证 Prometheus 查询时间窗、数据源身份、样本新鲜度、签名或证据是否对应当前 release。标记为 `operator` 只是证据模式标签，不是可信来源证明。**因此当前 advance 只能用于受控演练/人工操作验证，不能作为无人值守生产自动放量的依据。**
 
 ## 6. 环境内灰度
 
@@ -652,7 +652,7 @@ python3 scripts/ci/release_strategy.py render \
 
 `.github/workflows/release.yml` 的名字是 Progressive Release。只在 `main` 上 `workflow_dispatch`。在别的分支上手动触发时，Job 的 `if: github.ref == 'refs/heads/main'` 不成立，不会执行策略。它不是第二份策略引擎。`plan`、`advance`、`abort`、`scenario` 都调用 `scripts/ci/release_strategy.py`。
 
-权限是 `contents: read` 和 `deployments: read`。没有 `deployments: write`。Job 不读取 kubeconfig，也不执行 `kubectl apply`。并发组是 `release-<environment>-<service>`，`cancel-in-progress` 为 false：同名发布不会互相取消，后一次会等待。
+权限是 `contents: read` 和 `deployments: write`。额外的写权限只用于向专用 `cicd-release-state` Deployment 环境追加状态检查点，不用于修改业务环境的制品指针。Job 不读取 kubeconfig，也不执行 `kubectl apply`。并发组是 `release-<environment>-<service>`，`cancel-in-progress` 为 false：同名发布不会互相取消，后一次会等待。
 
 每次运行的顺序是：
 
@@ -687,9 +687,9 @@ validate
 | `deny_clusters` | string | 可选，逗号分隔 |
 | `active_slot` | choice：`blue`、`green` | 必填，默认 `blue` |
 | `analysis` | string | 仅 `advance`。当前步骤需要的 JSON 对象 |
-| `state` | string | 仅 `advance` 和 `abort`。上一次 `release-state.json` 的全文 |
+| `state` | — | 已删除。`advance` 和 `abort` 自动读取服务端最新成功 checkpoint，操作者不能提交自带状态 JSON |
 
-`plan` 和 `scenario` 用制品字段现场生成状态，不读 `state`。`check-pointer` 仍然先跑。
+`plan` 和 `scenario` 用制品字段现场生成状态。`advance` 和 `abort` 不再接收 `state` 输入，而是通过 `release_state_store.py load` 读取服务端最新 checkpoint。`check-pointer` 仍然先跑。
 
 ### 13.1 第一次：plan
 
@@ -699,21 +699,15 @@ validate
 
 ### 13.2 之后每一次：advance
 
-`workflow_dispatch` 没有文件输入，下一次运行也不会把上一次的 artifact 重新上传进来。操作者把上一次 artifact 里的 `release-state.json` 压成一行，贴进 `state`。在已经下载的目录里：
+下一次运行不需要重新上传上一次的 artifact，也不需要复制状态 JSON。Workflow 会按环境和服务从 GitHub Deployment 状态日志读取最新成功 checkpoint，核对状态摘要、revision、候选 digest 和环境/服务身份。服务端记录的 revision 已经前进时，旧 checkpoint 会被拒绝；同一环境/服务的 Workflow 由 concurrency group 串行执行。
 
-```bash
-python3 -c 'import json,pathlib; print(json.dumps(json.loads(pathlib.Path("release-state.json").read_text(encoding="utf-8")), separators=(",", ":")))'
-```
+因此下一次只需保持同一组身份字段，选择 `action=advance`，再按第 5 节准备当前步骤的 `analysis`。不要尝试手工构造或修改 `release-state.json`；该文件现在只是服务端 checkpoint 的导出副本。
 
-把这一行贴进 `state`。按第 5 节为当前步骤准备 `analysis`，也压成一行贴进去。其余身份字段保持和这次发布相同，尤其是 `bundle_sha256` 和 `environment`。Job 在调用引擎之前核对两件事：状态里的 `candidate_digest` 等于刚刚通过 `check-pointer` 的指针，状态里的 `environment` 等于本次 `environment`。对不上就失败，不会推进另一份发布。
-
-参考目录上走完一步之后的状态大约 3KB，放得进这个字符串。不要把 `state` 提交进仓库。
-
-`analysis` 原样写入 `analysis.json`。需要哪些字段仍由当前步骤决定。Workflow 不生成合成通过证据。成功后重新下载 artifact。证据标记应为 `operator`。按第 7 节或第 9 节的表核对权重或槽位，再决定下一次 advance 还是 abort。
+`analysis` 原样写入 `analysis.json`。需要哪些字段仍由当前步骤决定。Workflow 不生成合成通过证据，但也不验证操作者输入的 JSON 是否真实来自监控系统。成功后重新下载 artifact。证据标记为 `operator`，它只表示不是 scenario 自动生成的 synthetic 数据，不代表证据经过认证。按第 7 节或第 9 节的表核对权重或槽位，再决定下一次 advance 还是 abort。生产接入前必须由只读 Analysis Adapter 从受信 Prometheus/探针读取数据，记录 query、时间窗、样本数、数据源、release ID，并验证证据完整性。
 
 ### 13.3 中止
 
-`action=abort`。`state` 同样贴上一份进行中的 `release-state.json`。`analysis` 留空。成功后已打开区域回到基线，证据标记是 `operator`。`completed` 的状态不要走这个动作。
+`action=abort`。Workflow 自动读取服务端最新进行中 checkpoint，`analysis` 留空。成功后已打开区域回到基线，证据标记是 `operator`。`completed` 的状态不要走这个动作。
 
 ### 13.4 scenario
 
@@ -723,7 +717,7 @@ python3 -c 'import json,pathlib; print(json.dumps(json.loads(pathlib.Path("relea
 synthetic analysis is not production evidence
 ```
 
-它用来渲染最终期望状态，供人对照第 7 节或第 9 节的最后一行。不要把 artifact 交给生产控制器。生产切流只消费 `advance` 或 `abort` 之后、证据标记为 `operator` 的渲染结果。
+它用来渲染最终期望状态，供人对照第 7 节或第 9 节的最后一行。不要把 artifact 交给生产控制器。当前仓库没有生产流量控制器，因此不存在可直接用于生产切流的渲染结果。未来控制器只能在独立验证证据来源、状态完整性、目标集群和审批后，消费经过认证的期望状态；`operator` 标签本身不构成准入条件。
 
 ## 14. 外部控制器合同
 
@@ -822,8 +816,38 @@ synthetic analysis is not production evidence
 
 平台校验 `validate.yml` 会执行 `release_strategy.py validate`。
 
-## 17. 还没有做的事
+## 17. 当前实现的生产阻断项
+
+以下是把状态机接入生产流量前必须完成的控制面工作：
+
+1. **分析证据真实性**：当前 `analysis` 是手工 JSON，没有 Prometheus/探针读取、查询时间窗、release 绑定、签名或来源认证。
+2. **发布状态完整性**：状态已改为 GitHub Deployment 服务端 checkpoint，具有内容摘要、递增 revision、父 Deployment ID、最新版本核对和旧版本重放拒绝。它不是独立密码学签名，也不是事务型数据库；具体边界见本节末尾的“发布状态的持久化、完整性与防重放”。
+3. **流量控制执行**：当前只渲染 HTTPRoute/VirtualService JSON 并上传 Artifact，没有 apply，也没有读取控制器的实际路由状态。
+4. **运行时回滚**：`abort` 只把期望状态渲染回基线；`rollback.yml` 只恢复 GitHub Deployment 制品 pointer。二者都不会自动恢复真实集群流量。
+5. **发布完成判定**：当前 `completed` 表示策略状态机完成，不代表 Rollout、AnalysisRun 和业务验收完成。
+
+建议的生产闭环必须是：受信证据读取 → 签名/来源校验 → 服务端状态存储与乐观锁 → 单一流量控制器执行 → 只读回读实际路由/Pod/Analysis 状态 → 决策和审计。没有这些适配器前，不要给 `operator` 标签附加可信含义。
+
+## 18. 还没有做的事
 
 真实集群 apply 需要集群里的 Gateway 或 Istio、带 `cicd.platform/cluster-id` 标签的 OCM ManagedCluster，以及消费这些 JSON 的控制器。这些资源不在本仓库。控制面测试通过，不等于生产集群已经完成灰度或蓝绿。
 
 把 kubeconfig 放进 GitHub Actions 或 Jenkins，或者在 Job 里直接 `kubectl apply`，都违反第 14 节的合同。VirtualService 只是同一份状态的适配，不能在网格里再维护一套权重。
+
+
+## 发布状态的持久化、完整性与防重放
+
+发布状态不再由操作者把上一次的 JSON 原样粘贴到下一次 `workflow_dispatch`。手工传递 JSON 既无法证明来源，也无法阻止旧版本状态被重复提交。
+
+当前实现使用 GitHub Deployments API 建立独立的 `cicd-release-state` 状态日志：
+
+1. 每次 `plan`、`advance`、`abort` 完成结构校验后，创建一条新的状态 Deployment。
+2. Deployment payload 保存环境、服务、递增 revision、父 Deployment ID、完整 release state 和规范化 JSON 的 SHA256。
+3. 后续 `advance` / `abort` 从服务端读取最新成功 checkpoint，不接受操作者自带的 state JSON。
+4. 加载时重新计算 SHA256，并核对环境、服务、候选 digest 和 Deployment 状态。
+5. 写入下一 revision 时，必须证明输入 state 的父 Deployment ID、revision 与服务端最新 checkpoint 一致；旧 revision 重放会被拒绝。
+6. 同一环境/服务由 GitHub Actions concurrency group 串行执行；状态日志使用独立 environment，不与 dev/staging/production 的制品指针混在一起。
+
+这里的 SHA256 用于检测状态内容损坏，不是数字签名。真实性来自受 GitHub Deployments 写权限保护的服务端 checkpoint；不要把它描述成独立密码学签名或跨系统事务型数据库。**这也不是不可删除的 WORM（一次写入、多次读取）存储**：具备相应权限的仓库管理员仍可删除 Deployment 记录，拥有部署写权限的身份也能创建新的记录。因此必须限制 `deployments: write` 的授予范围并审计该权限；如果威胁模型要求防止仓库管理员篡改，应改用独立受控数据库、条件更新/CAS 和 KMS/HSM 签名，而不是把 GitHub Deployment 当作不可变账本。并发控制依赖 GitHub Actions concurrency，写入前还会检查最新父版本；如果创建 Deployment 后写 status 失败，后续操作会 fail closed，需要人工核对该条不完整记录，不能跳过它继续发布。
+
+状态完整性仍不等于发布执行成功：本 Workflow 仍只渲染 HTTPRoute / Istio VirtualService 期望状态，不会把它们应用到真实集群，也不会自动采集 Prometheus 分析数据。

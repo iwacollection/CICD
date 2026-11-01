@@ -118,6 +118,27 @@ def create_pointer(
     }
 
 
+def _list_all_pages(url: str, token: str, *, per_page: int = 100) -> list[dict[str, Any]]:
+    """Read a GitHub collection completely; never silently trust page one only."""
+    separator = "&" if "?" in url else "?"
+    results: list[dict[str, Any]] = []
+    page = 1
+    while True:
+        response = _request(f"{url}{separator}per_page={per_page}&page={page}", token)
+        if not isinstance(response, list):
+            raise ValueError("GitHub collection API returned an invalid response")
+        results.extend(item for item in response if isinstance(item, dict))
+        if len(response) < per_page:
+            return results
+        page += 1
+
+
+def _has_historical_success(*, api_url: str, repository: str, token: str, deployment_id: str) -> bool:
+    url = f"{api_url.rstrip('/')}/repos/{repository}/deployments/{deployment_id}/statuses"
+    statuses = _list_all_pages(url, token)
+    return any(status.get("state") == "success" for status in statuses)
+
+
 def inspect_pointer(*, api_url: str, repository: str, token: str, deployment_id: str) -> dict:
     if not deployment_id.isdigit():
         raise ValueError("deployment_id must be numeric")
@@ -130,6 +151,10 @@ def inspect_pointer(*, api_url: str, repository: str, token: str, deployment_id:
     if not isinstance(payload, dict):
         raise ValueError("deployment payload is not an object")
     _validate_payload(payload)
+    if not _has_historical_success(
+        api_url=api_url, repository=repository, token=token, deployment_id=deployment_id
+    ):
+        raise ValueError(f"deployment {deployment_id} has no historical success status")
     return {
         "deployment_id": str(deployment["id"]),
         "environment": deployment.get("environment", ""),
@@ -140,17 +165,11 @@ def inspect_pointer(*, api_url: str, repository: str, token: str, deployment_id:
 def current_pointer(*, api_url: str, repository: str, token: str, environment: str) -> dict:
     if not ENV_RE.fullmatch(environment):
         raise ValueError("environment contains unsupported characters")
-    url = f"{api_url.rstrip('/')}/repos/{repository}/deployments?environment={environment}&per_page=100"
-    deployments = _request(url, token)
-    if not isinstance(deployments, list):
-        raise ValueError("deployments API returned an invalid response")
+    url = f"{api_url.rstrip('/')}/repos/{repository}/deployments?environment={environment}"
+    deployments = _list_all_pages(url, token)
     for deployment in deployments:
         deployment_id = str(deployment.get("id", ""))
         if not deployment_id.isdigit():
-            continue
-        statuses_url = f"{api_url.rstrip('/')}/repos/{repository}/deployments/{deployment_id}/statuses?per_page=20"
-        statuses = _request(statuses_url, token)
-        if not isinstance(statuses, list) or not any(status.get("state") == "success" for status in statuses):
             continue
         try:
             return inspect_pointer(

@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
 from package_artifact import (  # noqa: E402
     _identity_suffix,
+    _expand_files,
     _resolve_toolchain_identity,
     _write_reproducible_tar_gz,
     build_manifest,
@@ -180,6 +181,33 @@ class ArtifactContractV2Tests(unittest.TestCase):
         central = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("name: Attest artifact manifests", central)
         self.assertIn("dag-node.yml", central)
+
+
+    def test_each_declared_dependency_lock_pattern_must_match(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workdir = Path(directory)
+            (workdir / "deps.lock").write_text("dep=1\\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "missing.lock"):
+                _expand_files(
+                    workdir,
+                    ["deps.lock", "missing.lock"],
+                    field="dependency_lock_files",
+                    required=True,
+                )
+
+    def test_dependency_lock_patterns_cannot_escape_working_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workdir = Path(directory) / "work"
+            workdir.mkdir()
+            outside = Path(directory) / "outside.lock"
+            outside.write_text("dep=1\\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "stay inside"):
+                _expand_files(
+                    workdir,
+                    ["../outside.lock"],
+                    field="dependency_lock_files",
+                    required=True,
+                )
 
 
 if __name__ == "__main__":
