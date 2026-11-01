@@ -197,3 +197,51 @@ GitHub Actions 托管控制面省掉了 Controller 运维，但 Self-hosted Runn
 - SDK 镜像损坏
 
 目标不是证明“永远不坏”，而是验证坏了以后是否能在预期时间恢复，并且不会发布错误制品。
+
+
+---
+
+## 11. Platform Health 的日常操作
+
+当前可执行的健康度采集只覆盖 GitHub Actions 的平台级 Workflow 历史，不等于已经采集企业 Jenkins、物理 Runner、Harbor 或 HIL 设备指标。
+
+### 11.1 手工触发与查看证据
+
+`.github/workflows/platform-health.yml` 支持手工触发，也每 6 小时定时运行。手工触发后，查看以下三处：
+
+1. **Job Summary**：快速看成功率、Queue P95、Duration P95、Rerun Rate 和是否触发 SLO breach；
+2. **platform-health Artifact**：下载 JSON/Markdown 报告，保留具体样本和计算结果；
+3. **Workflow 日志**：若没有生成报告，先检查 API 请求、Token 权限和策略文件校验步骤。
+
+本工作流需要 `actions: read` 权限读取 Workflow 历史；不要为解决 403 而直接授予 `write-all`。
+
+### 11.2 指标异常时如何判断
+
+| 观测结果 | 优先怀疑 | 下一步证据 |
+|---|---|---|
+| Queue P95 升高，Duration P95 稳定 | Runner/并发额度/调度排队 | Workflow 创建与开始时间、Runner 池在线数 |
+| Duration P95 升高，Queue P95 稳定 | 构建阶段变慢 | 按依赖下载、编译、测试、打包、上传拆耗时 |
+| Success Rate 下降 | 代码变更、工具链、外部服务或 Runner 故障 | 按 Workflow、项目、工具链和失败阶段分组 |
+| Rerun Rate 升高 | Flaky test、外部依赖抖动、Runner 不稳定 | 首次失败与重跑成功的 Job/step 差异 |
+| insufficient-data | 观察窗口样本不足 | 检查窗口、分支、事件筛选和样本数量；不要当成 SLO 通过 |
+
+### 11.3 SLO breach 的处置
+
+1. 先确认报告窗口和样本数量，避免把少量任务的偶然波动当成平台事故；
+2. 对比最近一次成功报告，确定哪个 Workflow/指标首次恶化；
+3. 查看同一时间段的仓库变更、工具链升级和外部依赖服务事件；
+4. 对影响范围进行分级：单个项目、单类工具链、Runner Pool 或全平台；
+5. 止血后再次手工运行 Platform Health，保留新的报告和恢复时间。
+
+不能通过放宽阈值或调低最低样本数来消除告警。若阈值确实需要调整，应修改 `ci/platform-slo.json`，说明业务依据并经过代码评审。
+
+### 11.4 指标覆盖边界
+
+| 能力 | 当前证据来源 | 尚不能证明 |
+|---|---|---|
+| GitHub Actions 成功率/排队/执行时间/重跑率 | Actions API 历史与 Platform Health 报告 | 企业 Jenkins 和自托管 Runner 的完整健康 |
+| Runner CPU、内存、磁盘、IO | 当前未接入真实主机指标 | 不能据此推断物理 Runner 没有容量问题 |
+| Harbor/制品仓库容量与延迟 | 当前没有企业 Harbor 实测指标 | 不能声称制品仓库 HA/灾备通过 |
+| SoC Runner 与 HIL 等待时间 | 当前无真实硬件池 | 不能声称 RK/QCOM/MTK 物理执行面健康 |
+
+真实基础设施接入后，应分别增加采集器和证据源，再将指标纳入平台健康模型；不能把 GitHub-hosted 样本改名成物理 Runner 指标。
