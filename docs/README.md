@@ -333,6 +333,10 @@ MediaTek / MTK          ⏸ planned
 - 进行中用 abort 收回基线；`completed` 之后走 `rollback.yml`，不能 abort；
 - 候选 digest 必须等于该环境当前指针；仓库不执行 `kubectl apply`，也不把本地渲染当成已上线。
 
+## [Argo Rollouts：让灰度自己跑完](argo-rollouts.md)
+
+在 `progressive-delivery.md` 的同一份策略上渲染 Argo Rollouts 和 AnalysisTemplate，由 AnalysisRun 自己取数、自动推进和回退；多集群的区域顺序交给 ApplicationSet RollingSync。
+
 ## [制品、晋级与回滚](artifacts-promotion-and-rollback.md)
 
 重点：
@@ -453,6 +457,7 @@ Hardware Rollout          -> ci/hardware-rollout.json
 Supply-chain Policy       -> ci/supply-chain-policy.json
 Promotion Policy          -> ci/promotion-policy.json
 Release Strategy          -> ci/release-strategies.json
+Argo Rollouts Wiring      -> ci/argo-rollouts.json
 Cluster Inventory         -> ci/clusters.json
 Platform SLO              -> ci/platform-slo.json
 Repository Governance     -> ci/repository-governance-policy.json
@@ -468,6 +473,7 @@ Artifact 校验             -> scripts/ci/verify_artifact.py
 长期归档                  -> scripts/ci/artifact_archive.py
 Promotion Path            -> scripts/ci/promotion_policy.py
 Progressive Release       -> scripts/ci/release_strategy.py
+Argo Rollouts Render      -> scripts/ci/argo_rollouts.py
 Environment Pointer       -> scripts/ci/deployment_pointer.py
 Supply-chain Gate         -> scripts/ci/supply_chain_policy.py
 Reproducibility           -> scripts/ci/reproducibility_check.py
