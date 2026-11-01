@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from artifact_archive import _request
-from deployment_pointer import inspect_pointer
+from deployment_pointer import _list_all_pages, inspect_pointer
 
 SCHEMA_VERSION = 1
 IDENTITY_FIELDS = (
@@ -130,25 +130,13 @@ def find_successful_prerequisite(
 ) -> dict[str, str]:
     deployments_url = (
         f"{api_url.rstrip('/')}/repos/{repository}/deployments"
-        f"?environment={prerequisite_environment}&per_page=100"
+        f"?environment={prerequisite_environment}"
     )
-    deployments = _request(deployments_url, token)
-    if not isinstance(deployments, list):
-        raise ValueError("deployments API returned an invalid response")
+    deployments = _list_all_pages(deployments_url, token)
 
     for deployment in deployments:
-        if not isinstance(deployment, dict):
-            continue
         deployment_id = str(deployment.get("id", ""))
         if not deployment_id.isdigit():
-            continue
-        statuses_url = (
-            f"{api_url.rstrip('/')}/repos/{repository}/deployments/{deployment_id}/statuses?per_page=20"
-        )
-        statuses = _request(statuses_url, token)
-        if not isinstance(statuses, list) or not any(
-            isinstance(status, dict) and status.get("state") == "success" for status in statuses
-        ):
             continue
         try:
             pointer = inspect_pointer(
