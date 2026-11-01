@@ -206,7 +206,7 @@ Upload
 
 1. 先下载本次 Workflow Run 中声明的上游制品；
 2. 校验上游制品的源码 SHA、仓库身份和 digest；
-3. 计算依赖锁文件的 fingerprint；
+3. 根据项目配置中的 `cache_key_files` 计算缓存键 fingerprint（不会自动读取 `dependency_lock_files`）；
 4. 将项目、SoC、系统、架构、工具链 identity、上游 fingerprint 和锁文件 fingerprint 组成 cache key；
 5. 恢复缓存后执行构建；
 6. 构建成功后生成独立 Artifact Contract v2，不能把缓存目录当成制品上传。
