@@ -50,7 +50,16 @@ Artifact Contract v2
 5. [供应链策略](supply-chain-policy.md)
 6. [制品、晋级与回滚](artifacts-promotion-and-rollback.md)
 7. [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md)
-8. [生产生命周期真实验收记录](production-verification.md)
+8. [CI/CD 完整闭环架构](cicd-closed-loop-architecture.md)
+   - CI 制品治理、Artifact Contract v2、SBOM、签名和 Promotion；
+   - GitOps 仓库、Argo CD Application / ApplicationSet 与同步状态；
+   - Argo Rollouts 单集群渐进式发布、Prometheus Analysis 自动决策；
+   - release identity、事件审计、跨集群波次、双回滚闭环。
+9. [Argo CD / Argo Rollouts 接入规范](argocd-argo-rollouts-integration.md)
+   - 现有发布状态机与 Argo Rollouts 的职责边界；
+   - Gateway API / Istio 路由只能有一个权重写入者；
+   - Analysis 失败关闭、多集群推进、回滚与权限隔离。
+10. [生产生命周期真实验收记录](production-verification.md)
 
 ### 如果你主要看 RK / 高通 / 联发科固件 CI
 
