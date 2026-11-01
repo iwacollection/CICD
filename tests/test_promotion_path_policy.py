@@ -66,7 +66,7 @@ class PromotionPathPolicyTests(unittest.TestCase):
         find_prerequisite.assert_not_called()
 
     @patch("promotion_policy.inspect_pointer")
-    @patch("promotion_policy._request")
+    @patch("promotion_policy._list_all_pages")
     def test_staging_accepts_exact_historical_successful_dev_deployment(self, request, inspect_pointer) -> None:
         request.side_effect = [
             [{"id": 77}, {"id": 66}],
@@ -88,7 +88,7 @@ class PromotionPathPolicyTests(unittest.TestCase):
         self.assertEqual(result["prerequisite_deployment_id"], "77")
 
     @patch("promotion_policy.inspect_pointer")
-    @patch("promotion_policy._request")
+    @patch("promotion_policy._list_all_pages")
     def test_exact_identity_prevents_promoting_different_digest(self, request, inspect_pointer) -> None:
         request.side_effect = [
             [{"id": 77}],
@@ -109,7 +109,7 @@ class PromotionPathPolicyTests(unittest.TestCase):
             )
 
     @patch("promotion_policy.inspect_pointer")
-    @patch("promotion_policy._request")
+    @patch("promotion_policy._list_all_pages")
     def test_failed_prerequisite_deployment_is_not_accepted(self, request, inspect_pointer) -> None:
         request.side_effect = [[{"id": 77}]]
         inspect_pointer.side_effect = ValueError("deployment 77 has no historical success")

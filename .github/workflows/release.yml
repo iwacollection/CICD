@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "plan renders the current step; advance and abort take a state JSON string because a later dispatch cannot re-upload the previous artifact; scenario walks every step with synthetic analysis and is not production evidence"
+        description: "plan creates a server-backed checkpoint; advance and abort load the latest verified checkpoint; scenario walks every step with synthetic analysis and is not production evidence"
         required: true
         default: plan
         type: choice

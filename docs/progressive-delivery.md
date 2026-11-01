@@ -652,7 +652,7 @@ python3 scripts/ci/release_strategy.py render \
 
 `.github/workflows/release.yml` 的名字是 Progressive Release。只在 `main` 上 `workflow_dispatch`。在别的分支上手动触发时，Job 的 `if: github.ref == 'refs/heads/main'` 不成立，不会执行策略。它不是第二份策略引擎。`plan`、`advance`、`abort`、`scenario` 都调用 `scripts/ci/release_strategy.py`。
 
-权限是 `contents: read` 和 `deployments: read`。没有 `deployments: write`。Job 不读取 kubeconfig，也不执行 `kubectl apply`。并发组是 `release-<environment>-<service>`，`cancel-in-progress` 为 false：同名发布不会互相取消，后一次会等待。
+权限是 `contents: read` 和 `deployments: write`。额外的写权限只用于向专用 `cicd-release-state` Deployment 环境追加状态检查点，不用于修改业务环境的制品指针。Job 不读取 kubeconfig，也不执行 `kubectl apply`。并发组是 `release-<environment>-<service>`，`cancel-in-progress` 为 false：同名发布不会互相取消，后一次会等待。
 
 每次运行的顺序是：
 
@@ -687,9 +687,9 @@ validate
 | `deny_clusters` | string | 可选，逗号分隔 |
 | `active_slot` | choice：`blue`、`green` | 必填，默认 `blue` |
 | `analysis` | string | 仅 `advance`。当前步骤需要的 JSON 对象 |
-| `state` | string | 仅 `advance` 和 `abort`。上一次 `release-state.json` 的全文 |
+| `state` | — | 已删除。`advance` 和 `abort` 自动读取服务端最新成功 checkpoint，操作者不能提交自带状态 JSON |
 
-`plan` 和 `scenario` 用制品字段现场生成状态，不读 `state`。`check-pointer` 仍然先跑。
+`plan` 和 `scenario` 用制品字段现场生成状态。`advance` 和 `abort` 不再接收 `state` 输入，而是通过 `release_state_store.py load` 读取服务端最新 checkpoint。`check-pointer` 仍然先跑。
 
 ### 13.1 第一次：plan
 
@@ -699,21 +699,15 @@ validate
 
 ### 13.2 之后每一次：advance
 
-`workflow_dispatch` 没有文件输入，下一次运行也不会把上一次的 artifact 重新上传进来。操作者把上一次 artifact 里的 `release-state.json` 压成一行，贴进 `state`。在已经下载的目录里：
+下一次运行不需要重新上传上一次的 artifact，也不需要复制状态 JSON。Workflow 会按环境和服务从 GitHub Deployment 状态日志读取最新成功 checkpoint，核对状态摘要、revision、候选 digest 和环境/服务身份。服务端记录的 revision 已经前进时，旧 checkpoint 会被拒绝；同一环境/服务的 Workflow 由 concurrency group 串行执行。
 
-```bash
-python3 -c 'import json,pathlib; print(json.dumps(json.loads(pathlib.Path("release-state.json").read_text(encoding="utf-8")), separators=(",", ":")))'
-```
-
-把这一行贴进 `state`。按第 5 节为当前步骤准备 `analysis`，也压成一行贴进去。其余身份字段保持和这次发布相同，尤其是 `bundle_sha256` 和 `environment`。Job 在调用引擎之前核对两件事：状态里的 `candidate_digest` 等于刚刚通过 `check-pointer` 的指针，状态里的 `environment` 等于本次 `environment`。对不上就失败，不会推进另一份发布。
-
-参考目录上走完一步之后的状态大约 3KB，放得进这个字符串。不要把 `state` 提交进仓库。
+因此下一次只需保持同一组身份字段，选择 `action=advance`，再按第 5 节准备当前步骤的 `analysis`。不要尝试手工构造或修改 `release-state.json`；该文件现在只是服务端 checkpoint 的导出副本。
 
 `analysis` 原样写入 `analysis.json`。需要哪些字段仍由当前步骤决定。Workflow 不生成合成通过证据，但也不验证操作者输入的 JSON 是否真实来自监控系统。成功后重新下载 artifact。证据标记为 `operator`，它只表示不是 scenario 自动生成的 synthetic 数据，不代表证据经过认证。按第 7 节或第 9 节的表核对权重或槽位，再决定下一次 advance 还是 abort。生产接入前必须由只读 Analysis Adapter 从受信 Prometheus/探针读取数据，记录 query、时间窗、样本数、数据源、release ID，并验证证据完整性。
 
 ### 13.3 中止
 
-`action=abort`。`state` 同样贴上一份进行中的 `release-state.json`。`analysis` 留空。成功后已打开区域回到基线，证据标记是 `operator`。`completed` 的状态不要走这个动作。
+`action=abort`。Workflow 自动读取服务端最新进行中 checkpoint，`analysis` 留空。成功后已打开区域回到基线，证据标记是 `operator`。`completed` 的状态不要走这个动作。
 
 ### 13.4 scenario
 
@@ -827,7 +821,7 @@ synthetic analysis is not production evidence
 以下是把状态机接入生产流量前必须完成的控制面工作：
 
 1. **分析证据真实性**：当前 `analysis` 是手工 JSON，没有 Prometheus/探针读取、查询时间窗、release 绑定、签名或来源认证。
-2. **发布状态完整性**：`state` 通过 workflow_dispatch 字符串在多次运行间传递；当前没有服务端持久化、签名、版本号/CAS（比较并交换）或防重放校验。Workflow 只额外核对 candidate digest 和 environment，不能把操作者上传的整份状态视为不可篡改事实。
+2. **发布状态完整性**：状态已改为 GitHub Deployment 服务端 checkpoint，具有内容摘要、递增 revision、父 Deployment ID、最新版本核对和旧版本重放拒绝。它不是独立密码学签名，也不是事务型数据库；具体边界见本节末尾的“发布状态的持久化、完整性与防重放”。
 3. **流量控制执行**：当前只渲染 HTTPRoute/VirtualService JSON 并上传 Artifact，没有 apply，也没有读取控制器的实际路由状态。
 4. **运行时回滚**：`abort` 只把期望状态渲染回基线；`rollback.yml` 只恢复 GitHub Deployment 制品 pointer。二者都不会自动恢复真实集群流量。
 5. **发布完成判定**：当前 `completed` 表示策略状态机完成，不代表 Rollout、AnalysisRun 和业务验收完成。
