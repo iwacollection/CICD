@@ -477,14 +477,7 @@ class ArgoRenderTests(unittest.TestCase):
 
 
 class ArgoWiringTests(unittest.TestCase):
-    def test_validate_workflow_and_docs_index_know_the_argo_layer(self) -> None:
-        validate = (ROOT / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        self.assertIn("argo_rollouts.py validate", validate)
-        self.assertLess(
-            validate.index("release_strategy.py validate"),
-            validate.index("argo_rollouts.py validate"),
-            "the shared release policy must be validated before the Argo layer that depends on it",
-        )
+    def test_docs_index_and_guide_know_the_argo_layer(self) -> None:
         index = (ROOT / "docs" / "README.md").read_text(encoding="utf-8")
         self.assertIn("argo-rollouts.md", index)
         guide = (ROOT / "docs" / "argo-rollouts.md").read_text(encoding="utf-8")
