@@ -183,8 +183,8 @@ production
 
 ```text
 dev        -> 无前置环境
-staging    -> 必须先在 dev 成功部署同一 artifact identity
-production -> 必须先在 staging 成功部署同一 artifact identity
+staging    -> 必须先有 dev 环境同一 artifact identity 的成功晋级 pointer
+production -> 必须先有 staging 环境同一 artifact identity 的成功晋级 pointer
 ```
 
 不能：
@@ -197,7 +197,7 @@ dev digest-A -> staging digest-B   X
 
 ## 7. “同一份制品”怎么证明
 
-晋级前不是只比较版本号或文件名，而是要求前置环境存在一个 successful GitHub Deployment，并且下面五个字段全部一致：
+晋级前不是只比较版本号或文件名，而是要求前置环境存在一个状态为 successful 的 GitHub Deployment pointer（晋级记录），并且下面五个字段全部一致：
 
 ```text
 artifact_name
@@ -257,7 +257,7 @@ Promotion Path Policy
 创建 GitHub Deployment pointer
 ```
 
-Promotion Policy 查询的是**历史 successful deployment**，而不是只看前置环境当前版本。
+Promotion Policy 查询的是**历史 successful promotion pointer**，而不是只看前置环境当前版本。这里的 successful 是 `deployment_pointer.py` 创建 GitHub Deployment 后写入的状态，代表制品晋级门禁通过，不代表 Kubernetes 工作负载部署成功或业务流量健康。
 
 所以即使 dev 后来已经前进到 digest-B，只要 digest-A 曾经在 dev 真实成功部署过，仍然可以按变更流程把经过验证的 digest-A 晋级到 staging。
 
@@ -309,6 +309,20 @@ production 140
 ```
 
 形成可审计晋级链。
+
+### 9.1 关键语义：pointer success 不是 runtime success
+
+当前 `promote.yml` 在完成来源、归档、digest、供应链、Attestation 和 Cosign 校验，并通过 GitHub Environment 审批后，调用 `deployment_pointer.py create`。该脚本创建 GitHub Deployment，并立即写入 `state=success`。
+
+因此：
+
+| 状态/记录 | 当前能证明什么 | 当前不能证明什么 |
+|---|---|---|
+| Promotion pointer = success | 制品身份通过晋级门禁，已被登记到目标环境 | 没有证明应用已部署、Pod Ready、探针通过或用户流量正常 |
+| Progressive release state = completed | 本地状态机按输入证据走完策略步骤 | 没有证明外部控制器已应用路由或真实流量已切换 |
+| Rollback pointer = success | 环境认可的制品 digest 已恢复为历史版本 | 没有自动恢复集群路由、Argo CD Git revision 或数据库状态 |
+
+如果未来要把“部署成功”纳入晋级条件，必须增加独立的 runtime deployment record：由真实部署控制器写入集群、应用、GitOps revision、Rollout/AnalysisRun 和健康证据，并让 Promotion Policy 校验该记录。不能复用当前 pointer 的 `success` 语义。
 
 ## 10. 为什么 Environment Approval 仍然需要
 
