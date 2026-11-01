@@ -427,7 +427,9 @@ Rollback 只接受同环境历史 Deployment ID，并创建新的 rollback point
 
 详见：**[制品、晋级与回滚](docs/artifacts-promotion-and-rollback.md)**
 
-环境指针只表示“这个 digest 可以出现在该环境”。指针本身不决定流量百分比，也不决定哪些集群收到新版本。这两件事由发布策略控制面完成，而且仍然使用同一份已晋级制品，不重新构建。下面是操作所需的规则。逐步命令、每一步要贴的分析 JSON、渲染文件名和失败句子在 **[灰度、蓝绿与跨集群跨区域发布操作手册](docs/progressive-delivery.md)**。按那份手册执行，不必先读 `scripts/ci/release_strategy.py`。
+环境指针只表示“这个 digest 可以出现在该环境”，不决定流量百分比，也不代表生产集群已经部署。完整的端到端目标架构（制品身份、GitOps、Argo CD、Rollouts、Prometheus Analysis、自动决策和双回滚）见 **[CI/CD 完整闭环架构](docs/cicd-closed-loop-architecture.md)**。
+
+具体发布策略、每一步输入证据、渲染文件和失败处理见 **[灰度、蓝绿与跨集群跨区域发布操作手册](docs/progressive-delivery.md)**；Argo CD / Rollouts 的接入契约、流量唯一写入者和权限边界见 **[Argo CD / Argo Rollouts 接入规范](docs/argocd-argo-rollouts-integration.md)**。
 
 仓库产出的是期望状态 JSON。它不保存 kubeconfig，不执行 `kubectl apply`，也不把这次渲染写成“生产集群已经切流”。`ci/clusters.json` 是参考目录，用来校验选择规则，不代表这些集群已经接入。
 
