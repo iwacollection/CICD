@@ -380,6 +380,28 @@ COPY production-key.pem /root/key.pem
 
 ---
 
+## 当前仓库实现边界：容器能力验证不等于工具链镜像发布
+
+需要把两条经常被混淆的流水线分开：
+
+| 流程 | 实际入口 | 当前行为 | 不代表什么 |
+|---|---|---|---|
+| 通用容器能力检查 | `.github/workflows/reusable-container.yml` | 在 GitHub-hosted Ubuntu Runner 上临时 build 镜像，检查 non-root、扫描、SBOM 和 smoke；上传检查证据 | 不 push 镜像，不生成长期工具链版本，不做项目发布 |
+| 中央工具链镜像生命周期 | `.github/workflows/toolchain-images.yml` | 根据 `ci/toolchains.json` 发现 Candidate，构建/扫描/验签/发布镜像，并通过消费者验证和 Promotion 流程管理状态 | 不能证明企业 Harbor 已接入 |
+| 业务项目容器构建 | `dag-node.yml` + `run_build.py` | 从中央 Registry 解析 Active 工具链身份，在受控容器中执行项目 build/test | 不应由项目自行传入可变镜像 tag |
+
+当前 Registry 的实际状态应以 `ci/toolchains.json` 为准：`gcc-host-container-v1` 是 Active；`java17-maven` 是 Candidate；RK、Qualcomm、MediaTek 工具链仍为 Planned。GHCR 是当前真实使用的镜像仓库；Harbor 企业 HA、异步扫描适配器、Robot 权限和灾备尚未接入，不能把 Harbor 方案章节当成已部署服务。
+
+### 容器构建失败时的定位顺序
+
+1. **镜像 build 失败**：先看 Dockerfile、build context、基础镜像和 apt/package 源；不要先清理项目依赖缓存。
+2. **镜像扫描失败**：区分扫描器执行错误与策略发现 HIGH/CRITICAL；当前扫描步骤可先输出报告，最终由 `supply_chain_policy.py` 执行门禁。报告缺失/格式错误不能当作无漏洞。
+3. **smoke 失败**：检查镜像内工具路径、版本和默认用户；在新 Candidate digest 上重新执行，不要覆盖 Active digest。
+4. **项目容器无法启动**：检查 Docker Daemon、镜像拉取权限、digest 和 Runner 架构；不得静默回退到宿主机工具链。
+5. **缓存导致差异**：关闭缓存做冷构建；如果冷构建失败，说明存在未声明输入，先修复依赖/工具链声明。
+
+恢复验收必须确认镜像 digest、扫描报告、SBOM、签名/Provenance 和消费者构建记录指向同一 Candidate/Active 身份。
+
 ## 10. 推荐最终形态
 
 ```text
