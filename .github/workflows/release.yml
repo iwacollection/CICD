@@ -178,10 +178,11 @@ jobs:
             args+=(--accept-excluded)
           fi
           if [[ "$ACTION" == "advance" || "$ACTION" == "abort" ]]; then
-            GH_TOKEN="$GH_TOKEN" python3 scripts/ci/release_state_store.py load \
+            python3 scripts/ci/release_state_store.py \
               --repository "$GITHUB_REPOSITORY" \
               --environment "$ENVIRONMENT" \
               --service "$SERVICE" \
+              load \
               --candidate-digest "$BUNDLE_SHA256" \
               --out release-state.json
             if [[ "$ACTION" == "advance" ]]; then
