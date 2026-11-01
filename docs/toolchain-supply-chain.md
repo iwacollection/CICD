@@ -160,3 +160,84 @@ Toolchain ID + immutable digest
 ```
 
 而不是“重新打一个相同 tag”。
+
+
+---
+
+## 操作者手册：一次工具链变更如何安全进入业务构建
+
+本节把上面的状态机落到当前仓库的真实入口。工具链目录是唯一登记来源；业务项目不能绕过它直接指定镜像地址。
+
+### 1. 先确认当前登记状态
+
+在仓库根目录执行：
+
+```bash
+python3 scripts/ci/toolchain_catalog.py
+python3 scripts/ci/supply_chain_policy.py
+```
+
+第一条检查 `ci/toolchains.json` 的结构和工具链引用；第二条检查供应链策略。任一命令失败，都先修复目录或策略问题，不要继续构建镜像。
+
+查看待构建 Candidate 矩阵：
+
+```bash
+python3 scripts/ci/toolchain_catalog.py --matrix
+```
+
+查看已有不可变 digest、并带消费者样例的 Candidate/Active 测试矩阵：
+
+```bash
+python3 scripts/ci/toolchain_catalog.py --consumer-matrix
+```
+
+注意：`--matrix` 只选择需要构建的 Candidate；`--consumer-matrix` 是消费者测试，不是把 Candidate 自动提升为 Active。
+
+### 2. Candidate 到 Active 的正确顺序
+
+```text
+修改 Dockerfile / build context / toolchain catalog
+  -> Pull Request
+  -> Toolchain Verify（构建、冒烟、扫描、策略检查）
+  -> Platform Validate
+  -> 合并 main
+  -> Toolchain Supply Chain 发布 Candidate
+  -> 记录精确 image@sha256、SBOM 和 provenance
+  -> 人工审查 Promotion PR
+  -> catalog 状态改为 active 并写入真实 digest
+  -> 业务构建引用 Toolchain ID
+```
+
+不要在 PR 阶段给业务项目开放 Candidate 消费权限。也不要因为镜像 push 成功就把它称为 Active。
+
+### 3. 发布后必须核对什么
+
+至少保留以下证据并相互对应：
+
+- Toolchain ID 与 catalog 中的镜像仓库；
+- Dockerfile 和完整 build context 的内容指纹；
+- 发布后的镜像 digest，而不是 tag；
+- 镜像冒烟测试结果；
+- 漏洞/许可证扫描报告；
+- SBOM；
+- GitHub provenance attestation；
+- Promotion PR 的审批和合并记录。
+
+如果 digest、build context 或 smoke command 不一致，停止 Promotion。不要复用旧 digest 冒充新输入的构建结果。
+
+### 4. 常见失败与恢复
+
+| 现象 | 证据与判断 | 处理 | 恢复验证 |
+|---|---|---|---|
+| catalog 校验失败 | `toolchain_catalog.py` 错误信息 | 修正 ID、状态、镜像、Dockerfile/context 路径 | catalog 和 supply-chain policy 两条命令均成功 |
+| Candidate 没进入构建矩阵 | `--matrix` 输出为空或数量为 0 | 检查状态是否为 candidate、digest 是否已存在、PR 修改范围是否触发工作流 | 矩阵只包含预期的待构建 Candidate |
+| 镜像构建成功但 smoke 失败 | Docker build 与 smoke step 日志 | 修复镜像内工具路径、版本或启动依赖 | 对新 Candidate digest 再次执行 smoke |
+| 扫描发现阻断漏洞/许可证 | Trivy JSON 报告与策略输出 | 修复基础镜像/软件包或按组织流程处理例外 | 新镜像重新扫描并通过策略门禁 |
+| 发布后 digest 未写回 catalog | GHCR 发布记录、promotion JSON、catalog diff | 通过 Promotion PR 写入实际 digest | catalog 校验通过，消费者矩阵解析到精确 digest |
+| Active 工具链损坏或出现严重漏洞 | Active digest、复扫报告、受影响项目清单 | 先阻断新消费；回退到上一个已验证 digest，或按 Candidate 流程发布修复版本 | Full Lane 和消费者构建通过，Manifest 记录回退后的 identity |
+
+### 5. 回滚不是重新构建
+
+回滚应将 Toolchain ID 指向之前保存并验证过的 digest，再通过 PR 和完整验证流程。不要给旧版本重新打一个相同 tag，也不要在业务项目中临时覆盖镜像地址。
+
+工具链回退后，旧、新工具链 identity 不同，缓存必须自然隔离；业务制品也必须记录实际使用的工具链身份。
