@@ -767,7 +767,7 @@ class ProgressiveDeliveryTests(unittest.TestCase):
         self.assertNotIn("inputs.state", workflow)
         self.assertIn("release_state_store.py", workflow)
         self.assertIn("              load \\\n", workflow)
-        self.assertIn("release_state_store.py publish", workflow)
+        self.assertIn("            publish \\\n", workflow)
         self.assertIn("deployments: write", workflow)
         self.assertIn("smoke", workflow)
         self.assertIn("readiness", workflow)
