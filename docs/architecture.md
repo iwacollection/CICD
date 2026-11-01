@@ -168,11 +168,36 @@ examples/              可跑通的最小示例
  docs/                  架构、缓存、制品、安全、排障文档
 ```
 
-## 10. 环境内发布策略
+## 10. 制品晋级与发布控制：必须区分“授权”和“上线”
 
-晋级把同一个 digest 授权到 `dev`、`staging` 或 `production`。授权之后，流量怎么切、集群名单怎么定，由 [灰度、蓝绿与跨集群跨区域灰度](progressive-delivery.md) 决定。
+当前仓库有两条不同的控制链：
 
-环境内灰度和蓝绿调整的是 Gateway API HTTPRoute。多集群灰度 `multi_cluster_canary` 先用 Open Cluster Management PlacementDecision 和 Argo CD ApplicationSet 钉死集群 ID，再只在这份名单里调整 HTTPRoute 权重；后开区域在打开前保持 0%。多集群蓝绿 `multi_cluster_blue_green` 使用同一份名单和区域顺序，但在名单内做原子槽位切换，预览 header 不改变生产权重，后开区域打开前保持基线。路由对象不能把制品送到名单之外的集群。同一次渲染会从这份状态再写出 Istio VirtualService，灰度权重与 HTTPRoute 相同，蓝绿生产流量 100% 在当前槽。VirtualService 不是第二份策略。`ops/Jenkinsfile` 只调用同一条 CLI，不保存 kubeconfig。
+**制品晋级（已实现 GitHub 侧记录）**
+
+```text
+可信 Build Run
+  -> 长期归档
+  -> 校验 Manifest / digest / SBOM / Attestation / Cosign
+  -> 检查 dev -> staging -> production 的前置记录
+  -> GitHub Environment 审批
+  -> 创建 GitHub Deployment digest pointer
+```
+
+这里创建的 Deployment pointer 会被标记为 `success`，表示“这份制品已通过晋级门禁并被登记为该环境认可的 digest”。它**不表示应用已部署到 Kubernetes，也不表示业务流量已经切换或健康检查通过**。前置环境策略查找的也是同一制品身份的成功晋级 pointer，不是运行时健康证明。详见 [制品、长期归档、晋级与回滚](artifacts-promotion-and-rollback.md)。
+
+**渐进式发布（当前实现为期望状态引擎）**
+
+```text
+环境 digest pointer
+  -> release_strategy.py plan / advance / abort
+  -> 输出 release-state.json
+  -> 渲染 Gateway API HTTPRoute + Istio VirtualService
+  -> 人工/外部控制器核对并消费
+```
+
+策略引擎已实现权重、槽位、区域波次、ClusterPin 和失败不推进等规则；`.github/workflows/release.yml` 只生成、校验并上传期望状态，不执行 `kubectl apply`。当前 `advance` 的分析 JSON 由操作者输入，程序只校验字段、类型和阈值，不验证它是否来自 Prometheus、是否新鲜或是否被篡改。因此这不是已接通 Prometheus 的自动生产发布闭环。
+
+真实生产接入还需要：可信的分析证据采集与签名/来源验证、不可篡改的发布状态存储、Argo CD/Rollouts/流量控制器适配、运行时反馈，以及运行时回滚与 GitOps 期望状态回退。不要把清单渲染成功写成流量切换成功。
 
 ## 11. 后续生产化扩展
 
