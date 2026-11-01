@@ -418,7 +418,7 @@ Private Product-owned Self-hosted Runner
 
 ---
 
-### 7.1 Resource Broker 的真实边界
+### 11.1 Resource Broker 的真实边界
 
 仓库中的 `resource_broker.py` 是 License/HIL 租约客户端：它向外部服务调用 `POST /v1/leases`，执行结束后调用 `DELETE /v1/leases/{lease_id}`，并在申请或释放失败时 fail closed。仓库中的本地 HIL Broker/服务文件可用于开发和实验室集成验证，但它们不能证明企业级高可用 Broker、真实许可证服务器或真实设备池已经部署。生产接入还要验证并发互斥、租约过期回收、Broker 故障恢复、设备掉线、断电和异常进程退出后的资源释放。
 
