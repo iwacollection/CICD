@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "description": "Argo Rollouts 适配层的运行时接线。灰度台阶、分析项、阈值、区域顺序只认 ci/release-strategies.json，这里不再抄一份。这里只回答三件事：指标怎么量（Prometheus 查询、冒烟接口）、每一项量多久（间隔、次数、失败容忍）、多集群怎么按区域放行（ApplicationSet RollingSync）。渲染只产出期望状态，不执行 kubectl apply，也不持有 kubeconfig。",
+  "controller": {
+    "traffic_router": "gateway_api",
+    "abort_scale_down_delay_seconds": 30,
+    "revision_history_limit": 3
+  },
+  "workload": {
+    "replicas": 3,
+    "container_port": 8080,
+    "port_name": "http",
+    "readiness_path": "/healthz"
+  },
+  "metrics": {
+    "prometheus_address": "http://prometheus.monitoring.svc.cluster.local:9090",
+    "cluster_domain": "cluster.local",
+    "queries": {
+      "error_rate": "sum(rate(istio_requests_total{reporter=\"source\",destination_service=~\"{{args.host}}\",response_code=~\"5.*\"}[2m])) / sum(rate(istio_requests_total{reporter=\"source\",destination_service=~\"{{args.host}}\"}[2m]))",
+      "latency_p95": "histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{reporter=\"source\",destination_service=~\"{{args.host}}\"}[2m])) by (le))",
+      "request_volume": "sum(increase(istio_requests_total{reporter=\"source\",destination_service=~\"{{args.host}}\"}[5m])) or vector(0)"
+    }
+  },
+  "analysis": {
+    "consecutive_error_limit": 4,
+    "smoke": {
+      "path": "/healthz",
+      "json_path": "{$.status}",
+      "expected": "ok",
+      "timeout_seconds": 10,
+      "interval_seconds": 20,
+      "count": 3,
+      "failure_limit": 0
+    },
+    "error_rate": {
+      "initial_delay_seconds": 30,
+      "interval_seconds": 60,
+      "count": 5,
+      "failure_limit": 1
+    },
+    "latency_p95": {
+      "initial_delay_seconds": 30,
+      "interval_seconds": 60,
+      "count": 5,
+      "failure_limit": 1
+    },
+    "request_volume": {
+      "initial_delay_seconds": 30,
+      "interval_seconds": 60,
+      "count": 5,
+      "inconclusive_limit": 2
+    },
+    "confirm_error_rate": {
+      "initial_delay_seconds": 0,
+      "interval_seconds": 60,
+      "count": 10,
+      "failure_limit": 1
+    }
+  },
+  "blue_green": {
+    "auto_promotion_enabled": true,
+    "scale_down_delay_seconds": 600
+  },
+  "progressive_sync": {
+    "label_key": "region",
+    "max_update": "100%"
+  },
+  "gitops": {
+    "repo_url": "",
+    "revision": "main",
+    "base_path": "rollouts",
+    "project": "default",
+    "argocd_namespace": "argocd"
+  }
+}
