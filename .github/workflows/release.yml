@@ -193,7 +193,7 @@ jobs:
           if not raw_analysis.strip():
               raise SystemExit("advance requires analysis JSON")
           Path("analysis.json").write_text(
-              raw_analysis if raw_analysis.endswith("\\n") else raw_analysis + "\\n",
+              raw_analysis if raw_analysis.endswith("\n") else raw_analysis + "\n",
               encoding="utf-8",
           )
           PY

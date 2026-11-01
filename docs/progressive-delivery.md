@@ -839,3 +839,21 @@ synthetic analysis is not production evidence
 真实集群 apply 需要集群里的 Gateway 或 Istio、带 `cicd.platform/cluster-id` 标签的 OCM ManagedCluster，以及消费这些 JSON 的控制器。这些资源不在本仓库。控制面测试通过，不等于生产集群已经完成灰度或蓝绿。
 
 把 kubeconfig 放进 GitHub Actions 或 Jenkins，或者在 Job 里直接 `kubectl apply`，都违反第 14 节的合同。VirtualService 只是同一份状态的适配，不能在网格里再维护一套权重。
+
+
+## 发布状态的持久化、完整性与防重放
+
+发布状态不再由操作者把上一次的 JSON 原样粘贴到下一次 `workflow_dispatch`。手工传递 JSON 既无法证明来源，也无法阻止旧版本状态被重复提交。
+
+当前实现使用 GitHub Deployments API 建立独立的 `cicd-release-state` 状态日志：
+
+1. 每次 `plan`、`advance`、`abort` 完成结构校验后，创建一条新的状态 Deployment。
+2. Deployment payload 保存环境、服务、递增 revision、父 Deployment ID、完整 release state 和规范化 JSON 的 SHA256。
+3. 后续 `advance` / `abort` 从服务端读取最新成功 checkpoint，不接受操作者自带的 state JSON。
+4. 加载时重新计算 SHA256，并核对环境、服务、候选 digest 和 Deployment 状态。
+5. 写入下一 revision 时，必须证明输入 state 的父 Deployment ID、revision 与服务端最新 checkpoint 一致；旧 revision 重放会被拒绝。
+6. 同一环境/服务由 GitHub Actions concurrency group 串行执行；状态日志使用独立 environment，不与 dev/staging/production 的制品指针混在一起。
+
+这里的 SHA256 用于检测状态内容损坏，不是数字签名。真实性来自受 GitHub Deployments 写权限保护的服务端 checkpoint；不要把它描述成独立密码学签名或跨系统事务型数据库。并发控制依赖 GitHub Actions concurrency，写入前还会检查最新父版本；如果创建 Deployment 后写 status 失败，后续操作会 fail closed，需要人工核对该条不完整记录，不能跳过它继续发布。
+
+状态完整性仍不等于发布执行成功：本 Workflow 仍只渲染 HTTPRoute / Istio VirtualService 期望状态，不会把它们应用到真实集群，也不会自动采集 Prometheus 分析数据。
