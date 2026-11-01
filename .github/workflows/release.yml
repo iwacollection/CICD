@@ -268,11 +268,12 @@ jobs:
           SERVICE: ${{ inputs.service }}
         run: |
           set -euo pipefail
-          python3 scripts/ci/release_state_store.py publish \\
-            --repository "$GITHUB_REPOSITORY" \\
-            --environment "$ENVIRONMENT" \\
-            --service "$SERVICE" \\
-            --action "$ACTION" \\
+          python3 scripts/ci/release_state_store.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --environment "$ENVIRONMENT" \
+            --service "$SERVICE" \
+            publish \
+            --action "$ACTION" \
             --state release-state.json
 
       - name: Publish release decision
