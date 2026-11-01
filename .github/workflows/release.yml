@@ -88,15 +88,10 @@ on:
         required: false
         default: ""
         type: string
-      state:
-        description: "advance and abort. Compact release-state.json from the previous run. A later workflow_dispatch cannot re-upload that artifact. The job writes this string to release-state.json and the engine validates it. Do not commit it."
-        required: false
-        default: ""
-        type: string
 
 permissions:
   contents: read
-  deployments: read
+  deployments: write
 
 concurrency:
   group: release-${{ inputs.environment }}-${{ inputs.service }}
@@ -159,7 +154,6 @@ jobs:
           DENY_CLUSTERS: ${{ inputs.deny_clusters }}
           ACTIVE_SLOT: ${{ inputs.active_slot }}
           ANALYSIS: ${{ inputs.analysis }}
-          STATE: ${{ inputs.state }}
         run: |
           set -euo pipefail
           args=(
@@ -183,33 +177,26 @@ jobs:
             args+=(--accept-excluded)
           fi
           if [[ "$ACTION" == "advance" || "$ACTION" == "abort" ]]; then
-            python3 - <<'PY'
-          import json
+            GH_TOKEN="$GH_TOKEN" python3 scripts/ci/release_state_store.py load \
+              --repository "$GITHUB_REPOSITORY" \
+              --environment "$ENVIRONMENT" \
+              --service "$SERVICE" \
+              --candidate-digest "$BUNDLE_SHA256" \
+              --out release-state.json
+            if [[ "$ACTION" == "advance" ]]; then
+              python3 - <<'PY'
           import os
           from pathlib import Path
 
-          action = os.environ["ACTION"]
-          raw_state = os.environ.get("STATE", "")
-          pointer = json.loads(Path("pointer.json").read_text(encoding="utf-8"))
-          text = raw_state if raw_state.endswith("\n") else raw_state + "\n"
-          Path("release-state.json").write_text(text, encoding="utf-8")
-          try:
-              state = json.loads(text)
-          except json.JSONDecodeError as exc:
-              raise SystemExit(f"state input is not valid JSON: {exc}")
-          if not isinstance(state, dict):
-              raise SystemExit("state input must be a JSON object")
-          if state.get("candidate_digest") != pointer.get("bundle_sha256"):
-              raise SystemExit("state candidate_digest does not match the environment pointer")
-          if state.get("environment") != os.environ["ENVIRONMENT"]:
-              raise SystemExit("state environment does not match the release environment")
-          if action == "advance":
-              raw_analysis = os.environ.get("ANALYSIS", "")
-              Path("analysis.json").write_text(
-                  raw_analysis if raw_analysis.endswith("\n") else raw_analysis + "\n",
-                  encoding="utf-8",
-              )
+          raw_analysis = os.environ.get("ANALYSIS", "")
+          if not raw_analysis.strip():
+              raise SystemExit("advance requires analysis JSON")
+          Path("analysis.json").write_text(
+              raw_analysis if raw_analysis.endswith("\\n") else raw_analysis + "\\n",
+              encoding="utf-8",
+          )
           PY
+            fi
           fi
           if [[ "$ACTION" == "scenario" ]]; then
             echo "synthetic analysis is not production evidence" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -268,6 +255,23 @@ jobs:
           print("rendered Gateway API HTTPRoute and Istio VirtualService from the same release state")
           print("this job does not apply manifests to a live cluster")
           PY
+
+      - name: Persist release state with monotonic checkpoint
+        if: inputs.action != 'scenario'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTION: ${{ inputs.action }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          SERVICE: ${{ inputs.service }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/release_state_store.py publish \\
+            --repository "$GITHUB_REPOSITORY" \\
+            --environment "$ENVIRONMENT" \\
+            --service "$SERVICE" \\
+            --action "$ACTION" \\
+            --state release-state.json
 
       - name: Publish release decision
         shell: bash
