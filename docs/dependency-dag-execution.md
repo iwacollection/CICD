@@ -215,3 +215,79 @@ DAG 引擎已经支持 target-aware 上游匹配，但真实 RK/Qcom/MTK 仍要�
 - 项目真实 build/test/pr-validation 脚本。
 
 这些条件没有满足前，`embedded-firmware-template` 保持 disabled，不能用模板绿色冒充真实硬件 CI。
+
+
+---
+
+## 12. DAG 执行失败时，系统应该怎样表现
+
+DAG 的关键不是“画出依赖图”，而是确保下游只消费本次运行中、同一源码提交产生并验证过的上游制品。
+
+### 12.1 失败传播规则
+
+当前中央 Workflow 使用静态的 L0～L7 Job，并通过 `needs` 建立层级屏障。下游层依赖上一层成功；上一层失败或被跳过时，后续层不会作为正常成功路径继续交付。Matrix 的 `fail-fast: false` 只表示同一层一个目标失败时，不立即取消同层其他目标；它**不表示允许下一层忽略失败继续构建**。
+
+```text
+L0: lib-a 成功 ─┐
+    lib-b 失败 ─┴─> L1 不应正常启动
+                         |
+                         v
+                    整次 DAG 失败
+                         |
+                         v
+              修复失败节点或输入后重跑
+```
+
+### 12.2 下游节点如何拒绝错误上游
+
+在 `.github/workflows/dag-node.yml` 中，执行顺序是：
+
+1. 下载本次 Run 的 `dag-*` artifacts；
+2. `resolve_upstream_artifacts.py` 根据依赖声明、目标平台、`GITHUB_SHA` 和 `GITHUB_REPOSITORY` 解析唯一上游；
+3. 校验 Manifest 和 bundle digest；
+4. 解压到当前项目的 `.ci-upstream/<project>`；
+5. 将上游 fingerprint 放入下游 cache key；
+6. 将上游 artifact digest 写入下游 Manifest。
+
+因此，找不到上游、同优先级匹配多个、源码 SHA 不一致或仓库身份不一致，都应该失败关闭。不能从旧 Workflow Run、其他分支或 Runner 工作目录中“补一个看起来差不多的包”。
+
+### 12.3 操作者排查顺序
+
+当下游项目失败时，不要先重跑整个矩阵。按以下顺序定位：
+
+1. 打开失败的 DAG Node Job，确认失败发生在 checkout、上游下载、resolver、build/test 还是 package/verify；
+2. 若失败在 resolver，检查本次 Run 是否上传了预期的 `dag-<artifact>`，以及 Manifest 中的 source SHA、repository、target 和 digest；
+3. 若失败在 build，检查项目是否按 `CI_UPSTREAM_ROOT` 引用上游输出，而不是引用本机绝对路径；
+4. 若失败在 cache fingerprint，检查锁文件 pattern 是否拼错、文件是否确实存在；
+5. 若失败在 verify，保留 bundle、manifest、checksum 和完整日志，禁止手工修改 Manifest 让校验通过。
+
+### 12.4 重跑与恢复边界
+
+- **代码或构建脚本错误：**修复代码后产生新 commit，再从新 commit 运行 DAG；不要把旧 commit 的上游包混入新 commit。
+- **Runner 临时故障：**可重跑失败的 Workflow Job，但必须确认 GitHub Actions 重跑仍属于同一个 Workflow Run/Attempt 语义，并观察上游 artifact 是否仍可获取。若无法确认，重跑整个 Workflow 更安全。
+- **上游制品缺失或 digest 不匹配：**不要只重跑下游；应从失败的上游层重新生成制品，再让下游消费同一 Run 中的验证结果。
+- **依赖图或目标配置错误：**先修复 catalog，再运行配置校验和 DAG 规划；不要用手工指定的层级绕过 Planner。
+- **超过 8 层：**当前 Workflow 只显式实现 L0～L7，Planner 应拒绝超出预算的 DAG。必须通过代码变更增加层级并补测试，不能删掉深层依赖。
+
+### 12.5 本地复现 Planner
+
+从仓库根目录运行：
+
+```bash
+python3 scripts/ci/dependency_plan.py
+python3 scripts/ci/dag_plan.py --projects-json '["hello-cpp"]' --lane fast
+```
+
+第一条检查 catalog 中依赖关系；第二条根据选定项目和 lane 输出可执行层级。它们验证的是规划逻辑，不会在本地执行 GitHub Actions Job，也不会生成真实 DAG artifacts。
+
+### 12.6 恢复完成的判定
+
+一次恢复必须同时满足：
+
+- 本次运行所有必需层成功；
+- 下游 Manifest 的 `dependencies.upstream_artifacts` 指向本次运行上游 bundle digest；
+- 上游与下游 source SHA、repository、target 匹配；
+- 下游 build/test 成功；
+- 最终 bundle、Manifest、checksum 再次校验通过。
+
+只看到最后一个 Job 绿色，不能单独证明依赖交接正确。
