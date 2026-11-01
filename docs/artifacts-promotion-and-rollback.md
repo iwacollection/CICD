@@ -237,9 +237,9 @@ Promotion Path Policy
   |
   +-- dev: root allowed
   |
-  +-- staging: 查 dev successful deployment history
+  +-- staging: 查 dev successful promotion-pointer history
   |
-  `-- production: 查 staging successful deployment history
+  `-- production: 查 staging successful promotion-pointer history
   |
   v
 重新验证 bundle + manifest
@@ -259,7 +259,7 @@ Promotion Path Policy
 
 Promotion Policy 查询的是**历史 successful promotion pointer**，而不是只看前置环境当前版本。这里的 successful 是 `deployment_pointer.py` 创建 GitHub Deployment 后写入的状态，代表制品晋级门禁通过，不代表 Kubernetes 工作负载部署成功或业务流量健康。
 
-所以即使 dev 后来已经前进到 digest-B，只要 digest-A 曾经在 dev 真实成功部署过，仍然可以按变更流程把经过验证的 digest-A 晋级到 staging。
+所以即使 dev 后来已经前进到 digest-B，只要 digest-A 曾经在 dev 通过晋级门禁并创建成功 pointer，仍然可以按变更流程把经过验证的 digest-A 晋级到 staging。
 
 ## 9. GitHub Deployment 是环境 digest pointer + 审计链
 
@@ -367,7 +367,7 @@ Rollback 不走 `dev -> staging -> production` 前向策略。
 它的边界是：
 
 ```text
-只能恢复目标环境自己的历史 successful deployment
+只能恢复目标环境自己的历史 successful promotion pointer
 ```
 
 流程：
