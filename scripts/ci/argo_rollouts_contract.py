@@ -72,6 +72,36 @@ def validate_contract(document: Any) -> list[str]:
             if analysis.get(key) is not True:
                 errors.append(f"analysis_policy.{key} must be true")
 
+    credential_policy = document.get("credential_policy")
+    required_credentials = {
+        "ci_build_has_cluster_write": False,
+        "gitops_writer_has_cluster_admin": False,
+        "observer_has_write_access": False,
+        "prefer_oidc_and_short_lived_credentials": True,
+        "forbid_plaintext_kubeconfig_in_repository": True,
+    }
+    if not isinstance(credential_policy, dict):
+        errors.append("credential_policy must be an object")
+    else:
+        for key, expected in required_credentials.items():
+            if credential_policy.get(key) is not expected:
+                errors.append(f"credential_policy.{key} must be {expected!r}")
+
+    promotion_policy = document.get("promotion_policy")
+    required_promotion = {
+        "require_artifact_contract_v2": True,
+        "require_verified_bundle_sha256": True,
+        "require_image_digest_match": True,
+        "require_pinned_cluster_set": True,
+        "require_previous_wave_success": True,
+    }
+    if not isinstance(promotion_policy, dict):
+        errors.append("promotion_policy must be an object")
+    else:
+        for key, expected in required_promotion.items():
+            if promotion_policy.get(key) is not expected:
+                errors.append(f"promotion_policy.{key} must be {expected!r}")
+
     environments = document.get("environments")
     if not isinstance(environments, list):
         errors.append("environments must be an array")
@@ -97,10 +127,24 @@ def validate_contract(document: Any) -> list[str]:
             errors.append(f"{prefix} duplicates environment/cluster_id {identity!r}")
         seen.add(identity)
 
-        if owner == "cicd-renderer" and env.get("rollouts_manages_traffic") is True:
+        renderer_writes = env.get("cicd_renderer_manages_traffic") is True
+        rollouts_writes = env.get("rollouts_manages_traffic") is True
+        if renderer_writes and rollouts_writes:
             errors.append(f"{prefix} assigns traffic weights to both CICD renderer and Rollouts")
-        if owner == "argo-rollouts" and env.get("cicd_renderer_manages_traffic") is True:
+        if owner == "none" and (renderer_writes or rollouts_writes):
+            errors.append(f"{prefix} declares a traffic writer while traffic_owner is none")
+        if owner == "cicd-renderer" and rollouts_writes:
+            errors.append(f"{prefix} assigns traffic weights to both CICD renderer and Rollouts")
+        if owner == "argo-rollouts" and renderer_writes:
             errors.append(f"{prefix} assigns traffic weights to both Rollouts and CICD renderer")
+
+        if mode == "observe-only":
+            for action in ("allow_promote", "allow_abort", "allow_production"):
+                if env.get(action) is True:
+                    errors.append(f"{prefix}.{action} must be false in observe-only mode")
+        elif mode != "production" and env.get("allow_production") is True:
+            errors.append(f"{prefix}.allow_production is only valid in production mode")
+
         if mode == "production":
             if env.get("allow_production") is not True:
                 errors.append(f"{prefix} production mode requires allow_production=true")
