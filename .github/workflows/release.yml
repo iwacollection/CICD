@@ -139,6 +139,7 @@ jobs:
       - name: Plan, advance, abort, or walk the release
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           ACTION: ${{ inputs.action }}
           STRATEGY: ${{ inputs.strategy }}
           ENVIRONMENT: ${{ inputs.environment }}

@@ -111,10 +111,8 @@ class PromotionPathPolicyTests(unittest.TestCase):
     @patch("promotion_policy.inspect_pointer")
     @patch("promotion_policy._request")
     def test_failed_prerequisite_deployment_is_not_accepted(self, request, inspect_pointer) -> None:
-        request.side_effect = [
-            [{"id": 77}],
-            [{"state": "failure"}],
-        ]
+        request.side_effect = [[{"id": 77}]]
+        inspect_pointer.side_effect = ValueError("deployment 77 has no historical success")
         with self.assertRaisesRegex(ValueError, "no successful deployment"):
             find_successful_prerequisite(
                 api_url="https://api.github.com",
@@ -123,7 +121,7 @@ class PromotionPathPolicyTests(unittest.TestCase):
                 prerequisite_environment="staging",
                 identity=self.identity,
             )
-        inspect_pointer.assert_not_called()
+        inspect_pointer.assert_called_once()
 
     @patch("deployment_pointer._request")
     def test_promotion_pointer_records_verified_prerequisite_deployment(self, request) -> None:
