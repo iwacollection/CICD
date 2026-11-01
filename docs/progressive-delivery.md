@@ -216,7 +216,7 @@ analysis latency_p95 exceeds threshold
 synthetic analysis is not production evidence
 ```
 
-生产推进只能使用 `advance`，并且证据来自真实流量或真实探活。GitHub Actions 的 `analysis` 输入就是这份 JSON 字符串。Job 把它写入 `analysis.json` 后交给 `release_strategy.py advance`，不会在 workflow 里填一份合成的通过结果。
+当前实现只证明 JSON 字段、类型、请求数和阈值满足策略；它**不验证证据来源**。GitHub Actions 的 `analysis` 输入是操作者手工提供的 JSON 字符串，Job 原样写入 `analysis.json` 后交给 `release_strategy.py advance`。程序不会查询 Prometheus，也不会验证 Prometheus 查询时间窗、数据源身份、样本新鲜度、签名或证据是否对应当前 release。标记为 `operator` 只是证据模式标签，不是可信来源证明。**因此当前 advance 只能用于受控演练/人工操作验证，不能作为无人值守生产自动放量的依据。**
 
 ## 6. 环境内灰度
 
@@ -709,7 +709,7 @@ python3 -c 'import json,pathlib; print(json.dumps(json.loads(pathlib.Path("relea
 
 参考目录上走完一步之后的状态大约 3KB，放得进这个字符串。不要把 `state` 提交进仓库。
 
-`analysis` 原样写入 `analysis.json`。需要哪些字段仍由当前步骤决定。Workflow 不生成合成通过证据。成功后重新下载 artifact。证据标记应为 `operator`。按第 7 节或第 9 节的表核对权重或槽位，再决定下一次 advance 还是 abort。
+`analysis` 原样写入 `analysis.json`。需要哪些字段仍由当前步骤决定。Workflow 不生成合成通过证据，但也不验证操作者输入的 JSON 是否真实来自监控系统。成功后重新下载 artifact。证据标记为 `operator`，它只表示不是 scenario 自动生成的 synthetic 数据，不代表证据经过认证。按第 7 节或第 9 节的表核对权重或槽位，再决定下一次 advance 还是 abort。生产接入前必须由只读 Analysis Adapter 从受信 Prometheus/探针读取数据，记录 query、时间窗、样本数、数据源、release ID，并验证证据完整性。
 
 ### 13.3 中止
 
@@ -821,6 +821,18 @@ synthetic analysis is not production evidence
 - `release.yml` 的 `action` 包含 `plan`、`advance`、`abort`、`scenario`；`advance` 把操作者传入的分析 JSON 交给引擎；渲染结果同时包含 HTTPRoute 和 VirtualService；workflow 里没有 kubeconfig，也不包含 `kubectl apply`。
 
 平台校验 `validate.yml` 会执行 `release_strategy.py validate`。
+
+## 17.1 当前实现的生产阻断项
+
+以下是把状态机接入生产流量前必须完成的控制面工作：
+
+1. **分析证据真实性**：当前 `analysis` 是手工 JSON，没有 Prometheus/探针读取、查询时间窗、release 绑定、签名或来源认证。
+2. **发布状态完整性**：`state` 通过 workflow_dispatch 字符串在多次运行间传递；当前没有服务端持久化、签名、版本号/CAS（比较并交换）或防重放校验。Workflow 只额外核对 candidate digest 和 environment，不能把操作者上传的整份状态视为不可篡改事实。
+3. **流量控制执行**：当前只渲染 HTTPRoute/VirtualService JSON 并上传 Artifact，没有 apply，也没有读取控制器的实际路由状态。
+4. **运行时回滚**：`abort` 只把期望状态渲染回基线；`rollback.yml` 只恢复 GitHub Deployment 制品 pointer。二者都不会自动恢复真实集群流量。
+5. **发布完成判定**：当前 `completed` 表示策略状态机完成，不代表 Rollout、AnalysisRun 和业务验收完成。
+
+建议的生产闭环必须是：受信证据读取 → 签名/来源校验 → 服务端状态存储与乐观锁 → 单一流量控制器执行 → 只读回读实际路由/Pod/Analysis 状态 → 决策和审计。没有这些适配器前，不要给 `operator` 标签附加可信含义。
 
 ## 17. 还没有做的事
 
