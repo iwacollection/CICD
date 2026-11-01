@@ -1,103 +1,111 @@
-# CI/CD 平台文档导航
+# CI/CD 学习与工作文档导航
 
-> **第一次学习请先看：[第一次看这个 CI/CD 项目：从这里开始](START-HERE.md)。**
->
-> 不需要从头读完所有文档。先理解主流程，再按实际问题查阅专题。
+文档按实际交付工作流程组织。建议先读[第一次学习入口](START-HERE.md)，再根据当前工作环节查阅专题；不需要按目录顺序读完所有文档。
 
-## 一、核心学习路线
+## 一、先理解整条交付流程
 
-按顺序读下面 4 份文档，就能建立平台的基本认识：
+```text
+项目接入
+  → 代码变更与构建范围分析
+  → 工具链准备、依赖构建与测试
+  → 制品生成、校验和安全检查
+  → 制品归档与环境发布
+  → 发布验证、回滚
+  → 平台日常运维与持续治理
+```
 
-1. [总体架构](architecture.md)：平台由哪些部分组成，代码如何进入平台。
-2. [真实依赖 DAG](dependency-dag-execution.md)：多个项目之间有依赖时，构建顺序如何安排。
-3. [Artifact Contract v2](artifact-contract-v2.md)：构建结果如何记录来源、依赖和校验值。
-4. [制品、晋级与回滚](artifacts-promotion-and-rollback.md)：同一个制品如何经过测试、预发布、生产，以及出问题如何回退。
+## 二、按工作流程学习
 
-完整主流程：
+### 1. 接入一个新项目
 
-`代码提交 → 影响分析 → 依赖构建 → 测试 → 制品打包 → 安全检查 → 长期归档 → 环境发布 → 验证 / 回滚`
+先弄清楚项目需要提供什么，平台负责什么，以及怎样安全地接入中央构建流程。
 
-## 二、按问题查文档
+- [新项目接入手册](onboarding.md)：从项目登记到首次构建的完整接入步骤。
+- [业务仓库调用中央 CI](reusable-workflow.md)：业务仓库如何调用中央构建流程。
+- [总体架构](architecture.md)：了解平台各环节如何衔接。
 
-### 构建和工具链
+### 2. 提交代码后，平台如何决定构建什么
 
-- [容器化构建环境](containerized-build-environments.md)
-- [构建、缓存与依赖](build-cache-and-dependencies.md)
-- [Fast Lane 与影响分析](fast-lane-and-impact-analysis.md)
-- [多语言构建策略](language-build-strategies.md)
+理解一次代码变更怎样影响项目，以及多个项目之间有依赖时如何安排先后顺序。
+
+- [Fast Lane 与影响分析](fast-lane-and-impact-analysis.md)：识别本次变更影响的项目，避免无关构建。
+- [真实依赖 DAG](dependency-dag-execution.md)：按依赖关系安排构建，支持安全并行。
+- [构建、缓存与依赖](build-cache-and-dependencies.md)：理解依赖下载、缓存命中和缓存失效时的处理。
+
+### 3. 平台怎样准备环境并完成构建、测试
+
+不同项目需要不同版本的 JDK、编译器或厂商 SDK；本环节重点是环境一致、任务隔离和失败可定位。
+
+- [多语言构建策略](language-build-strategies.md)：不同语言项目如何共用平台规则。
+- [容器化构建环境](containerized-build-environments.md)：如何固定构建环境，减少机器差异。
+- [Java 工具链管理](java-toolchain-management.md)：管理不同版本 JDK 和 Java 构建工具。
+- [Jenkins Java Toolchain Shared Library](jenkins-shared-library.md)：Jenkins 项目如何调用统一 Java 工具链。
+- [平台运维、可观测性与容量](operations-observability-and-capacity.md)：排查排队、执行时间和 Runner 容量问题。
+
+### 4. 构建完成后，怎样证明制品可信
+
+制品是最终要交付的软件文件或固件。本环节解决来源不清、文件被替换、依赖不明和安全风险不可追溯的问题。
+
+- [Artifact Contract v2](artifact-contract-v2.md)：记录制品来源、构建环境、依赖和文件校验值。
+- [供应链策略](supply-chain-policy.md)：检查漏洞、许可证、密钥和配置风险。
+- [Runner 与供应链安全](runner-security-and-supply-chain.md)：隔离不可信代码与有权限的构建机器。
+
+### 5. 怎样保存、发布和回滚
+
+先理解制品归档，再理解同一份制品如何进入不同环境，以及发布失败时如何恢复。
+
+- [制品、晋级与回滚](artifacts-promotion-and-rollback.md)：制品如何归档、进入环境以及恢复历史版本。
+- [灰度、蓝绿与跨集群发布](progressive-delivery.md)：逐步放量、切换版本和跨集群发布的操作流程。
+- [CI/CD 完整闭环架构](cicd-closed-loop-architecture.md)：查看从制品到部署、验证和回滚的整体设计。
+- [Argo CD / Argo Rollouts 接入规范](argocd-argo-rollouts-integration.md)：了解与 Kubernetes 发布系统的集成边界。
+
+### 6. 平台运行中，怎样发现和处理问题
+
+- [故障排查手册](troubleshooting.md)：按现象定位构建、制品、发布和权限问题。
+- [平台健康度与 SLO](platform-health-slo.md)：了解成功率、排队时间和执行时间等平台指标。
+- [平台维护手册](platform-maintenance.md)：日常维护、变更和重新验收要求。
+- [仓库治理基线与漂移审计](repository-governance.md)：检查仓库保护规则是否被意外修改。
+- [生产生命周期验收记录](production-verification.md)：查看真实执行记录和验证边界。
+
+## 三、两类需要额外学习的项目场景
+
+这两组专题是主流程在特定项目上的扩展，不是另一套独立交付流程。
+
+### 嵌入式与多 SoC 固件
+
+- [多 SoC / 固件 CI 管理主线](multi-soc-and-firmware.md)：不同芯片平台如何共用管理方式、隔离工具链。
+- [Hardware Runner / SDK / License / HIL](hardware-runner-integration.md)：专用构建机器、厂商 SDK、许可证和硬件实验室如何协作。
+- [RK 真实物理接入手册](rk-physical-bringup.md)：瑞芯微真实设备接入前后的准备和验收。
+
+### Jenkins 与 Java 项目
+
 - [Java 工具链管理](java-toolchain-management.md)
 - [Jenkins Java Toolchain Shared Library](jenkins-shared-library.md)
 
-### 制品和安全
+## 四、每份技术专题应该回答什么
 
-- [Artifact Contract v2](artifact-contract-v2.md)
-- [供应链策略](supply-chain-policy.md)
-- [Runner 与供应链安全](runner-security-and-supply-chain.md)
-- [制品、晋级与回滚](artifacts-promotion-and-rollback.md)
+阅读或维护专题时，围绕实际工作问题展开，不以罗列名词或代码文件为目标：
 
-### 发布和部署
+1. **为什么需要**：生产中遇到什么问题，不做会有什么影响？
+2. **解决什么问题**：本方案负责什么，不负责什么？
+3. **实际怎么运行**：从输入、执行过程到输出，按真实顺序说明。
+4. **失败怎么办**：常见失败现象、判断依据、处理步骤和恢复验证是什么？
 
-- [灰度、蓝绿与跨集群发布](progressive-delivery.md)
-- [CI/CD 完整闭环架构](cicd-closed-loop-architecture.md)
-- [Argo CD / Argo Rollouts 接入规范](argocd-argo-rollouts-integration.md)
-- [生产生命周期验收记录](production-verification.md)
+如果某项内容不适用，应明确说明原因，不为满足格式而硬加内容。
 
-### 嵌入式和多 SoC 固件
+## 五、如何判断一项能力已经完成
 
-- [多 SoC / 固件 CI 管理主线](multi-soc-and-firmware.md)
-- [Hardware Runner / SDK / License / HIL](hardware-runner-integration.md)
-- [RK 真实物理接入手册](rk-physical-bringup.md)
+必须把以下四层分开记录，不能互相替代：
 
-### 平台运维和治理
+| 层次 | 能证明什么 | 不能证明什么 |
+|---|---|---|
+| 设计目标 | 说明计划解决的问题和预期行为 | 不能证明代码已经实现 |
+| 代码实现 | 仓库中存在相应逻辑、配置或集成入口 | 不能证明逻辑正确，也不能证明外部系统已接通 |
+| 自动化验证 | 测试或工作流在规定条件下通过 | 不能自动证明真实生产环境运行正常 |
+| 真实生产验收 | 在明确的真实环境中完成端到端验证，并保留记录 | 不能自动推广为所有项目、硬件和环境均已验收 |
 
-- [新项目接入手册](onboarding.md)
-- [业务仓库调用中央 CI](reusable-workflow.md)
-- [CI 平台运维、可观测性与容量](operations-observability-and-capacity.md)
-- [平台健康度与 SLO](platform-health-slo.md)
-- [仓库治理基线与漂移审计](repository-governance.md)
-- [平台维护手册](platform-maintenance.md)
-- [故障排查手册](troubleshooting.md)
+当前真实验证范围和未完成边界，以[生产生命周期验收记录](production-verification.md)为准。不要把模拟场景、示例项目或控制面渲染结果写成真实生产部署。
 
-## 三、配置和代码从哪里找
+## 六、遇到问题时的阅读方式
 
-| 内容 | 位置 |
-|---|---|
-| 项目和构建目标 | `ci/projects.json` |
-| 工具链登记 | `ci/toolchains.json` |
-| 硬件规格 | `ci/hardware-profiles.json` |
-| 供应链规则 | `ci/supply-chain-policy.json` |
-| 发布策略 | `ci/release-strategies.json` |
-| 依赖分析和构建计划 | `scripts/ci/impact_analysis.py`、`scripts/ci/dependency_plan.py` |
-| 构建执行 | `scripts/ci/run_build.py` |
-| 制品打包和校验 | `scripts/ci/package_artifact.py`、`scripts/ci/verify_artifact.py` |
-| 发布状态管理 | `scripts/ci/release_strategy.py` |
-
-## 四、GitHub Actions 工作流分别负责什么
-
-这些工作流不是重复的“多套 CI”。它们承担不同职责：
-
-| 工作流 | 作用 |
-|---|---|
-| `validate.yml` | 检查平台配置、策略和自动化测试 |
-| `ci.yml` | 分析改动并按依赖顺序构建项目 |
-| `dag-node.yml` | 执行一个具体的依赖构建节点 |
-| `toolchain-images.yml` | 构建、检查和发布中央工具链镜像 |
-| `archive-artifacts.yml` | 长期保存构建制品 |
-| `promote.yml` | 将已验证制品晋级到目标环境 |
-| `release.yml` | 管理灰度、蓝绿等渐进式发布 |
-| `rollback.yml` | 将环境恢复到之前的制品版本 |
-| `platform-health.yml` | 收集平台健康度和运行指标 |
-| `repository-governance.yml` | 检查仓库规则是否发生漂移 |
-| `reusable-build.yml` | 供普通业务仓库调用的构建入口 |
-| `reusable-rk-build.yml` | 供 RK 固件项目调用的构建入口 |
-| `reusable-rk-enrollment.yml` | 登记真实 RK SDK 身份 |
-| `reusable-rk-physical-readiness.yml` | 检查真实 RK Runner、SDK 和硬件实验室是否就绪 |
-
-## 五、设计、代码和生产验收要分开看
-
-- 文档说明设计目标，不自动代表功能已经上线。
-- 代码存在，不自动代表真实外部系统已经接通。
-- GitHub Actions 测试通过，只能证明对应自动化测试通过。
-- 真实 Jenkins、Harbor、Kubernetes 集群、RK 板卡等外部环境，需要各自的接入和验收证据。
-
-具体证据以[生产生命周期验收记录](production-verification.md)和各专题中的“当前状态 / 未完成边界”为准。
+不要先从脚本或工作流文件名开始找。先确定问题发生在哪个工作环节，再读对应专题中的运行流程和失败处理；需要核对实现时，再沿专题中的配置和代码引用进入仓库实现。
