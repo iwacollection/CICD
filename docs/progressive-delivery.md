@@ -822,7 +822,7 @@ synthetic analysis is not production evidence
 
 平台校验 `validate.yml` 会执行 `release_strategy.py validate`。
 
-## 17.1 当前实现的生产阻断项
+## 17. 当前实现的生产阻断项
 
 以下是把状态机接入生产流量前必须完成的控制面工作：
 
@@ -834,7 +834,7 @@ synthetic analysis is not production evidence
 
 建议的生产闭环必须是：受信证据读取 → 签名/来源校验 → 服务端状态存储与乐观锁 → 单一流量控制器执行 → 只读回读实际路由/Pod/Analysis 状态 → 决策和审计。没有这些适配器前，不要给 `operator` 标签附加可信含义。
 
-## 17. 还没有做的事
+## 18. 还没有做的事
 
 真实集群 apply 需要集群里的 Gateway 或 Istio、带 `cicd.platform/cluster-id` 标签的 OCM ManagedCluster，以及消费这些 JSON 的控制器。这些资源不在本仓库。控制面测试通过，不等于生产集群已经完成灰度或蓝绿。
 
