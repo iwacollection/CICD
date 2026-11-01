@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persist progressive-release state as an append-only GitHub Deployment log.
+"""Persist progressive-release state as a GitHub Deployment checkpoint history.
 
 The state JSON is only a transport format. The authoritative head is the newest
 successful checkpoint in the dedicated `cicd-release-state` deployment environment.

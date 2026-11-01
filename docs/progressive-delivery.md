@@ -848,6 +848,6 @@ synthetic analysis is not production evidence
 5. 写入下一 revision 时，必须证明输入 state 的父 Deployment ID、revision 与服务端最新 checkpoint 一致；旧 revision 重放会被拒绝。
 6. 同一环境/服务由 GitHub Actions concurrency group 串行执行；状态日志使用独立 environment，不与 dev/staging/production 的制品指针混在一起。
 
-这里的 SHA256 用于检测状态内容损坏，不是数字签名。真实性来自受 GitHub Deployments 写权限保护的服务端 checkpoint；不要把它描述成独立密码学签名或跨系统事务型数据库。并发控制依赖 GitHub Actions concurrency，写入前还会检查最新父版本；如果创建 Deployment 后写 status 失败，后续操作会 fail closed，需要人工核对该条不完整记录，不能跳过它继续发布。
+这里的 SHA256 用于检测状态内容损坏，不是数字签名。真实性来自受 GitHub Deployments 写权限保护的服务端 checkpoint；不要把它描述成独立密码学签名或跨系统事务型数据库。**这也不是不可删除的 WORM（一次写入、多次读取）存储**：具备相应权限的仓库管理员仍可删除 Deployment 记录，拥有部署写权限的身份也能创建新的记录。因此必须限制 `deployments: write` 的授予范围并审计该权限；如果威胁模型要求防止仓库管理员篡改，应改用独立受控数据库、条件更新/CAS 和 KMS/HSM 签名，而不是把 GitHub Deployment 当作不可变账本。并发控制依赖 GitHub Actions concurrency，写入前还会检查最新父版本；如果创建 Deployment 后写 status 失败，后续操作会 fail closed，需要人工核对该条不完整记录，不能跳过它继续发布。
 
 状态完整性仍不等于发布执行成功：本 Workflow 仍只渲染 HTTPRoute / Istio VirtualService 期望状态，不会把它们应用到真实集群，也不会自动采集 Prometheus 分析数据。
