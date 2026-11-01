@@ -1097,8 +1097,8 @@ release_id、commit SHA、Pod UID 等高基数字段通过日志、事件或追�
 | 制品身份 | Artifact Contract v2 | image digest 与 bundle member 强绑定及消费端校验 |
 | 供应链 | SBOM、扫描、attestation / 签名策略 | 生产 Registry 和真实验证身份接入 |
 | 长期归档 | Archive workflow / artifact archive | 外部长期存储保留、灾备和恢复验收 |
-| 环境晋级 | Promotion policy / workflow | 与真实部署状态的语义拆分和对账 |
-| 环境指针 | deployment pointer | 明确 promotion pointer 与 runtime deployment pointer |
+| 环境晋级 | Promotion policy / workflow 创建 GitHub Deployment pointer | pointer 的 success 只表示制品晋级门禁通过；真实部署/健康状态需独立 runtime record |
+| 环境指针 | deployment pointer（制品晋级指针） | 不代表 Kubernetes 已部署；需独立 runtime deployment pointer 与状态对账 |
 | 发布状态机 | scripts/ci/release_strategy.py | 与真实 Rollout / Analysis 状态建立适配器 |
 | 路由期望状态 | HTTPRoute / Istio VirtualService 渲染 | 真实 traffic owner 选择，避免与 Rollouts 双写 |
 | 集群波次 | ci/clusters.json、Placement / ApplicationSet 参考渲染 | 真实集群身份、PlacementDecision 和固定 pin 验收 |
@@ -1115,7 +1115,10 @@ release_id、commit SHA、Pod UID 等高基数字段通过日志、事件或追�
 - ci/release-strategies.json 是策略配置来源，策略数字和波次顺序不能在新文档或 Workflow 中另写不一致的规则。
 - ci/clusters.json 是参考集群目录，不是实际集群接入证明。
 - 当前 .github/workflows/release.yml 生成并验证期望状态，不代表已对真实 Kubernetes 执行 apply。
-- 当前 advance 使用操作者提供的 analysis JSON，不等于已从 Prometheus AnalysisRun 读取真实结果。
+- 当前 advance 使用操作者提供的 analysis JSON，只做字段/阈值校验；没有证据来源、时间窗、新鲜度或签名验证，不等于已从 Prometheus AnalysisRun 读取真实结果。
+- release-state.json 在多次 workflow_dispatch 间由操作者复制传递；当前没有服务端签名、状态版本/CAS 或防重放保护，不应作为生产控制器的可信状态源。
+- deployment_pointer.py 创建 GitHub Deployment 后直接写入 success；这个 success 是制品晋级记录，不是运行时部署或业务健康结果。
+- rollback.yml 只恢复同环境的历史制品 pointer，不会自动回退 GitOps commit、Rollout、HTTPRoute/VirtualService 或数据库。
 - 当前路由输出包含 Gateway API HTTPRoute 和 Istio VirtualService；接入 Rollouts 前必须选择 traffic owner。
 - scenario 的 synthetic analysis 只能用于状态机测试，不能用于生产决策。
 - ApplicationSet 清单渲染成功，不代表真实 Argo CD 已连接并同步目标集群。
@@ -1151,7 +1154,7 @@ tests/
 └── test_rollback_coordinator.py
 ~~~
 
-Observer 默认只读。Promote / Abort / Rollback 必须经过独立授权、审批、幂等和审计门禁。
+Observer 默认只读。Promote / Abort / Rollback 必须经过独立授权、审批、幂等和审计门禁。状态机在接入真实控制器前，还必须增加受信证据来源验证、签名状态存储、乐观锁/防重放、实际状态回读和运行时回滚协调。
 
 ## 18. 生产验收总清单
 
