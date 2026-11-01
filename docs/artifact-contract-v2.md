@@ -124,7 +124,7 @@ gzip filename  = 空
 "dependency_lock_files": ["deps.lock", "toolchain.lock"]
 ```
 
-平台会记录每个 lock 文件的 digest。声明了 pattern 但实际匹配不到文件时，打包直接失败，避免 Manifest 假装记录了不存在的依赖基线。
+平台会逐条展开每一个 lock pattern，并记录匹配到的每个 lock 文件 digest。**只要任意一条已声明 pattern 没有匹配到文件，打包就立即失败**；不能用“其他 pattern 匹配到了文件”来掩盖缺失的锁文件。pattern 还必须解析到 working directory 内的普通文件，不能通过绝对路径或 `..` 越界读取仓库外文件。
 
 ## Runner 与编译器版本
 
@@ -201,7 +201,7 @@ python3 scripts/ci/package_artifact.py \
   --output-dir dist
 ```
 
-注意：该示例要求 `examples/cpp-app/build/hello-cpp` 确实存在；如果实际 CMake target 输出名不同，应先查 `CMakeLists.txt` 并调整路径。生产容器工具链还必须传入不可变的 `--container-image image@sha256:...` 和对应身份，不能把这个 host 示例当作生产容器构建证明。
+注意：当前 `examples/cpp-app/CMakeLists.txt` 的可执行目标名是 `hello-ci`，所以正确产物路径为 `build/hello-ci`，不是 `build/hello-cpp`。运行打包命令前，必须先按“多语言项目的 CI 构建策略”第 11.3 节构建并暂存 `hello-lib` 上游制品，再构建 `hello-cpp`。生产容器工具链还必须传入不可变的 `--container-image image@sha256:...` 和对应身份，不能把这个 host 示例当作生产容器构建证明。
 
 打包后执行：
 
