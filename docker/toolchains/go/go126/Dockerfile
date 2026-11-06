@@ -19,7 +19,7 @@ RUN set -eux; \
     go_archive="go${GO_VERSION}.linux-amd64.tar.gz"; \
     curl --fail --show-error --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 900 \
       "https://go.dev/dl/${go_archive}" --output "/tmp/${go_archive}"; \
-    printf '%s  %s\\n' "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum --check -; \
+    printf '%s  %s\\n' "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum -c -; \
     rm -f "/tmp/${go_archive}"; \
     tooling_dir="$(mktemp -d)"; \
     mkdir -p /tmp/gopath /tmp/gocache; \
