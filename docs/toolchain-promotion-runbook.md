@@ -132,7 +132,7 @@ GitHub Deployments 是追加式登记记录，保留候选 digest、源码 commi
 - application_image：可选的业务应用部署镜像 digest（必须是 repository@sha256，不得使用 tag）；
 - promotion / rollback 来源 Deployment ID。
 
-因此可以从生产 Deployment ID 反查到 manifest，再反查源代码 commit、构建 workflow、工具链镜像 digest、依赖锁文件、SBOM、漏洞扫描、签名和 provenance。业务应用镜像不等于工具链镜像；Promote Archived Artifact 工作流可额外接收 application_image 输入，把业务镜像 digest 与该 Artifact Contract 绑定到同一 Deployment pointer。Rollback 会保留该字段，不重新生成制品。
+因此可以从生产 Deployment ID 反查到 manifest，再反查源代码 commit、构建 workflow、工具链镜像 digest、依赖锁文件、SBOM、漏洞扫描、签名和 provenance。业务应用镜像不等于工具链镜像；Promote Archived Artifact 工作流可额外接收 application_image 输入，把业务镜像 digest 与该 Artifact Contract 绑定到同一 Deployment pointer。容器化业务必须在 dev 首次晋级时提供该 digest，后续 staging/production 晋级必须提供完全相同的 digest；promotion policy 会把 application_image 纳入跨环境精确身份比较，禁止中途丢失或替换。Rollback 会保留该字段，不重新生成制品。
 
 ## 6. Argo CD / Kubernetes 实际运行验证
 
