@@ -319,7 +319,7 @@ jobs:
           IMAGE: ${{ matrix.immutable_reference }}
         run: |
           set -euo pipefail
-          gh attestation verify "oci://$IMAGE" \
+          gh attestation verify "oci://$IMAGE" --bundle-from-oci \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/toolchain-images.yml" \
             --source-ref "refs/heads/main"
@@ -661,7 +661,7 @@ jobs:
         run: |
           set -euo pipefail
           docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
-          gh attestation verify "oci://${IMAGE}@${DIGEST}" \
+          gh attestation verify "oci://${IMAGE}@${DIGEST}" --bundle-from-oci \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/toolchain-images.yml" \
             --source-ref "refs/heads/main"
