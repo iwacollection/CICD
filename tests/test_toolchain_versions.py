@@ -28,7 +28,7 @@ class ToolchainVersionRegistryTests(unittest.TestCase):
         self.assertIn('@sha256:', result['immutable_reference'])
     def test_planned_combination_is_not_runnable(self):
         with self.assertRaisesRegex(ValueError, 'is planned'):
-            resolve_version(self.registry, self.catalog, 'go', '1.25', 'go', '1.25', True)
+            resolve_version(self.registry, self.catalog, 'go', '1.25.12', 'go', '1.25.12', True)
     def test_unknown_patch_version_fails_closed(self):
         with self.assertRaisesRegex(ValueError, 'matches=0'):
             resolve_version(self.registry, self.catalog, 'go', '1.26', 'go', '1.26', True)
