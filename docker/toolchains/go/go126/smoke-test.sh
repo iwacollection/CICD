@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for the Go toolchain image. Runs offline: the fixture has no
-# third-party dependencies. Executed by the Toolchain Supply Chain workflow
-# before the image is published, and again against the exact published digest.
+# third-party dependencies. Executed before publication and against the exact
+# published digest.
 set -euo pipefail
 
 expected_go="go${GO_TOOLCHAIN_VERSION:?GO_TOOLCHAIN_VERSION is not set in the image}"
@@ -13,7 +13,7 @@ if [[ "$actual_go" != "$expected_go" ]]; then
   exit 1
 fi
 
-for pair in GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local; do
+for pair in GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local CGO_ENABLED=1; do
   key="${pair%%=*}"
   want="${pair#*=}"
   got="$(go env "$key")"
@@ -74,7 +74,7 @@ CGO_ENABLED=1 go build -o smoke-cgo .
 ./smoke-cgo | grep -Fx "go-toolchain-smoke-ok 42"
 
 # A package that imports "C" is excluded when CGO_ENABLED=0, so the static
-# build check needs its own pure-Go package.
+# build and test checks use a separate pure-Go package.
 mkdir static
 cat > static/main.go <<'GOSTATIC'
 package main
@@ -86,12 +86,31 @@ func main() {
 }
 GOSTATIC
 
+cat > static/main_test.go <<'GOSTATICTEST'
+package main
+
+import "testing"
+
+func TestStaticSmoke(t *testing.T) {
+	if got := 20 + 22; got != 42 {
+		t.Fatalf("unexpected result: %d", got)
+	}
+}
+GOSTATICTEST
+
 CGO_ENABLED=0 go build -o smoke-static ./static
 ./smoke-static | grep -Fx "go-toolchain-smoke-static-ok"
 
-go vet ./...
-gotestsum --junitfile smoke-junit.xml --format testname -- ./...
+# Keep the build mode explicit. CGO_ENABLED is process-scoped in the earlier
+# build command; without this prefix, vet/test could see a different package
+# file set and report "build constraints exclude all Go files".
+CGO_ENABLED=1 go vet ./...
+CGO_ENABLED=1 gotestsum --junitfile smoke-junit.xml --format testname -- .
 test -s smoke-junit.xml
 grep -q "<testsuite" smoke-junit.xml
+
+CGO_ENABLED=0 gotestsum --junitfile static-junit.xml --format testname -- ./static
+test -s static-junit.xml
+grep -q "<testsuite" static-junit.xml
 
 echo "go-toolchain-smoke: all checks passed"
