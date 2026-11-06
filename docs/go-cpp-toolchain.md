@@ -85,7 +85,7 @@ cppToolchainBuild(projectDir: '.', registryCredentialsId: 'ghcr-readonly')
 | Go | 1.26.10 linux/amd64；Dockerfile 核对镜像内 Go 版本，并下载 Go 官方发布包再次校验 SHA256：\`ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5\` |
 | C 工具 | 官方基础镜像已提供 gcc、libc6-dev、make；Smoke Test 验证编译器、头文件和真实 cgo 编译 |
 | 常用工具 | git、curl、CA 证书由官方 buildpack-deps 构建环境提供，并由 Smoke Test 检查 |
-| gotestsum | v1.13.0，固定版本安装；Go Module checksum database 校验依赖内容 |
+| gotestsum | v1.13.0；显式固定 `golang.org/x/mod v0.40.0`、`golang.org/x/text v0.41.0`，避免工具自身携带已知高危依赖 |
 | 环境变量 | \`GOTOOLCHAIN=local\`、\`GOFLAGS="-trimpath -buildvcs=false"\`，缓存放在 \`/workspace/.cache\` 下 |
 
 这次改动不再在 Go Dockerfile 中执行 \`apt-get\`。之前的 Ubuntu Snapshot 下载发生 HTTP 502/503，增加重试仍不能保证上游服务可用。现在直接使用官方 Go 构建镜像，并通过 digest 固定其 Go、Debian 和预装构建依赖，避免每次构建临时访问 Ubuntu Snapshot。
@@ -109,6 +109,6 @@ cppToolchainBuild(projectDir: '.', registryCredentialsId: 'ghcr-readonly')
 | \`... is not a go toolchain\` | Go 步骤里写了 gcc 的工具链 ID | 改用 \`cppToolchainBuild\`，或改 \`ci/toolchain.json\` |
 | \`Pulled image does not match central Active digest\` | 镜像被替换或拉到别的内容 | 停止构建，联系平台维护者 |
 | Go 版本或 SHA256 检查失败 | 基础镜像内版本与声明不一致，或 Go 官方发布包内容不匹配 | 停止构建，核对基础镜像 digest 和 Go 官方发布校验和 |
-| 缺少 gcc / 头文件 / make | 基础镜像依赖不满足 | 停止构建，检查固定的官方 Go 镜像，不要在构建时临时 apt install |
+| 缺少 gcc / 头文件 / make | 基础镜像依赖不满足 | 停止构建，检查固定的官方 Go 镜像，不要在构建时临时 apt install |\n| 漏洞扫描发现 apt 或 gotestsum 的 Go 依赖高危漏洞 | 基础镜像或工具自身带入了已知漏洞组件 | 不降低门禁等级；移除运行时不需要的 apt，并升级、固定 gotestsum 的受影响依赖版本 |
 | 构建时 \`error obtaining VCS status\` | 没用本镜像的 \`GOFLAGS\` | 确认用的是 \`go126\` 镜像，不要在命令里覆盖 \`GOFLAGS\` |
 | 构建失败但没有测试报告 | 失败发生在测试之前 | 正常；\`junit\` 允许空结果，看控制台日志 |
