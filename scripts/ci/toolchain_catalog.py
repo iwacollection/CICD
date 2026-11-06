@@ -254,6 +254,8 @@ def build_publish_matrix(data: dict, repository_root: Path | None = None, includ
                 "context": item["context"],
                 "smoke_command": item["smoke_command"],
                 "platform": item.get("platforms", ["linux/amd64"])[0],
+                "verification_fixture": item.get("verification_fixture", ""),
+                "verification_command": item.get("verification_command", ""),
             }
         )
     return {"include": include}
