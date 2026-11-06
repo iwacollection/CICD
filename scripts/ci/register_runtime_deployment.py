@@ -53,11 +53,16 @@ def register_runtime(*, api_url: str, repository: str, token: str,
 
     environment = f"runtime-{environment_name}"
     deployments_url = f"{api_url.rstrip('/')}/repos/{repository}/deployments"
+    run_id = os.getenv("GITHUB_RUN_ID", "")
+    server_url = os.getenv("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    artifact_name = os.getenv("RUNTIME_EVIDENCE_ARTIFACT", "")
     payload = {key: evidence[key] for key in (
         "schema_version", "kind", "application", "namespace", "pod_selector",
         "image_digest", "expected_image", "gitops_revision", "manifest_sha256",
-        "argocd_sync", "argocd_health", "pod_count", "verified_pods",
-        "verified_at", "evidence_sha256")}
+        "argocd_sync", "argocd_health", "pod_count", "verified_at", "evidence_sha256")}
+    payload["workflow_run_id"] = run_id
+    payload["workflow_run_url"] = f"{server_url}/{repository}/actions/runs/{run_id}" if run_id else ""
+    payload["evidence_artifact_name"] = artifact_name
     deployment = _request(deployments_url, token, method="POST", payload={
         "ref": revision, "task": "runtime-verification", "auto_merge": False,
         "required_contexts": [], "environment": environment,
