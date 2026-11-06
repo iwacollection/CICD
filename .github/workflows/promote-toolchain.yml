@@ -36,6 +36,7 @@ jobs:
         with:
           ref: main
           persist-credentials: true
+          token: ${{ secrets.TOOLCHAIN_PROMOTION_TOKEN }}
 
       - name: Login GHCR read-only
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -153,7 +154,7 @@ jobs:
 
       - name: Open catalog promotion PR (does not merge)
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.TOOLCHAIN_PROMOTION_TOKEN }}
           TOOLCHAIN: ${{ inputs.toolchain }}
           DIGEST: ${{ inputs.digest }}
         run: |
