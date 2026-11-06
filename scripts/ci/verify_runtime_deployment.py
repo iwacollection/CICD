@@ -20,7 +20,8 @@ def verify_runtime(app: dict[str, Any], pods: dict[str, Any], *,
                    application: str, namespace: str, selector: str,
                    expected_image: str, expected_revision: str,
                    manifest_sha256: str, artifact_name: str,
-                   bundle_sha256: str, source_sha: str, source_run_id: str,
+                   bundle_sha256: str, deployment_pointer_id: str,
+                   source_sha: str, source_run_id: str,
                    target_environment: str) -> dict[str, Any]:
     if not NAME_RE.fullmatch(application):
         raise ValueError("application name is invalid")
@@ -36,6 +37,8 @@ def verify_runtime(app: dict[str, Any], pods: dict[str, Any], *,
         raise ValueError("artifact source commit must be a 40-character SHA")
     if not str(source_run_id).isdigit():
         raise ValueError("artifact source workflow run ID must be numeric")
+    if not str(deployment_pointer_id).isdigit():
+        raise ValueError("deployment pointer ID must be numeric")
     if not artifact_name or len(artifact_name) > 128:
         raise ValueError("artifact name is invalid")
     if not REVISION_RE.fullmatch(expected_revision):
@@ -99,6 +102,7 @@ def verify_runtime(app: dict[str, Any], pods: dict[str, Any], *,
         "pod_selector": selector, "expected_image": expected_image, "image_digest": image_digest,
         "gitops_revision": actual_revision, "manifest_sha256": manifest_sha256,
         "artifact_name": artifact_name, "bundle_sha256": bundle_sha256,
+        "deployment_pointer_id": str(deployment_pointer_id),
         "artifact_source_sha": source_sha, "artifact_source_run_id": str(source_run_id),
         "argocd_sync": sync.get("status"), "argocd_health": health.get("status"),
         "pod_count": len(verified_pods), "verified_pods": sorted(verified_pods, key=lambda p: p["name"]),
@@ -112,8 +116,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     for arg in ("app-json", "pods-json", "application", "namespace", "selector",
                 "expected-image", "expected-revision", "manifest-sha256",
-                "artifact-name", "bundle-sha256", "source-sha", "source-run-id",
-                "environment"):
+                "artifact-name", "bundle-sha256", "deployment-pointer-id",
+                "source-sha", "source-run-id", "environment"):
         parser.add_argument("--" + arg, required=True)
     parser.add_argument("--output", default="runtime-evidence.json")
     args = parser.parse_args()
@@ -123,8 +127,9 @@ def main() -> int:
             application=args.application, namespace=args.namespace, selector=args.selector,
             expected_image=args.expected_image, expected_revision=args.expected_revision,
             manifest_sha256=args.manifest_sha256, artifact_name=args.artifact_name,
-            bundle_sha256=args.bundle_sha256, source_sha=args.source_sha,
-            source_run_id=args.source_run_id, target_environment=args.environment)
+            bundle_sha256=args.bundle_sha256, deployment_pointer_id=args.deployment_pointer_id,
+            source_sha=args.source_sha, source_run_id=args.source_run_id,
+            target_environment=args.environment)
         Path(args.output).write_text(json.dumps(evidence, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
