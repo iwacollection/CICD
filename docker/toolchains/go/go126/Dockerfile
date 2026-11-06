@@ -3,11 +3,12 @@ FROM golang:1.26.10-bookworm@sha256:23ce71337b726608afb1bc00986e630a05034a87a87e
 ARG GO_VERSION=1.26.10
 ARG GO_SHA256=ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5
 ARG GOTESTSUM_VERSION=v1.13.0
+ARG X_MOD_VERSION=v0.40.0
+ARG X_TEXT_VERSION=v0.41.0
 
 # The official Go image already contains Go, GCC, libc development headers,
 # make, git, curl and CA certificates. Verify the upstream Go release checksum
-# as an independent supply-chain check; the pinned base digest fixes the
-# preinstalled toolchain and Debian build environment.
+# independently, then build gotestsum with patched, pinned Go module dependencies.
 RUN set -eux; \
     test "$(go env GOVERSION)" = "go${GO_VERSION}"; \
     command -v gcc; \
@@ -18,17 +19,28 @@ RUN set -eux; \
     go_archive="go${GO_VERSION}.linux-amd64.tar.gz"; \
     curl --fail --show-error --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 900 \
       "https://go.dev/dl/${go_archive}" --output "/tmp/${go_archive}"; \
-    printf '%s  %s\n' "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum --check -; \
+    printf '%s  %s\\n' "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum --check -; \
     rm -f "/tmp/${go_archive}"; \
+    tooling_dir="$(mktemp -d)"; \
+    cd "$tooling_dir"; \
+    GOTOOLCHAIN=local go mod init cicd-toolchain-tools; \
+    GOTOOLCHAIN=local go get "gotest.tools/gotestsum@${GOTESTSUM_VERSION}"; \
+    GOTOOLCHAIN=local go get "golang.org/x/mod@${X_MOD_VERSION}" "golang.org/x/text@${X_TEXT_VERSION}"; \
     GOTOOLCHAIN=local GOPATH=/tmp/gopath GOBIN=/usr/local/bin GOCACHE=/tmp/gocache \
-      go install "gotest.tools/gotestsum@${GOTESTSUM_VERSION}"; \
-    rm -rf /tmp/gopath /tmp/gocache; \
+      go install gotest.tools/gotestsum; \
+    cd /; \
+    rm -rf "$tooling_dir" /tmp/gopath /tmp/gocache; \
+    # APT is not used by this build-only image; remove the vulnerable package manager. \
+    dpkg --purge apt libapt-pkg6.0; \
+    ! command -v apt-get; \
     git config --system --add safe.directory /workspace; \
     mkdir -p /home/ci /workspace; \
     chown -R 10001:10001 /home/ci /workspace
 
 ENV GO_TOOLCHAIN_VERSION=${GO_VERSION} \
     GOTESTSUM_TOOLCHAIN_VERSION=${GOTESTSUM_VERSION} \
+    GOTESTSUM_X_MOD_VERSION=${X_MOD_VERSION} \
+    GOTESTSUM_X_TEXT_VERSION=${X_TEXT_VERSION} \
     GOROOT=/usr/local/go \
     GOPATH=/workspace/.cache/go \
     GOCACHE=/workspace/.cache/go-build \
