@@ -67,7 +67,7 @@ def verify_runtime(app: dict[str, Any], pods: dict[str, Any], *,
                    for c in (pod_status.get("conditions") or [])):
             raise ValueError(f"Pod {pod_name} is not Ready")
         expected_containers = [c for c in (pod_spec.get("containers") or [])
-                               if c.get("image", "").split("@", 1)[0] == image_name]
+                               if c.get("image") == expected_image]
         if not expected_containers:
             raise ValueError(f"Pod {pod_name} does not declare expected image {image_name}")
         status_by_name = {s.get("name"): s for s in (pod_status.get("containerStatuses") or [])}
