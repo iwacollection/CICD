@@ -24,7 +24,7 @@
 | Go | 1.26.10 | candidate | 官方 Go release SHA256；官方 golang base digest |
 | Go | 1.25.14 | retired | 上游该版本存在未修复 HIGH 漏洞，保留历史定义，不允许消费或发布 |
 | C/C++ | GCC 13 | active | 当前 GCC 容器工具链 |
-| C/C++ | GCC/G++ 12.4.0-2ubuntu1~24.04.1 | planned | Ubuntu base digest、APT snapshot 20261105、精确 APT 包版本；smoke 强制检查完整编译器版本 |
+| C/C++ | GCC/G++ 12.5.0-9ubuntu1 | planned | Ubuntu 26.10 base digest、APT snapshot 20261105、精确 APT 包版本；smoke 强制检查完整编译器版本 |
 | C/C++ | Clang 18 | planned | 尚无独立镜像 |
 
 ## 镜像输入说明
@@ -32,7 +32,7 @@
 - 所有新发布的 Ubuntu 镜像使用固定 base image digest；APT 软件包从固定 snapshot 安装。CA bootstrap 阶段使用零重试，避免 CVE-2026-109518 的重试利用条件；由于最小基础镜像尚无 CA 根证书，bootstrap 暂时关闭 TLS peer 验证，但 APT 仍验证 Ubuntu archive 签名元数据和软件包哈希。安装 CA 后恢复正常 HTTPS 证书验证，再安装修复版本 apt/libapt-pkg 2.8.4ubuntu0.1 和 OpenSSL libssl3t64 3.0.13-0ubuntu3.16。
 - JDK 21 使用 Temurin 官方发行归档 SHA256；Maven 使用 Apache 官方 SHA512；Maven 3.10.0 自带的 Guava 从受影响的 33.7.1-jre 替换为修复 CVE-2026-102554 的 33.7.2-jre，并校验 SHA256。
 - Go 1.25.14 已退役；Go 1.26.10 是当前 candidate，仍需经过 main 发布、精确 digest 消费验证和人工晋级。
-- GCC 12 使用 Ubuntu 24.04 固定 APT snapshot，精确安装 gcc-12/g++-12 12.4.0-2ubuntu1~24.04.1。APT 根据 Ubuntu 签名仓库元数据校验每个 .deb 的 SHA256，smoke test 同时断言 dpkg 包版本和编译器完整版本。
+- GCC 12 使用固定 digest 的 Ubuntu 26.10 基础镜像和 20261105 APT snapshot，精确安装 gcc-12/g++-12 12.5.0-9ubuntu1。smoke test 同时断言 dpkg 包版本、编译器完整版本，并实际编译运行 C++20 程序。Ubuntu 26.10 是短周期版本，支持至 2027 年 7 月；该镜像只作为构建工具链，不作为业务运行时基础镜像。
 
 ## 验证边界
 
