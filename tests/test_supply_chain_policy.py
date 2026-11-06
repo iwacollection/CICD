@@ -34,7 +34,23 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertRegex(text, r"FROM ubuntu:24\.04@sha256:[0-9a-f]{64}")
         self.assertIn('APT::Snapshot "20260828T000000Z"', text)
 
-    def test_floating_container_base_is_rejected(self) -> None:
+
+    def test_debian_snapshot_is_accepted_for_apt_based_toolchain(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            dockerfile = Path(directory) / "Dockerfile"
+            dockerfile.write_text(
+                "FROM golang:1.26.10-trixie@sha256:" + "a" * 64 + "\\n"
+                "RUN echo 'deb [check-valid-until=no] "
+                "https://snapshot.debian.org/archive/debian/20261106T000000Z trixie main' "
+                "> /etc/apt/sources.list && apt-get update\\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(validate_dockerfile(dockerfile, self.policy), [])
+
+    def test_gcc_toolchain_does_not_disable_apt_tls_verification(self) -> None:
+        dockerfile = ROOT / "docker" / "toolchains" / "gcc" / "gcc12" / "Dockerfile"
+        self.assertNotIn("Verify-Peer=false", dockerfile.read_text(encoding="utf-8"))
+\n    def test_floating_container_base_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             dockerfile = Path(directory) / "Dockerfile"
             dockerfile.write_text(
