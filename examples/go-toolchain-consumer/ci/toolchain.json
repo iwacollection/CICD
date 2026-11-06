@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "language": "go",
+  "project_name": "go-toolchain-consumer",
+  "toolchain": "go126",
+  "build_command": "mkdir -p bin reports && go build -trimpath -o bin/go-toolchain-consumer ./cmd/app",
+  "test_command": "mkdir -p reports && gotestsum --junitfile reports/junit.xml --format testname -- ./...",
+  "verify_command": "./bin/go-toolchain-consumer | grep -Fx 'go-toolchain-consumer-ok'",
+  "artifact_globs": [
+    "bin/go-toolchain-consumer"
+  ],
+  "dependency_lock_files": [
+    "go.mod"
+  ],
+  "test_report_globs": [
+    "reports/*.xml"
+  ]
+}
