@@ -74,10 +74,28 @@ jobs:
           cosign verify-attestation --type cyclonedx "$IMAGE" \
             --certificate-identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/toolchain-images.yml@refs/heads/main" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com" > sbom-attestation.json
-          jq -e '.[0].payload' sbom-attestation.json >/dev/null
-          jq -r '.[0].payload' sbom-attestation.json | base64 --decode > sbom-statement.json
+          jq -e '.payload' sbom-attestation.json >/dev/null
+          jq -r '.payload' sbom-attestation.json | base64 --decode > sbom-statement.json
           jq -e '.subject[] | select(.digest.sha256 == env.EXPECTED_DIGEST)' sbom-statement.json >/dev/null
           jq '.predicate' sbom-statement.json > verified-sbom.cdx.json
+          cosign verify-attestation --type vuln "$IMAGE" \
+            --certificate-identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/toolchain-images.yml@refs/heads/main" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" > scan-attestation.json
+          jq -e '.payload' scan-attestation.json >/dev/null
+          jq -r '.payload' scan-attestation.json | base64 --decode > scan-statement.json
+          jq -e '.subject[] | select(.digest.sha256 == env.EXPECTED_DIGEST)' scan-statement.json >/dev/null
+          jq '.predicate' scan-statement.json > verified-scan.json
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          record = json.loads(Path("candidate.json").read_text())
+          for filename, field in [("verified-sbom.cdx.json", "sbom_sha256"), ("verified-scan.json", "scan_report_sha256")]:
+              value = json.loads(Path(filename).read_text())
+              canonical = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+              actual = hashlib.sha256(canonical).hexdigest()
+              if actual != record[field]:
+                  raise SystemExit(f"{filename} digest does not match registered candidate evidence")
+          PY
         env:
           EXPECTED_DIGEST: ${{ inputs.digest }}
 
@@ -109,7 +127,7 @@ jobs:
           set -euo pipefail
           python3 scripts/ci/supply_chain_policy.py \
             --skip-dockerfiles \
-            --report promotion-security.json \
+            --report verified-scan.json \
             --sbom verified-sbom.cdx.json \
             --toolchain "$TOOLCHAIN" \
             --image-digest "$DIGEST"
