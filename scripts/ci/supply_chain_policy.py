@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import re
 import sys
@@ -60,6 +61,49 @@ def validate_policy(policy: dict) -> list[str]:
         elif len(denied) != len(set(denied)):
             errors.append("policy.license.deny_licenses must not contain duplicates")
 
+    exceptions = policy.get("vulnerability_exceptions", [])
+    if not isinstance(exceptions, list):
+        errors.append("policy.vulnerability_exceptions must be a list")
+        exceptions = []
+    required_exception_fields = {
+        "id", "toolchain", "image_digest", "vulnerability_id", "package",
+        "severity", "justification", "owner", "approved_by", "ticket",
+        "approved_at", "expires_at", "compensating_controls",
+    }
+    seen_exceptions: set[str] = set()
+    for index, exception in enumerate(exceptions):
+        prefix = f"policy.vulnerability_exceptions[{index}]"
+        if not isinstance(exception, dict):
+            errors.append(f"{prefix} must be an object")
+            continue
+        missing = required_exception_fields - set(exception)
+        if missing:
+            errors.append(f"{prefix} missing fields: {', '.join(sorted(missing))}")
+            continue
+        exception_id = exception.get("id")
+        if not isinstance(exception_id, str) or not exception_id or exception_id in seen_exceptions:
+            errors.append(f"{prefix}.id must be unique and non-empty")
+        else:
+            seen_exceptions.add(exception_id)
+        for field in ("toolchain", "package", "justification", "owner", "approved_by", "ticket", "compensating_controls"):
+            if not isinstance(exception.get(field), str) or not exception[field].strip():
+                errors.append(f"{prefix}.{field} must be non-empty")
+        if not isinstance(exception.get("image_digest"), str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", exception["image_digest"]):
+            errors.append(f"{prefix}.image_digest must be an exact sha256 digest")
+        if not isinstance(exception.get("vulnerability_id"), str) or not re.fullmatch(r"(?:CVE-[0-9]{4}-[0-9]+|GHSA-[0-9a-z-]+)", exception["vulnerability_id"]):
+            errors.append(f"{prefix}.vulnerability_id must be an exact CVE/GHSA identifier")
+        if exception.get("severity") not in {"HIGH", "CRITICAL"}:
+            errors.append(f"{prefix}.severity must be HIGH or CRITICAL")
+        try:
+            approved_at = datetime.fromisoformat(str(exception.get("approved_at", "")).replace("Z", "+00:00"))
+            expires_at = datetime.fromisoformat(str(exception.get("expires_at", "")).replace("Z", "+00:00"))
+            if approved_at.tzinfo is None or expires_at.tzinfo is None or expires_at <= approved_at:
+                raise ValueError("timestamps must be timezone-aware and expires_at must be later")
+            if (expires_at - approved_at).days > 90:
+                errors.append(f"{prefix} exception lifetime cannot exceed 90 days")
+        except ValueError:
+            errors.append(f"{prefix} approved_at/expires_at must be valid timezone-aware ISO-8601 timestamps")
+
     artifact = policy.get("artifact")
     if not isinstance(artifact, dict):
         errors.append("policy.artifact must be an object")
@@ -95,7 +139,7 @@ def _severity(item: dict) -> str:
     return str(item.get("Severity", "UNKNOWN")).upper()
 
 
-def validate_trivy_report(report: dict, policy: dict) -> tuple[list[str], dict]:
+def validate_trivy_report(\n    report: dict, policy: dict, *, toolchain: str = "", image_digest: str = "", now: datetime | None = None\n) -> tuple[list[str], dict]:
     errors: list[str] = []
     summary = {
         "vulnerabilities": 0,
@@ -208,7 +252,7 @@ def main() -> int:
         except ValueError as exc:
             errors.append(str(exc))
         else:
-            report_errors, summary = validate_trivy_report(report, policy)
+            report_errors, summary = validate_trivy_report(\n                report, policy, toolchain=args.toolchain, image_digest=args.image_digest\n            )
             errors.extend(report_errors)
 
     if args.sbom:
