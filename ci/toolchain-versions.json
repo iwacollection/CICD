@@ -70,7 +70,7 @@
       "build_tool_version": "12",
       "toolchain_id": "gcc12",
       "status": "planned",
-      "notes": "Dedicated GCC/G++ 12 image definition with fixed Ubuntu APT snapshot; remains planned pending full verification and publication."
+      "notes": "Dedicated GCC/G++ 12.4 image definition pinned to Ubuntu 24.04 package version 12.4.0-2ubuntu1~24.04.1; remains planned pending full verification and publication."
     },
     {
       "id": "cpp-clang-18",
