@@ -128,12 +128,19 @@ GitHub Deployments 是追加式登记记录，保留候选 digest、源码 commi
 - manifest SHA256；
 - source commit 和 source run；
 - toolchain identity；
-- container image 的不可变 digest reference；
+- container_image：构建时使用的工具链容器镜像 digest；
+- application_image：可选的业务应用部署镜像 digest（必须是 repository@sha256，不得使用 tag）；
 - promotion / rollback 来源 Deployment ID。
 
-因此可以从生产 Deployment ID 反查到 manifest，再反查源代码 commit、构建 workflow、工具链镜像 digest、依赖锁文件、SBOM、漏洞扫描、签名和 provenance。Rollback 复制历史身份，不重新生成制品。
+因此可以从生产 Deployment ID 反查到 manifest，再反查源代码 commit、构建 workflow、工具链镜像 digest、依赖锁文件、SBOM、漏洞扫描、签名和 provenance。业务应用镜像不等于工具链镜像；Promote Archived Artifact 工作流可额外接收 application_image 输入，把业务镜像 digest 与该 Artifact Contract 绑定到同一 Deployment pointer。Rollback 会保留该字段，不重新生成制品。
 
-## 6. 验证与边界
+## 6. Argo CD / Kubernetes 实际运行验证
+
+对于容器化业务，Promotion 时传入 application_image 后，运行时验证工作流要求提供该成功 Deployment pointer ID。工作流会先验证归档 Artifact Contract，再检查 pointer 中的 application_image、bundle SHA256、manifest SHA256、source commit/run 与归档记录一致；随后检查 Argo CD revision/health，并逐个比对 Kubernetes Pod Spec image 与容器运行时 imageID digest。验证通过后追加 runtime Deployment 记录。详细操作见 [Argo CD / Kubernetes 部署后运行验证](argocd-kubernetes-runtime-verification.md)。
+
+application_image 是显式关联字段，不会从 toolchain.container_image 自动推导。没有该字段的旧 Deployment pointer 不能用于声称应用镜像已经完成追溯；需要通过新的受控 Promotion 生成带 application_image 的记录。
+
+## 7. 验证与边界
 
 本仓库的单元测试覆盖例外的 digest/包/CVE/过期匹配、候选登记幂等性、候选身份检查和工作流门禁。GitHub Actions 会验证 YAML、脚本和 PR 可运行路径。
 
@@ -143,6 +150,7 @@ GitHub Deployments 是追加式登记记录，保留候选 digest、源码 commi
 - main 上真实推送 GHCR 镜像并验证 OCI referrers 可读；
 - 执行一次人工批准的 Promotion workflow；
 - 合并自动生成的 catalog PR 后验证消费者只解析 active digest；
+- 在真实 Argo CD / Kubernetes 环境配置只读凭据，执行一次成功的运行时 digest readback；
 - 在真实部署平台接入 Admission/Deploy gate，并把运行时镜像 digest 回写到部署记录。
 
 部署平台必须拒绝 tag-only image、未登记 digest、非 active toolchain 和缺失/不匹配的证据。仅有 GitHub Deployment 记录还不等于 Kubernetes Admission 已强制执行。
