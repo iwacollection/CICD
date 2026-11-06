@@ -29,6 +29,7 @@ def valid_record() -> dict:
         "scan_report_sha256": "1" * 64,
         "signature_verified": True,
         "sbom_attestation_verified": True,
+        "scan_attestation_verified": True,
         "provenance_verified": True,
         "security_policy_passed": True,
     }
