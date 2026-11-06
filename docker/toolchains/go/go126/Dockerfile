@@ -9,8 +9,9 @@ ARG X_TEXT_VERSION=v0.41.0
 # Alpine avoids carrying Debian's vulnerable kernel-header and general-purpose
 # package set. build-base provides GCC, musl-dev headers and make for CGO.
 RUN set -eux; \
-    apk add --no-cache build-base ca-certificates curl git; \
+    apk add --no-cache bash build-base ca-certificates curl git; \
     test "$(go env GOVERSION)" = "go${GO_VERSION}"; \
+    command -v bash; \
     command -v gcc; \
     command -v git; \
     command -v make; \
