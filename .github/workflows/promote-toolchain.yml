@@ -95,7 +95,7 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
         with:
           scan-type: image
-          image-ref: ${{ inputs.digest != '' && format('{0}', env.IMAGE) || '' }}
+          image-ref: ${{ env.IMAGE }}
           scanners: vuln,misconfig,secret,license
           severity: HIGH,CRITICAL
           ignore-unfixed: false
