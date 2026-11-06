@@ -97,7 +97,7 @@ jobs:
           echo "KUBECONFIG=$RUNNER_TEMP/kube/config" >> "$GITHUB_ENV"
 
       - name: Install pinned kubectl
-        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78e8e1c7e6e3d1 # v4
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
         with:
           version: ${{ inputs.kubectl_version }}
 
