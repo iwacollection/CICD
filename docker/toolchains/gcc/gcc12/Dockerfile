@@ -6,7 +6,7 @@ ARG GCC_PACKAGE_VERSION=12.4.0-2ubuntu1~24.04.1
 RUN rm -f /etc/apt/apt.conf.d/50snapshot \
     && apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=3 install -y --no-install-recommends ca-certificates \
-    && printf '%s\\n' 'APT::Snapshot "20261105T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+    && printf '%s\n' 'APT::Snapshot "20261105T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=60 -o APT::Update::Error-Mode=any update \
     && apt-get --allow-downgrades -o Acquire::Retries=3 -o Acquire::https::Timeout=60 install -y --no-install-recommends ca-certificates apt=2.8.4ubuntu0.1 libapt-pkg6.0t64=2.8.4ubuntu0.1 libssl3t64=3.0.13-0ubuntu3.16 gcc-12=${GCC_PACKAGE_VERSION} g++-12=${GCC_PACKAGE_VERSION} cmake ninja-build ccache git \
     && rm -rf /var/lib/apt/lists/*
