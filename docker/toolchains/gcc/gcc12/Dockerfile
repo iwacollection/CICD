@@ -6,7 +6,7 @@ ARG GCC_PACKAGE_VERSION=12.5.0-9ubuntu1
 RUN rm -f /etc/apt/apt.conf.d/50snapshot \
     && apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=3 install -y --no-install-recommends ca-certificates \
-    && printf '%s\\n' 'APT::Snapshot "20261105T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+    && printf '%s\n' 'APT::Snapshot "20261105T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=60 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=60 install -y --no-install-recommends gcc-12=${GCC_PACKAGE_VERSION} g++-12=${GCC_PACKAGE_VERSION} cmake ninja-build ccache git \
     && rm -rf /var/lib/apt/lists/*
