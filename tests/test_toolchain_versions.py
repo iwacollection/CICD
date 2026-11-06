@@ -28,7 +28,7 @@ class ToolchainVersionRegistryTests(unittest.TestCase):
         self.assertIn('@sha256:', result['immutable_reference'])
     def test_planned_combination_is_not_runnable(self):
         with self.assertRaisesRegex(ValueError, 'is planned'):
-            resolve_version(self.registry, self.catalog, 'go', '1.25.14', 'go', '1.25.14', True)
+            resolve_version(self.registry, self.catalog, 'java', '21.0.12.1+1', 'maven', '3.10.0', True)
     def test_retired_combination_is_not_runnable(self):
         with self.assertRaisesRegex(ValueError, 'is retired'):
             resolve_version(self.registry, self.catalog, 'go', '1.25.14', 'go', '1.25.14', True)
