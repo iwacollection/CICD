@@ -29,7 +29,7 @@ gotestsum --version | grep -F "${expected_gotestsum#v}" >/dev/null || {
   exit 1
 }
 
-gcc --version | head -n 1
+gcc --version | sed -n '1p'
 git --version
 
 work="$(mktemp -d)"
@@ -73,7 +73,21 @@ GOTEST
 CGO_ENABLED=1 go build -o smoke-cgo .
 ./smoke-cgo | grep -Fx "go-toolchain-smoke-ok 42"
 
-CGO_ENABLED=0 go build -o smoke-static .
+# A package that imports "C" is excluded when CGO_ENABLED=0, so the static
+# build check needs its own pure-Go package.
+mkdir static
+cat > static/main.go <<'GOSTATIC'
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("go-toolchain-smoke-static-ok")
+}
+GOSTATIC
+
+CGO_ENABLED=0 go build -o smoke-static ./static
+./smoke-static | grep -Fx "go-toolchain-smoke-static-ok"
 
 go vet ./...
 gotestsum --junitfile smoke-junit.xml --format testname -- ./...
