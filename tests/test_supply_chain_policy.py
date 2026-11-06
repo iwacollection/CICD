@@ -99,6 +99,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
         central = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         dag_node = (ROOT / ".github" / "workflows" / "dag-node.yml").read_text(encoding="utf-8")
         reusable = (ROOT / ".github" / "workflows" / "reusable-build.yml").read_text(encoding="utf-8")
+        reusable_container = (ROOT / ".github" / "workflows" / "reusable-container.yml").read_text(encoding="utf-8")
         toolchain = (ROOT / ".github" / "workflows" / "toolchain-images.yml").read_text(encoding="utf-8")
         archive = (ROOT / ".github" / "workflows" / "archive-artifacts.yml").read_text(encoding="utf-8")
         promote = (ROOT / ".github" / "workflows" / "promote.yml").read_text(encoding="utf-8")
