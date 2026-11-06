@@ -3,7 +3,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN printf '%s\n' 'APT::Snapshot "20261029T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
     && apt-get -o Acquire::Retries=8 -o Acquire::https::Timeout=30 -o APT::Update::Error-Mode=any -o Acquire::https::Verify-Peer=false update \
     && apt-get -o Acquire::Retries=8 -o Acquire::https::Timeout=30 -o Acquire::https::Verify-Peer=false install -y --no-install-recommends ca-certificates \
-    && apt-get update \
+    && apt-get -o Acquire::Retries=8 -o Acquire::https::Timeout=30 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=8 -o Acquire::https::Timeout=30 install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 ARG TEMURIN_VERSION=21.0.12.1
@@ -15,7 +15,7 @@ RUN set -eux; \
     jdk_archive="OpenJDK21U-jdk_x64_linux_hotspot_${TEMURIN_VERSION}_${TEMURIN_BUILD}.tar.gz"; \
     jdk_url="https://github.com/adoptium/temurin21-binaries/releases/download/jdk-${TEMURIN_VERSION}%2B${TEMURIN_BUILD}/${jdk_archive}"; \
     curl --fail --show-error --location --retry 3 --retry-all-errors "${jdk_url}" --output "/tmp/${jdk_archive}"; \
-    printf '%s  %s\\n' "${TEMURIN_SHA256}" "/tmp/${jdk_archive}" | sha256sum --check -; \
+    printf '%s  %s\n' "${TEMURIN_SHA256}" "/tmp/${jdk_archive}" | sha256sum --check -; \
     mkdir -p /opt/java/openjdk; tar -xzf "/tmp/${jdk_archive}" -C /opt/java/openjdk --strip-components=1 --no-same-owner; rm "/tmp/${jdk_archive}"; \
     maven_archive="apache-maven-${MAVEN_VERSION}-bin.tar.gz"; \
     curl --fail --show-error --location --retry 3 --retry-all-errors "https://dlcdn.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/${maven_archive}" -o "/tmp/${maven_archive}"; \
