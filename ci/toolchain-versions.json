@@ -48,9 +48,9 @@
       "language_version": "1.25.14",
       "build_tool": "go",
       "build_tool_version": "1.25.14",
-      "toolchain_id": "go125",
-      "status": "planned",
-      "notes": "Pinned Go 1.25.14 linux/amd64 official go.dev release SHA256; remains planned pending full verification and publication."
+      "toolchain_id": "",
+      "status": "retired",
+      "notes": "Retired before publication: Go 1.25.14 is affected by CVE-2026-111943, CVE-2026-78667, CVE-2026-78669 and CVE-2026-97031. Upstream fixes are available in Go 1.26.9/1.26.10 and 1.27.2/1.27.3, not in the Go 1.25 release line. The Go 1.25 Dockerfile is retained for audit history but excluded from verification and publication matrices; use Go 1.26.10 or newer."
     },
     {
       "id": "cpp-gcc-13",

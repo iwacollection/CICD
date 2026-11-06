@@ -123,9 +123,9 @@
     },
     {
       "id": "go125",
-      "status": "planned",
+      "status": "retired",
       "execution_mode": "container",
-      "description": "Isolated planned Go 1.25.14 toolchain built from the official go.dev linux/amd64 archive with SHA256 verification; digest is intentionally empty pending verification.",
+      "description": "Retired: Go 1.25.14 is affected by upstream HIGH-severity standard-library vulnerabilities with no fixed Go 1.25 release. Kept for historical traceability; use the verified Go 1.26.10 toolchain or a newer supported release.",
       "image": "ghcr.io/iwacollection/cicd-toolchain-go125",
       "digest": "",
       "dockerfile": "docker/toolchains/go/go125/Dockerfile",
