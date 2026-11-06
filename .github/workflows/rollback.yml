@@ -173,6 +173,7 @@ jobs:
           TOOLCHAIN_IDENTITY: ${{ steps.restore.outputs.toolchain_identity }}
           CONTAINER_IMAGE: ${{ steps.restore.outputs.container_image }}
           MANIFEST_SHA256: ${{ steps.restore.outputs.manifest_sha256 }}
+          APPLICATION_IMAGE: ${{ steps.restore.outputs.application_image }}
         run: |
           set -euo pipefail
           python3 scripts/ci/deployment_pointer.py create \
@@ -187,6 +188,7 @@ jobs:
             --restored-from-deployment-id "$RESTORE_DEPLOYMENT_ID" \
             --toolchain-identity "$TOOLCHAIN_IDENTITY" \
             --container-image "$CONTAINER_IMAGE" \
+            --application-image "$APPLICATION_IMAGE" \
             --manifest-sha256 "$MANIFEST_SHA256"
 
       - name: Rollback summary
