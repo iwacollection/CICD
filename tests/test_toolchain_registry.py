@@ -44,12 +44,13 @@ class ToolchainRegistryTests(unittest.TestCase):
 
     def test_candidate_registration_is_idempotent_for_same_digest_and_source(self) -> None:
         record = valid_record()
-        with patch("toolchain_registry._list_all_pages", return_value=[
-            {"id": 99, "payload": {
+        with patch("toolchain_registry._list_all_pages", side_effect=[
+            [{"id": 99, "payload": {
                 "kind": "toolchain-image-registry",
                 "digest": record["digest"],
                 "source_commit": record["source_commit"],
-            }}
+            }}],
+            [{"state": "success"}],
         ]), patch("toolchain_registry._create_deployment") as create:
             result = register_candidate(
                 api_url="https://api.github.com", repository="iwacollection/CICD",
