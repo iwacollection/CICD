@@ -1,4 +1,4 @@
-FROM golang:1.26.10-bookworm@sha256:23ce71337b726608afb1bc00986e630a05034a87a87ea1fc2cd1ae5cf33387eb
+FROM golang:1.26.10-trixie@sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42
 
 ARG GO_VERSION=1.26.10
 ARG GO_SHA256=ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5
@@ -31,7 +31,7 @@ RUN set -eux; \
       go install gotest.tools/gotestsum; \
     cd /; \
     rm -rf "$tooling_dir" /tmp/gopath /tmp/gocache /root/go/pkg/mod /root/.cache/go-build; \
-    dpkg --purge apt libapt-pkg6.0; \
+    dpkg --purge apt libapt-pkg7.0; \
     ! command -v apt; \
     git config --system --add safe.directory /workspace; \
     mkdir -p /home/ci /workspace; \
@@ -58,8 +58,8 @@ RUN chmod 0755 /usr/local/bin/go-toolchain-smoke
 
 LABEL org.opencontainers.image.title="CICD Go 1.26 toolchain" \
       org.opencontainers.image.description="Pinned official Go build image with cgo (gcc), git, make and gotestsum" \
-      org.opencontainers.image.base.name="golang:1.26.10-bookworm" \
-      org.opencontainers.image.base.digest="sha256:23ce71337b726608afb1bc00986e630a05034a87a87ea1fc2cd1ae5cf33387eb" \
+      org.opencontainers.image.base.name="golang:1.26.10-trixie" \
+      org.opencontainers.image.base.digest="sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42" \
       org.opencontainers.image.version="1.26.10" \
       org.opencontainers.image.vendor="The Go Authors / gotestsum"
 
