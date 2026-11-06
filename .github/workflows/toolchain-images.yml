@@ -6,16 +6,18 @@ on:
     branches: [main]
     paths:
       - "ci/toolchains.json"
+      - "ci/toolchain-versions.json"
       - "ci/supply-chain-policy.json"
       - "docker/toolchains/**"
       - "scripts/ci/toolchain_catalog.py"
+      - "scripts/ci/toolchain_versions.py"
       - "scripts/ci/supply_chain_policy.py"
       - "scripts/ci/run_build.py"
       - "scripts/ci/collect_build_metadata.py"
       - "scripts/ci/resolve_toolchain.py"
       - "scripts/ci/package_artifact.py"
       - "scripts/ci/verify_artifact.py"
-      - "examples/java17-maven-service/**"
+      - "examples/**"
       - "src/**"
       - "vars/**"
       - "jenkins-shared-library-tests/**"
@@ -37,6 +39,8 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       count: ${{ steps.matrix.outputs.count }}
+      verify_matrix: ${{ steps.verify_matrix.outputs.matrix }}
+      verify_count: ${{ steps.verify_matrix.outputs.count }}
       consumer_matrix: ${{ steps.consumers.outputs.consumer_matrix }}
       consumer_count: ${{ steps.consumers.outputs.consumer_count }}
       relevant: ${{ steps.scope.outputs.relevant }}
@@ -67,7 +71,7 @@ jobs:
             relevant=false
             while IFS= read -r path; do
               case "$path" in
-                ci/toolchains.json|ci/supply-chain-policy.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|scripts/ci/supply_chain_policy.py|scripts/ci/run_build.py|scripts/ci/collect_build_metadata.py|scripts/ci/resolve_toolchain.py|scripts/ci/package_artifact.py|scripts/ci/verify_artifact.py|examples/java17-maven-service/*|examples/java17-maven-service/**|src/*|src/**|vars/*|vars/**|jenkins-shared-library-tests/*|jenkins-shared-library-tests/**|.github/workflows/toolchain-images.yml)
+                ci/toolchains.json|ci/toolchain-versions.json|ci/supply-chain-policy.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|scripts/ci/toolchain_versions.py|scripts/ci/supply_chain_policy.py|scripts/ci/run_build.py|scripts/ci/collect_build_metadata.py|scripts/ci/resolve_toolchain.py|scripts/ci/package_artifact.py|scripts/ci/verify_artifact.py|examples/*|examples/**|src/*|src/**|vars/*|vars/**|jenkins-shared-library-tests/*|jenkins-shared-library-tests/**|.github/workflows/toolchain-images.yml)
                   relevant=true
                   break
                   ;;
@@ -92,6 +96,20 @@ jobs:
             echo '{"include":[]}'
           fi
 
+      - name: Discover planned and candidate verification images
+        id: verify_matrix
+        shell: bash
+        env:
+          RELEVANT: ${{ steps.scope.outputs.relevant }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEVANT" == "true" ]]; then
+            python3 scripts/ci/toolchain_catalog.py --verify-matrix
+          else
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo 'count=0' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Discover pinned candidate consumers
         id: consumers
         shell: bash
@@ -112,12 +130,13 @@ jobs:
   verify:
     name: Verify / ${{ matrix.toolchain }}
     needs: discover
-    if: needs.discover.outputs.count != '0'
+    if: needs.discover.outputs.verify_count != '0'
     permissions:
       contents: read
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.discover.outputs.verify_matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -130,23 +149,17 @@ jobs:
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build candidate locally
-        shell: bash
-        env:
-          DOCKERFILE: ${{ matrix.dockerfile }}
-          CONTEXT: ${{ matrix.context }}
-          PLATFORM: ${{ matrix.platform }}
-          TOOLCHAIN: ${{ matrix.toolchain }}
-        run: |
-          set -euo pipefail
-          docker buildx build \
-            --pull \
-            --load \
-            --platform "$PLATFORM" \
-            --cache-from "type=gha,scope=toolchain-$TOOLCHAIN" \
-            --cache-to "type=gha,mode=max,scope=toolchain-$TOOLCHAIN" \
-            -f "$DOCKERFILE" \
-            -t "ci-toolchain-verify:$GITHUB_SHA" \
-            "$CONTEXT"
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          tags: ci-toolchain-verify:${{ github.sha }}
+          load: true
+          # Base image digests are pinned; do not force a remote pull each run.
+          cache-from: type=gha,scope=toolchain-${{ matrix.toolchain }}
+          cache-to: type=gha,mode=max,scope=toolchain-${{ matrix.toolchain }}
+          provenance: false
 
       - name: Smoke test candidate
         shell: bash
@@ -156,24 +169,39 @@ jobs:
           set -euo pipefail
           docker run --rm "ci-toolchain-verify:$GITHUB_SHA" bash -euo pipefail -c "$SMOKE_COMMAND"
 
+      - name: Build and test language consumer fixture
+        if: matrix.verification_fixture != ''
+        shell: bash
+        env:
+          FIXTURE: ${{ matrix.verification_fixture }}
+          COMMAND: ${{ matrix.verification_command }}
+        run: |
+          set -euo pipefail
+          # Match the mounted workspace to the Runner UID/GID. The toolchain image
+          # is intentionally non-root; without this mapping, Go/CMake cannot write
+          # build caches or outputs into the host-owned checkout mount.
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
+            --env GOPATH=/tmp/go \
+            --env GOCACHE=/tmp/go-build \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/$FIXTURE,dst=/workspace" \
+            --workdir /workspace \
+            "ci-toolchain-verify:$GITHUB_SHA" \
+            bash -euo pipefail -c "$COMMAND"
+
       - name: Scan candidate vulnerabilities and licenses
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
         with:
           scan-type: image
           image-ref: ci-toolchain-verify:${{ github.sha }}
-          scanners: vuln,license
+          scanners: vuln,misconfig,secret,license
           severity: HIGH,CRITICAL
-          ignore-unfixed: true
+          ignore-unfixed: false
           format: json
           output: toolchain-security.json
           exit-code: "0"
           version: v0.70.0
-
-      - name: Enforce candidate supply-chain policy
-        run: >-
-          python3 scripts/ci/supply_chain_policy.py
-          --skip-dockerfiles
-          --report toolchain-security.json
 
       - name: Generate candidate SBOM
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
@@ -184,6 +212,15 @@ jobs:
           output: toolchain-sbom.cdx.json
           version: v0.70.0
 
+      - name: Enforce candidate supply-chain policy
+        run: >-
+          python3 scripts/ci/supply_chain_policy.py
+          --skip-dockerfiles
+          --report toolchain-security.json
+          --sbom toolchain-sbom.cdx.json
+          --toolchain "${{ matrix.toolchain }}"
+          --image-digest "$(docker image inspect ci-toolchain-verify:$GITHUB_SHA --format '{{.Id}}')"
+
       - name: Verify source identity
         shell: bash
         env:
@@ -192,6 +229,17 @@ jobs:
           set -euo pipefail
           echo "Dockerfile SHA256: $(sha256sum "$DOCKERFILE" | awk '{print $1}')"
           docker image inspect "ci-toolchain-verify:$GITHUB_SHA" --format 'Local image ID: {{.Id}}'
+
+      - name: Upload verification evidence
+        if: always() && hashFiles('toolchain-security.json', 'toolchain-sbom.cdx.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: toolchain-verification-${{ matrix.toolchain }}-${{ github.sha }}
+          path: |
+            toolchain-security.json
+            toolchain-sbom.cdx.json
+          if-no-files-found: warn
+          retention-days: 30
 
   gate:
     name: Toolchain gate
@@ -207,7 +255,7 @@ jobs:
         env:
           DISCOVER_RESULT: ${{ needs.discover.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
-          MATRIX_COUNT: ${{ needs.discover.outputs.count }}
+          MATRIX_COUNT: ${{ needs.discover.outputs.verify_count }}
           RELEVANT: ${{ needs.discover.outputs.relevant }}
           CONSUMER_COUNT: ${{ needs.discover.outputs.consumer_count }}
           CONSUMER_MATRIX: ${{ needs.discover.outputs.consumer_matrix }}
@@ -265,6 +313,17 @@ jobs:
           cosign verify "$IMAGE" \
             --certificate-identity="https://github.com/${{ github.repository }}/.github/workflows/toolchain-images.yml@refs/heads/main" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+
+      - name: Independently verify Candidate provenance
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.immutable_reference }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://$IMAGE" --bundle-from-oci \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/toolchain-images.yml" \
+            --source-ref "refs/heads/main"
 
       - name: Pull exact Candidate digest
         shell: bash
@@ -411,8 +470,10 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+      deployments: write
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -460,17 +521,78 @@ jobs:
           docker pull "$immutable_image"
           docker run --rm "$immutable_image" bash -euo pipefail -c "$SMOKE_COMMAND"
 
+      - name: Build and test consumer fixture against exact published digest
+        if: matrix.verification_fixture != ''
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}@${{ steps.push.outputs.digest }}
+          FIXTURE: ${{ matrix.verification_fixture }}
+          COMMAND: ${{ matrix.verification_command }}
+        run: |
+          set -euo pipefail
+          # Keep published-digest consumer builds consistent with PR verification:
+          # map the non-root container to the Runner identity for writable bind mounts.
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
+            --env GOPATH=/tmp/go \
+            --env GOCACHE=/tmp/go-build \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/$FIXTURE,dst=/workspace" \
+            --workdir /workspace \
+            "$IMAGE" bash -euo pipefail -c "$COMMAND"
+
+      - name: Build and test Java consumer fixture against exact published digest
+        if: matrix.consumer_fixture != ''
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}@${{ steps.push.outputs.digest }}
+          FIXTURE: ${{ matrix.consumer_fixture }}
+          JDK_VERSION: ${{ matrix.jdk_version }}
+          MAVEN_VERSION: ${{ matrix.maven_version }}
+        run: |
+          set -euo pipefail
+          expected_java_version="${JDK_VERSION%%+*}"
+          build_command="$(cat <<'BUILD_COMMAND'
+          set -euo pipefail
+          actual_java_version="$(java -version 2>&1 | sed -n '1s/.*version "\([^"]*\)".*/\1/p')"
+          actual_java_spec="$(java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/^[[:space:]]*java.specification.version =/ { print $2; exit }')"
+          actual_maven_version="$(mvn --version 2>&1 | sed -n '1s/^Apache Maven \([^ ]*\).*/\1/p')"
+          test "$actual_java_version" = "$EXPECTED_JAVA_VERSION"
+          test "$actual_java_spec" = "17"
+          test "$actual_maven_version" = "$EXPECTED_MAVEN_VERSION"
+          mvn --batch-mode --no-transfer-progress clean verify
+          java -jar target/java17-maven-service-1.0.0.jar | grep -Fx java17-maven-consumer-ok
+          BUILD_COMMAND
+          )"
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
+            --env EXPECTED_JAVA_VERSION="$expected_java_version" \
+            --env EXPECTED_MAVEN_VERSION="$MAVEN_VERSION" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/$FIXTURE,dst=/workspace" \
+            --workdir /workspace \
+            "$IMAGE" bash -euo pipefail -c "$build_command"
+
       - name: Scan exact published digest
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
         with:
           scan-type: image
           image-ref: ${{ matrix.image }}@${{ steps.push.outputs.digest }}
-          scanners: vuln,license
+          scanners: vuln,misconfig,secret,license
           severity: HIGH,CRITICAL
-          ignore-unfixed: true
+          ignore-unfixed: false
           format: json
           output: published-security.json
           exit-code: "0"
+          version: v0.70.0
+
+      - name: Generate published digest SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: image
+          image-ref: ${{ matrix.image }}@${{ steps.push.outputs.digest }}
+          format: cyclonedx
+          output: published-sbom.cdx.json
           version: v0.70.0
 
       - name: Enforce published image policy
@@ -478,9 +600,38 @@ jobs:
           python3 scripts/ci/supply_chain_policy.py
           --skip-dockerfiles
           --report published-security.json
+          --sbom published-sbom.cdx.json
+          --toolchain "${{ matrix.toolchain }}"
+          --image-digest "${{ steps.push.outputs.digest }}"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2 / Cosign v3.0.6
+
+      - name: Attach digest-bound CycloneDX SBOM attestation
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          immutable_image="${IMAGE}@${DIGEST}"
+          cosign attest --yes --type cyclonedx --predicate published-sbom.cdx.json "$immutable_image"
+          cosign verify-attestation --type cyclonedx "$immutable_image" \
+            --certificate-identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/toolchain-images.yml@refs/heads/main" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+
+      - name: Attach digest-bound Trivy scan attestation
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          immutable_image="${IMAGE}@${DIGEST}"
+          cosign attest --yes --type vuln --predicate published-security.json "$immutable_image"
+          cosign verify-attestation --type vuln "$immutable_image" \
+            --certificate-identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/toolchain-images.yml@refs/heads/main" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
 
       - name: Cosign exact published digest
         shell: bash
@@ -501,6 +652,20 @@ jobs:
           subject-name: ${{ matrix.image }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+      - name: Independently verify GitHub provenance for exact digest
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
+          gh attestation verify "oci://${IMAGE}@${DIGEST}" --bundle-from-oci \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/toolchain-images.yml" \
+            --source-ref "refs/heads/main"
 
       - name: Generate promotion record
         shell: bash
@@ -530,7 +695,8 @@ jobs:
           definition_sha256 = candidate_build_definition_sha256(item, context_sha256)
 
           record = {
-              "schema_version": 2,
+              "schema_version": 3,
+              "kind": "toolchain-image-registry",
               "toolchain": os.environ["TOOLCHAIN"],
               "image": os.environ["IMAGE"],
               "digest": os.environ["DIGEST"],
@@ -543,6 +709,14 @@ jobs:
               "build_definition_sha256": definition_sha256,
               "platform": os.environ["PLATFORM"],
               "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
+              "sbom_sha256": __import__("hashlib").sha256(json.dumps(json.loads(Path("published-sbom.cdx.json").read_text()), sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+              "scan_report_sha256": __import__("hashlib").sha256(json.dumps(json.loads(Path("published-security.json").read_text()), sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+              "signature_verified": True,
+              "sbom_attestation_verified": True,
+              "scan_attestation_verified": True,
+              "provenance_verified": True,
+              "security_policy_passed": True,
               "supply_chain_policy": "ci/supply-chain-policy.json",
               "cosign_verified": True,
               "buildkit_sbom": True,
@@ -553,6 +727,13 @@ jobs:
           )
           PY
           cat "promotion-$TOOLCHAIN.json"
+
+      - name: Register immutable Candidate digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/toolchain_registry.py register --record "promotion-${{ matrix.toolchain }}.json"
 
       - name: Upload promotion record
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -572,5 +753,6 @@ jobs:
             echo "- SBOM: BuildKit OCI attestation generated"
             echo "- Cosign: keyless signature verified"
             echo "- Provenance: GitHub build provenance attestation generated"
-            echo "- Promotion: register this digest in ci/toolchains.json before business consumption"
+            echo "- Registry: immutable Candidate digest recorded in GitHub Deployments"
+            echo "- Promotion: run Promote Toolchain Candidate; approval opens a catalog PR"
           } >> "$GITHUB_STEP_SUMMARY"

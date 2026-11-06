@@ -13,6 +13,7 @@ from promotion_policy import (  # noqa: E402
     find_successful_prerequisite,
     load_policy,
     normalize_identity,
+    pointer_matches,
     required_prerequisite,
     validate_policy,
     verify_promotion,
@@ -29,6 +30,30 @@ class PromotionPathPolicyTests(unittest.TestCase):
             source_run_id="123",
             release_tag="artifact-v2-" + "c" * 64,
         )
+
+    def test_new_deployment_trace_fields_must_match_when_present(self) -> None:
+        identity = {
+            **self.identity,
+            "toolchain_identity": "sha256:" + "d" * 64,
+            "container_image": "ghcr.io/example/toolchain@sha256:" + "d" * 64,
+            "manifest_sha256": "e" * 64,
+            "application_image": "ghcr.io/example/app@sha256:" + "f" * 64,
+        }
+        self.assertTrue(pointer_matches(identity, identity))
+        self.assertFalse(pointer_matches({**identity, "toolchain_identity": "sha256:" + "f" * 64}, identity))
+        legacy = {key: value for key, value in self.identity.items() if key in {
+            "artifact_name", "bundle_sha256", "source_sha", "source_run_id", "release_tag"
+        }}
+        self.assertFalse(pointer_matches(legacy, identity))
+        self.assertTrue(pointer_matches(self.identity, self.identity))
+        app_identity = normalize_identity(
+            artifact_name="app-a", bundle_sha256="a" * 64, source_sha="b" * 40,
+            source_run_id="123", release_tag="artifact-v2-" + "c" * 64,
+            application_image="ghcr.io/example/app@sha256:" + "f" * 64,
+        )
+        self.assertTrue(pointer_matches(app_identity, app_identity))
+        self.assertFalse(pointer_matches({**app_identity, "application_image": "ghcr.io/example/app@sha256:" + "d" * 64}, app_identity))
+        self.assertFalse(pointer_matches({key: value for key, value in app_identity.items() if key != "application_image"}, app_identity))
 
     def test_repository_policy_requires_strict_dev_staging_production_order(self) -> None:
         self.assertEqual(validate_policy(self.policy), [])

@@ -35,16 +35,44 @@ class ArtifactLifecycleTests(unittest.TestCase):
             source_run_id="123",
             release_tag="artifact-v2-" + "c" * 64,
             reason="promotion",
+            toolchain_identity="sha256:" + "d" * 64,
+            container_image="ghcr.io/example/toolchain@sha256:" + "d" * 64,
+            application_image="ghcr.io/example/app@sha256:" + "f" * 64,
+            manifest_sha256="e" * 64,
         )
         self.assertEqual(result["deployment_id"], "321")
+        self.assertEqual(result["toolchain_identity"], "sha256:" + "d" * 64)
+        self.assertEqual(result["container_image"], "ghcr.io/example/toolchain@sha256:" + "d" * 64)
+        self.assertEqual(result["application_image"], "ghcr.io/example/app@sha256:" + "f" * 64)
+        self.assertEqual(result["manifest_sha256"], "e" * 64)
         self.assertEqual(result["bundle_sha256"], "a" * 64)
         create_payload = request.call_args_list[0].kwargs["payload"]
         self.assertEqual(create_payload["environment"], "production")
         self.assertEqual(create_payload["payload"]["artifact_name"], "artifact-a")
         self.assertEqual(create_payload["payload"]["bundle_sha256"], "a" * 64)
+        self.assertEqual(create_payload["payload"]["toolchain_identity"], "sha256:" + "d" * 64)
+        self.assertEqual(create_payload["payload"]["container_image"], "ghcr.io/example/toolchain@sha256:" + "d" * 64)
+        self.assertEqual(create_payload["payload"]["application_image"], "ghcr.io/example/app@sha256:" + "f" * 64)
+        self.assertEqual(create_payload["payload"]["manifest_sha256"], "e" * 64)
         status_payload = request.call_args_list[1].kwargs["payload"]
         self.assertEqual(status_payload["state"], "success")
         self.assertTrue(status_payload["auto_inactive"])
+
+    def test_create_pointer_rejects_tag_only_application_image(self) -> None:
+        with self.assertRaisesRegex(ValueError, "application_image"):
+            create_pointer(
+                api_url="https://api.github.com",
+                repository="example/repo",
+                token="token",
+                environment="production",
+                artifact_name="artifact-a",
+                bundle_sha256="a" * 64,
+                source_sha="b" * 40,
+                source_run_id="123",
+                release_tag="artifact-v2-" + "c" * 64,
+                reason="promotion",
+                application_image="ghcr.io/example/app:latest",
+            )
 
     @patch("deployment_pointer._request")
     def test_inspect_pointer_rejects_non_v2_payload(self, request) -> None:
@@ -76,6 +104,7 @@ class ArtifactLifecycleTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "promote.yml").read_text(encoding="utf-8")
         self.assertIn("artifact_archive.py download", workflow)
         self.assertIn("deployment_pointer.py create", workflow)
+        self.assertIn("--application-image", workflow)
         self.assertIn("deployments: write", workflow)
         self.assertNotIn("actions/download-artifact", workflow)
         self.assertNotIn("retention-days: 90", workflow)
@@ -87,6 +116,7 @@ class ArtifactLifecycleTests(unittest.TestCase):
         self.assertIn("artifact_archive.py download", workflow)
         self.assertIn("--reason rollback", workflow)
         self.assertIn("--restored-from-deployment-id", workflow)
+        self.assertIn("--application-image", workflow)
         self.assertNotIn("package_artifact.py", workflow)
         self.assertNotIn("run_build.py", workflow)
 

@@ -145,7 +145,7 @@ Runner Image Prewarm
 - `active`：已经批准的不可变镜像身份。新工具链的 PR 不能触发 Active 镜像重建或重新发布，也不能把 Active 的 digest 静默替换为新构建结果。
 - `retired`：不参与构建和消费，历史 digest 保留用于审计和恢复。
 
-这样可以避免一个新 Candidate 的提交触发全仓库 Active 镜像重建，也避免某个旧 Active 镜像的当前漏洞扫描结果阻塞无关的 Candidate 构建。Candidate 的 digest 为空表示尚待首次发布或经审批请求重建；发布后必须通过 PR 把真实 digest 和完整 build context SHA256 写回 Registry。后续矩阵会跳过已有 digest 的 Candidate，但在跳过之前会重新计算 Docker build context 的目录与文件内容摘要；只要 Dockerfile、上下文文件新增/删除/修改，或镜像地址、Dockerfile 路径、平台、smoke command 等目录定义字段变化，摘要/构建定义指纹就会不匹配并让校验失败，而不是静默跳过。需要重新构建时，必须通过 PR 显式清空该 Candidate digest，再更新输入并重新走构建、扫描、签名和发布流程。
+这样可以避免一个新 Candidate 的提交触发全仓库 Active 镜像重建，也避免某个旧 Active 镜像的当前漏洞扫描结果阻塞无关的 Candidate 构建。Candidate 的 digest 为空表示尚待首次发布或经审批请求重建；发布成功后，流水线会自动将真实 digest 和完整 build context SHA256 登记到 GitHub Deployment registry。人工审核晋级通过后会自动创建 catalog Promotion PR，把真实 digest 与完整 build context/build definition SHA256 写回 Registry；PR 仍需正常代码审查和合并。后续矩阵会跳过已有 digest 的 Candidate，但在跳过之前会重新计算 Docker build context 的目录与文件内容摘要；只要 Dockerfile、上下文文件新增/删除/修改，或镜像地址、Dockerfile 路径、平台、smoke command 等目录定义字段变化，摘要/构建定义指纹就会不匹配并让校验失败，而不是静默跳过。需要重新构建时，必须通过 PR 显式清空该 Candidate digest，再更新输入并重新走构建、扫描、签名和发布流程。
 
 Active 镜像的持续漏洞复扫属于独立的 Registry/安全运营任务，应按 Active digest 扫描并触发准入阻断或升级流程；不能通过重新构建 Active 镜像来代替复扫。
 
@@ -241,3 +241,8 @@ python3 scripts/ci/toolchain_catalog.py --consumer-matrix
 回滚应将 Toolchain ID 指向之前保存并验证过的 digest，再通过 PR 和完整验证流程。不要给旧版本重新打一个相同 tag，也不要在业务项目中临时覆盖镜像地址。
 
 工具链回退后，旧、新工具链 identity 不同，缓存必须自然隔离；业务制品也必须记录实际使用的工具链身份。
+
+
+## 发布后的自动登记与人工晋级
+
+详细步骤、例外字段和 GitHub Environment 管理要求见[工具链候选登记、审核晋级与部署追溯](toolchain-promotion-runbook.md)。GitHub Deployment 记录是候选/批准审计历史；`ci/toolchains.json` 仍是项目消费状态的声明来源，只有 Promotion PR 合并后才会变为 active。

@@ -34,6 +34,18 @@ def _validate_payload(payload: dict[str, Any]) -> None:
     for field in ("restored_from_deployment_id", "promoted_from_deployment_id"):
         if field in payload and not str(payload[field]).isdigit():
             raise ValueError(f"deployment payload {field} is invalid")
+    if "manifest_sha256" in payload and not SHA256_RE.fullmatch(str(payload["manifest_sha256"])):
+        raise ValueError("deployment payload manifest_sha256 is invalid")
+    if "toolchain_identity" in payload and not isinstance(payload["toolchain_identity"], str):
+        raise ValueError("deployment payload toolchain_identity is invalid")
+    if "container_image" in payload and not isinstance(payload["container_image"], str):
+        raise ValueError("deployment payload container_image is invalid")
+    container_image = payload.get("container_image", "")
+    if container_image and "@sha256:" not in container_image:
+        raise ValueError("deployment payload container_image must be immutable")
+    application_image = payload.get("application_image", "")
+    if application_image and not re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", application_image):
+        raise ValueError("deployment payload application_image must be an immutable repository@sha256 reference")
 
 
 def create_pointer(
@@ -50,6 +62,10 @@ def create_pointer(
     reason: str,
     restored_from_deployment_id: str = "",
     promoted_from_deployment_id: str = "",
+    toolchain_identity: str = "",
+    container_image: str = "",
+    application_image: str = "",
+    manifest_sha256: str = "",
 ) -> dict:
     if not ENV_RE.fullmatch(environment):
         raise ValueError("environment contains unsupported characters")
@@ -77,6 +93,16 @@ def create_pointer(
         if not promoted_from_deployment_id.isdigit():
             raise ValueError("promoted_from_deployment_id must be numeric")
         payload["promoted_from_deployment_id"] = promoted_from_deployment_id
+    if toolchain_identity:
+        payload["toolchain_identity"] = toolchain_identity
+    if container_image:
+        payload["container_image"] = container_image
+    if application_image:
+        if not re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", application_image):
+            raise ValueError("application_image must be an immutable repository@sha256 reference")
+        payload["application_image"] = application_image
+    if manifest_sha256:
+        payload["manifest_sha256"] = manifest_sha256
     _validate_payload(payload)
 
     deployment_url = f"{api_url.rstrip('/')}/repos/{repository}/deployments"
@@ -209,6 +235,10 @@ def main() -> int:
     create_parser.add_argument("--reason", choices=("promotion", "rollback"), required=True)
     create_parser.add_argument("--restored-from-deployment-id", default="")
     create_parser.add_argument("--promoted-from-deployment-id", default="")
+    create_parser.add_argument("--toolchain-identity", default="")
+    create_parser.add_argument("--container-image", default="")
+    create_parser.add_argument("--application-image", default="")
+    create_parser.add_argument("--manifest-sha256", default="")
 
     inspect_parser = subparsers.add_parser("inspect")
     inspect_parser.add_argument("--repository", required=True)
@@ -237,6 +267,10 @@ def main() -> int:
                 reason=args.reason,
                 restored_from_deployment_id=args.restored_from_deployment_id,
                 promoted_from_deployment_id=args.promoted_from_deployment_id,
+                toolchain_identity=args.toolchain_identity,
+                container_image=args.container_image,
+                application_image=args.application_image,
+                manifest_sha256=args.manifest_sha256,
             )
         elif args.command == "inspect":
             result = inspect_pointer(

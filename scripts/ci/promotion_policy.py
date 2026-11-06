@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 from pathlib import Path
@@ -20,6 +21,10 @@ IDENTITY_FIELDS = (
     "source_sha",
     "source_run_id",
     "release_tag",
+    "toolchain_identity",
+    "container_image",
+    "manifest_sha256",
+    "application_image",
 )
 
 
@@ -95,6 +100,10 @@ def normalize_identity(
     source_sha: str,
     source_run_id: str,
     release_tag: str,
+    toolchain_identity: str = "",
+    container_image: str = "",
+    manifest_sha256: str = "",
+    application_image: str = "",
 ) -> dict[str, str]:
     identity = {
         "artifact_name": artifact_name,
@@ -102,6 +111,10 @@ def normalize_identity(
         "source_sha": source_sha,
         "source_run_id": source_run_id,
         "release_tag": release_tag,
+        "toolchain_identity": toolchain_identity,
+        "container_image": container_image,
+        "manifest_sha256": manifest_sha256,
+        "application_image": application_image,
     }
     if not artifact_name:
         raise ValueError("artifact_name is required")
@@ -113,11 +126,26 @@ def normalize_identity(
         raise ValueError("source_run_id must be numeric")
     if not release_tag.startswith("artifact-v2-"):
         raise ValueError("release_tag must reference an Artifact Contract v2 archive")
+    if manifest_sha256 and (len(manifest_sha256) != 64 or any(c not in "0123456789abcdef" for c in manifest_sha256)):
+        raise ValueError("manifest_sha256 must be 64 lowercase hexadecimal characters")
+    if container_image and "@sha256:" not in container_image:
+        raise ValueError("container_image must use an immutable digest reference")
+    if application_image and not re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", application_image):
+        raise ValueError("application_image must use an immutable repository@sha256 reference")
     return identity
 
 
 def pointer_matches(pointer: dict[str, Any], identity: dict[str, str]) -> bool:
-    return all(str(pointer.get(field, "")) == identity[field] for field in IDENTITY_FIELDS)
+    # Every trace field, including application_image, is part of the exact
+    # cross-environment identity. An image digest cannot be silently dropped
+    # or changed between dev, staging and production.
+    required = ("artifact_name", "bundle_sha256", "source_sha", "source_run_id", "release_tag")
+    if not all(str(pointer.get(field, "")) == identity[field] for field in required):
+        return False
+    for field in ("toolchain_identity", "container_image", "manifest_sha256", "application_image"):
+        if str(pointer.get(field, "")) != identity[field]:
+            return False
+    return True
 
 
 def find_successful_prerequisite(
@@ -217,6 +245,10 @@ def main() -> int:
     verify.add_argument("--source-sha", required=True)
     verify.add_argument("--source-run-id", required=True)
     verify.add_argument("--release-tag", required=True)
+    verify.add_argument("--toolchain-identity", default="")
+    verify.add_argument("--container-image", default="")
+    verify.add_argument("--manifest-sha256", default="")
+    verify.add_argument("--application-image", default="")
 
     args = parser.parse_args()
     try:
@@ -234,6 +266,10 @@ def main() -> int:
             source_sha=args.source_sha,
             source_run_id=args.source_run_id,
             release_tag=args.release_tag,
+            toolchain_identity=args.toolchain_identity,
+            container_image=args.container_image,
+            manifest_sha256=args.manifest_sha256,
+            application_image=args.application_image,
         )
         result = verify_promotion(
             policy=policy,

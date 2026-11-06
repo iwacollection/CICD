@@ -290,7 +290,25 @@ def download(
         actual = sha256(target)
         if actual != expected_assets[name]:
             raise ValueError(f"release asset digest mismatch for {name}")
-    return {"status": "downloaded", "release_tag": tag, **record}
+    manifest_assets = [
+        name for name in expected_assets
+        if name.endswith(".manifest.json")
+    ]
+    if len(manifest_assets) != 1:
+        raise ValueError("archive must contain exactly one manifest asset")
+    manifest_path = directory / manifest_assets[0]
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    toolchain = manifest.get("toolchain", {})
+    if not isinstance(toolchain, dict):
+        raise ValueError("artifact manifest toolchain identity is missing")
+    return {
+        "status": "downloaded",
+        "release_tag": tag,
+        "manifest_sha256": expected_assets[manifest_assets[0]],
+        "toolchain_identity": str(toolchain.get("identity", "")),
+        "container_image": str(toolchain.get("container_image", "")),
+        **record,
+    }
 
 
 def _emit(result: dict) -> None:
@@ -303,6 +321,9 @@ def _emit(result: dict) -> None:
                 "bundle_sha256",
                 "source_sha",
                 "workflow_run_id",
+                "toolchain_identity",
+                "container_image",
+                "manifest_sha256",
             ):
                 if key in result:
                     handle.write(f"{key}={result[key]}\n")

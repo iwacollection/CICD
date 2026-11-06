@@ -174,6 +174,30 @@ class CandidateConsumerMatrixTests(unittest.TestCase):
                 item["image"] + "@" + item["digest"],
             )
 
+    def test_candidate_without_digest_waits_for_publish_consumer_lane(self) -> None:
+        item = {
+            "id": "java17-maven",
+            "status": "candidate",
+            "execution_mode": "container",
+            "image": "ghcr.io/iwacollection/cicd-toolchain-java17-maven",
+            "digest": "",
+            "consumer_fixture": "examples/java17-maven-service",
+        }
+        matrix = build_consumer_matrix({"toolchains": [item]}, ROOT)
+        self.assertEqual(matrix["include"], [])
+
+    def test_active_consumer_without_digest_is_rejected(self) -> None:
+        item = {
+            "id": "java17-maven",
+            "status": "active",
+            "execution_mode": "container",
+            "image": "ghcr.io/iwacollection/cicd-toolchain-java17-maven",
+            "digest": "",
+            "consumer_fixture": "examples/java17-maven-service",
+        }
+        with self.assertRaisesRegex(ValueError, "active consumer fixture"):
+            build_consumer_matrix({"toolchains": [item]}, ROOT)
+
     def test_fixture_must_declare_the_same_toolchain_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

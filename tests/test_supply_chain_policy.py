@@ -34,6 +34,23 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertRegex(text, r"FROM ubuntu:24\.04@sha256:[0-9a-f]{64}")
         self.assertIn('APT::Snapshot "20260828T000000Z"', text)
 
+
+    def test_debian_snapshot_is_accepted_for_apt_based_toolchain(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            dockerfile = Path(directory) / "Dockerfile"
+            dockerfile.write_text(
+                "FROM golang:1.26.10-trixie@sha256:" + "a" * 64 + "\n"
+                "RUN echo 'deb [check-valid-until=no] "
+                "https://snapshot.debian.org/archive/debian/20261106T000000Z trixie main' "
+                "> /etc/apt/sources.list && apt-get update\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(validate_dockerfile(dockerfile, self.policy), [])
+
+    def test_gcc_toolchain_does_not_disable_apt_tls_verification(self) -> None:
+        dockerfile = ROOT / "docker" / "toolchains" / "gcc" / "gcc12" / "Dockerfile"
+        self.assertNotIn("Verify-Peer=false", dockerfile.read_text(encoding="utf-8"))
+
     def test_floating_container_base_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             dockerfile = Path(directory) / "Dockerfile"
@@ -95,19 +112,31 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertEqual(validate_sbom(valid), [])
         self.assertTrue(validate_sbom({"bomFormat": "SPDX"}))
 
+    def test_capability_container_pins_security_fixed_ubuntu_packages(self) -> None:
+        dockerfile_path = ROOT / "examples" / "capability-service" / "Dockerfile"
+        dockerfile = dockerfile_path.read_text(encoding="utf-8")
+        self.assertEqual(validate_dockerfile(dockerfile_path, self.policy), [])
+        self.assertIn('APT::Snapshot "20261105T000000Z"', dockerfile)
+        self.assertIn("apt=2.8.4ubuntu0.1", dockerfile)
+        self.assertIn("libssl3t64=3.0.13-0ubuntu3.16", dockerfile)
+        self.assertIn("Acquire::Retries=0", dockerfile)
+
     def test_required_workflows_enforce_supply_chain(self) -> None:
         central = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         dag_node = (ROOT / ".github" / "workflows" / "dag-node.yml").read_text(encoding="utf-8")
         reusable = (ROOT / ".github" / "workflows" / "reusable-build.yml").read_text(encoding="utf-8")
+        reusable_container = (ROOT / ".github" / "workflows" / "reusable-container.yml").read_text(encoding="utf-8")
         toolchain = (ROOT / ".github" / "workflows" / "toolchain-images.yml").read_text(encoding="utf-8")
         archive = (ROOT / ".github" / "workflows" / "archive-artifacts.yml").read_text(encoding="utf-8")
         promote = (ROOT / ".github" / "workflows" / "promote.yml").read_text(encoding="utf-8")
+        toolchain_promote = (ROOT / ".github" / "workflows" / "promote-toolchain.yml").read_text(encoding="utf-8")
         rollback = (ROOT / ".github" / "workflows" / "rollback.yml").read_text(encoding="utf-8")
 
-        for workflow in (dag_node, reusable, toolchain):
+        for workflow in (dag_node, reusable, reusable_container, toolchain):
             self.assertIn("aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25", workflow)
             self.assertIn("v0.70.0", workflow)
             self.assertIn("supply_chain_policy.py", workflow)
+            self.assertIn("ignore-unfixed: false", workflow)
 
         self.assertIn("dag-node.yml", central)
         self.assertIn("supply_chain_policy.py", central)
@@ -118,6 +147,20 @@ class SupplyChainPolicyTests(unittest.TestCase):
 
         self.assertIn("sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6", toolchain)
         self.assertIn("cosign verify", toolchain)
+        self.assertIn("cosign attest --yes --type cyclonedx", toolchain)
+        self.assertIn("cosign attest --yes --type vuln", toolchain)
+        self.assertIn("gh attestation verify", toolchain)
+        self.assertIn("--bundle-from-oci", toolchain)
+        self.assertIn("toolchain_registry.py register", toolchain)
+        self.assertIn("Build and test Java consumer fixture against exact published digest", toolchain)
+        self.assertIn("ignore-unfixed: false", toolchain)
+        self.assertIn("cosign verify-attestation --type cyclonedx", toolchain_promote)
+        self.assertIn("cosign verify-attestation --type vuln", toolchain_promote)
+        self.assertIn("gh attestation verify", toolchain_promote)
+        self.assertIn("--bundle-from-oci", toolchain_promote)
+        self.assertIn("environment: toolchain-production", toolchain_promote)
+        self.assertIn("toolchain_registry.py approve", toolchain_promote)
+        self.assertIn('["gh", "pr", "create"', toolchain_promote)
         self.assertIn("cosign sign-blob", archive)
         self.assertIn("id-token: write", archive)
 

@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Append a GitHub Deployment record only after runtime evidence was verified."""
+from __future__ import annotations
+import argparse, json, os, re, sys, urllib.error
+from pathlib import Path
+from typing import Any
+from artifact_archive import _request
+
+SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+REVISION_RE = re.compile(r"^[0-9a-f]{7,40}$")
+
+def register_runtime(*, api_url: str, repository: str, token: str,
+                     workflow_sha: str, evidence: dict[str, Any]) -> dict[str, Any]:
+    required = {"schema_version": 1, "kind": "argocd-kubernetes-runtime-verification",
+                "argocd_sync": "Synced", "argocd_health": "Healthy"}
+    for key, expected in required.items():
+        if evidence.get(key) != expected:
+            raise ValueError(f"runtime evidence {key} must equal {expected}")
+    for field in ("image_digest", "manifest_sha256"):
+        value = str(evidence.get(field, ""))
+        if not SHA256_RE.fullmatch(value if field == "image_digest" else "sha256:" + value):
+            raise ValueError(f"runtime evidence {field} is invalid")
+    revision = str(evidence.get("gitops_revision", ""))
+    if not REVISION_RE.fullmatch(revision):
+        raise ValueError("runtime evidence GitOps revision is invalid")
+    if not evidence.get("application") or not evidence.get("namespace"):
+        raise ValueError("runtime evidence application and namespace are required")
+    if not evidence.get("artifact_name") or not str(evidence.get("artifact_source_run_id", "")).isdigit():
+        raise ValueError("runtime evidence artifact identity is incomplete")
+    if not str(evidence.get("deployment_pointer_id", "")).isdigit():
+        raise ValueError("runtime evidence artifact identity is incomplete")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(evidence.get("bundle_sha256", ""))):
+        raise ValueError("runtime evidence bundle_sha256 is invalid")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(evidence.get("artifact_source_sha", ""))):
+        raise ValueError("runtime evidence artifact_source_sha is invalid")
+    pods = evidence.get("verified_pods")
+    if not isinstance(pods, list) or not pods or evidence.get("pod_count") != len(pods):
+        raise ValueError("runtime evidence must contain a matching non-empty Pod list")
+    evidence_hash = str(evidence.get("evidence_sha256", ""))
+    if not re.fullmatch(r"[0-9a-f]{64}", evidence_hash):
+        raise ValueError("runtime evidence evidence_sha256 is invalid")
+    unsigned_evidence = {key: value for key, value in evidence.items() if key != "evidence_sha256"}
+    import hashlib
+    canonical = json.dumps(unsigned_evidence, sort_keys=True, separators=(",", ":")).encode()
+    if hashlib.sha256(canonical).hexdigest() != evidence_hash:
+        raise ValueError("runtime evidence SHA256 does not match its contents")
+    expected_image = str(evidence.get("expected_image", ""))
+    expected_digest = str(evidence.get("image_digest", ""))
+    if not expected_image.endswith("@" + expected_digest):
+        raise ValueError("runtime evidence expected image and digest do not match")
+    for pod in pods:
+        images = pod.get("images") if isinstance(pod, dict) else None
+        if not isinstance(images, list) or not images:
+            raise ValueError("each verified Pod must include at least one verified image")
+        if any(item.get("image") != expected_image or expected_digest not in item.get("image_id", "")
+               for item in images):
+            raise ValueError("runtime Pod evidence contains a mismatched image or imageID")
+    environment_name = evidence.get("environment")
+    if environment_name not in {"dev", "staging", "production"}:
+        raise ValueError("runtime evidence environment is invalid")
+
+    if not re.fullmatch(r"[0-9a-f]{40}", workflow_sha):
+        raise ValueError("workflow_sha must be the 40-character CICD repository commit SHA")
+    environment = f"runtime-{environment_name}"
+    deployments_url = f"{api_url.rstrip('/')}/repos/{repository}/deployments"
+    run_id = os.getenv("GITHUB_RUN_ID", "")
+    server_url = os.getenv("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    artifact_name = os.getenv("RUNTIME_EVIDENCE_ARTIFACT", "")
+    payload = {key: evidence[key] for key in (
+        "schema_version", "kind", "application", "namespace", "pod_selector",
+        "image_digest", "expected_image", "gitops_revision", "manifest_sha256",
+        "artifact_name", "bundle_sha256", "deployment_pointer_id",
+        "artifact_source_sha", "artifact_source_run_id", "argocd_sync", "argocd_health", "pod_count", "verified_at", "evidence_sha256")}
+    payload["workflow_run_id"] = run_id
+    payload["workflow_run_url"] = f"{server_url}/{repository}/actions/runs/{run_id}" if run_id else ""
+    payload["evidence_artifact_name"] = artifact_name
+    deployment = _request(deployments_url, token, method="POST", payload={
+        "ref": workflow_sha, "task": "runtime-verification", "auto_merge": False,
+        "required_contexts": [], "environment": environment,
+        "description": f"Verified {evidence['application']} @ {evidence['image_digest']}",
+        "transient_environment": False, "production_environment": environment_name == "production",
+        "payload": payload})
+    deployment_id = str(deployment.get("id", "")) if isinstance(deployment, dict) else ""
+    if not deployment_id.isdigit():
+        raise ValueError("GitHub did not return a runtime Deployment ID")
+    status = _request(f"{deployments_url}/{deployment_id}/statuses", token, method="POST", payload={
+        "state": "success", "environment": environment,
+        "description": f"Argo CD Healthy; {evidence['pod_count']} Pods use exact image digest",
+        "auto_inactive": False})
+    return {"deployment_id": deployment_id, "environment": environment,
+            "image_digest": evidence["image_digest"], "gitops_revision": revision,
+            "evidence_sha256": evidence["evidence_sha256"],
+            "status": status.get("state", "success") if isinstance(status, dict) else "success"}
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--evidence", default="runtime-evidence.json")
+    parser.add_argument("--api-url", default=os.getenv("GITHUB_API_URL", "https://api.github.com"))
+    args = parser.parse_args()
+    token, repository = os.getenv("GH_TOKEN", "").strip(), os.getenv("GITHUB_REPOSITORY", "").strip()
+    if not token or not repository:
+        raise SystemExit("GH_TOKEN and GITHUB_REPOSITORY are required")
+    try:
+        evidence = json.loads(Path(args.evidence).read_text(encoding="utf-8"))
+        if not isinstance(evidence, dict):
+            raise ValueError("runtime evidence must be a JSON object")
+        workflow_sha = os.getenv("GITHUB_SHA", "").strip()
+        result = register_runtime(api_url=args.api_url, repository=repository, token=token,
+                                  workflow_sha=workflow_sha, evidence=evidence)
+    except (OSError, json.JSONDecodeError, ValueError, urllib.error.URLError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    output = os.getenv("GITHUB_OUTPUT", "")
+    if output:
+        with open(output, "a", encoding="utf-8") as handle:
+            for key, value in result.items():
+                handle.write(f"{key}={value}\n")
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())

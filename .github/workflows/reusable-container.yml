@@ -123,7 +123,7 @@ jobs:
           image-ref: ${{ steps.image.outputs.tag }}
           scanners: vuln,license,secret
           severity: HIGH,CRITICAL
-          ignore-unfixed: true
+          ignore-unfixed: false
           format: json
           output: .ci-evidence/container/image-scan.json
           exit-code: "0"

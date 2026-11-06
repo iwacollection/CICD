@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 import re
 import sys
 from pathlib import Path
 
 DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}(?:\s|$)")
-SNAPSHOT_RE = re.compile(r"(?:APT::Snapshot|--snapshot)[=\s\"']+([0-9]{8}T[0-9]{6}Z)")
+SNAPSHOT_RE = re.compile(r"""(?:APT::Snapshot|--snapshot)[=\s\\\"']+([0-9]{8}T[0-9]{6}Z)|snapshot\.debian\.org/archive/(?:debian|debian-security)/([0-9]{8}T[0-9]{6}Z)""")
 VALID_SEVERITIES = {"UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
 
 
@@ -44,6 +45,8 @@ def validate_policy(policy: dict) -> list[str]:
         errors.append("policy scanner.name must be trivy")
     elif not isinstance(scanner.get("version"), str) or not scanner.get("version"):
         errors.append("policy scanner.version must be pinned")
+    elif scanner.get("ignore_unfixed_vulnerabilities") is not False:
+        errors.append("policy must scan unfixed vulnerabilities; exceptions require explicit approval")
 
     _validate_severity_section(policy, "vulnerability", errors)
     _validate_severity_section(policy, "misconfiguration", errors)
@@ -59,6 +62,51 @@ def validate_policy(policy: dict) -> list[str]:
             errors.append("policy.license.deny_licenses must be a string list")
         elif len(denied) != len(set(denied)):
             errors.append("policy.license.deny_licenses must not contain duplicates")
+
+    exceptions = policy.get("vulnerability_exceptions", [])
+    if not isinstance(exceptions, list):
+        errors.append("policy.vulnerability_exceptions must be a list")
+        exceptions = []
+    required_exception_fields = {
+        "id", "toolchain", "image_digest", "vulnerability_id", "package",
+        "severity", "justification", "owner", "approved_by", "ticket",
+        "approved_at", "expires_at", "compensating_controls",
+    }
+    seen_exceptions: set[str] = set()
+    for index, exception in enumerate(exceptions):
+        prefix = f"policy.vulnerability_exceptions[{index}]"
+        if not isinstance(exception, dict):
+            errors.append(f"{prefix} must be an object")
+            continue
+        missing = required_exception_fields - set(exception)
+        if missing:
+            errors.append(f"{prefix} missing fields: {', '.join(sorted(missing))}")
+            continue
+        exception_id = exception.get("id")
+        if not isinstance(exception_id, str) or not exception_id or exception_id in seen_exceptions:
+            errors.append(f"{prefix}.id must be unique and non-empty")
+        else:
+            seen_exceptions.add(exception_id)
+        for field in ("toolchain", "package", "justification", "owner", "approved_by", "ticket", "compensating_controls"):
+            if not isinstance(exception.get(field), str) or not exception[field].strip():
+                errors.append(f"{prefix}.{field} must be non-empty")
+        if not isinstance(exception.get("image_digest"), str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", exception["image_digest"]):
+            errors.append(f"{prefix}.image_digest must be an exact sha256 digest")
+        if not isinstance(exception.get("vulnerability_id"), str) or not re.fullmatch(r"(?:CVE-[0-9]{4}-[0-9]+|GHSA-[0-9a-z-]+)", exception["vulnerability_id"]):
+            errors.append(f"{prefix}.vulnerability_id must be an exact CVE/GHSA identifier")
+        if exception.get("severity") not in {"HIGH", "CRITICAL"}:
+            errors.append(f"{prefix}.severity must be HIGH or CRITICAL")
+        try:
+            approved_at = datetime.fromisoformat(str(exception.get("approved_at", "")).replace("Z", "+00:00"))
+            expires_at = datetime.fromisoformat(str(exception.get("expires_at", "")).replace("Z", "+00:00"))
+            if approved_at.tzinfo is None or expires_at.tzinfo is None or expires_at <= approved_at:
+                raise ValueError("timestamps must be timezone-aware and expires_at must be later")
+            if expires_at - approved_at > timedelta(days=90):
+                errors.append(f"{prefix} exception lifetime cannot exceed 90 days")
+            if approved_at > datetime.now(timezone.utc):
+                errors.append(f"{prefix}.approved_at cannot be in the future")
+        except ValueError:
+            errors.append(f"{prefix} approved_at/expires_at must be valid timezone-aware ISO-8601 timestamps")
 
     artifact = policy.get("artifact")
     if not isinstance(artifact, dict):
@@ -87,7 +135,7 @@ def validate_dockerfile(path: Path, policy: dict) -> list[str]:
                 errors.append(f"{path}: latest tag is forbidden: {line}")
     if "apt-get" in text or re.search(r"\bapt\s+(?:install|update)\b", text):
         if container.get("require_apt_snapshot", True) and not SNAPSHOT_RE.search(text):
-            errors.append(f"{path}: apt usage must be bound to an immutable Ubuntu Snapshot ID")
+            errors.append(f"{path}: apt usage must be bound to an immutable Ubuntu or Debian Snapshot ID")
     return errors
 
 
@@ -95,7 +143,14 @@ def _severity(item: dict) -> str:
     return str(item.get("Severity", "UNKNOWN")).upper()
 
 
-def validate_trivy_report(report: dict, policy: dict) -> tuple[list[str], dict]:
+def validate_trivy_report(
+    report: dict,
+    policy: dict,
+    *,
+    toolchain: str = "",
+    image_digest: str = "",
+    now: datetime | None = None,
+) -> tuple[list[str], dict]:
     errors: list[str] = []
     summary = {
         "vulnerabilities": 0,
@@ -103,11 +158,36 @@ def validate_trivy_report(report: dict, policy: dict) -> tuple[list[str], dict]:
         "denied_licenses": 0,
         "secrets": 0,
         "misconfigurations": 0,
+        "vulnerability_exceptions_applied": 0,
     }
     vuln_denied = set(policy.get("vulnerability", {}).get("deny_severities", []))
     denied_licenses = set(policy.get("license", {}).get("deny_licenses", []))
     misconfig_denied = set(policy.get("misconfiguration", {}).get("deny_severities", []))
     deny_secrets = bool(policy.get("secret", {}).get("deny_any_finding", True))
+    now = now or datetime.now(timezone.utc)
+    exceptions = policy.get("vulnerability_exceptions", [])
+    if not isinstance(exceptions, list):
+        exceptions = []
+
+    def exception_for(finding: dict) -> dict | None:
+        for exception in exceptions:
+            if not isinstance(exception, dict):
+                continue
+            if (
+                exception.get("toolchain") != toolchain
+                or exception.get("image_digest") != image_digest
+                or exception.get("vulnerability_id") != finding.get("VulnerabilityID")
+                or exception.get("package") != finding.get("PkgName")
+                or exception.get("severity") != _severity(finding)
+            ):
+                continue
+            try:
+                expiry = datetime.fromisoformat(str(exception["expires_at"]).replace("Z", "+00:00"))
+            except (KeyError, ValueError):
+                continue
+            if expiry.tzinfo is not None and expiry > now:
+                return exception
+        return None
 
     results = report.get("Results", [])
     if not isinstance(results, list):
@@ -121,6 +201,10 @@ def validate_trivy_report(report: dict, policy: dict) -> tuple[list[str], dict]:
                 continue
             summary["vulnerabilities"] += 1
             if _severity(finding) in vuln_denied:
+                exception = exception_for(finding)
+                if exception is not None:
+                    summary["vulnerability_exceptions_applied"] += 1
+                    continue
                 errors.append(
                     f"vulnerability blocked: {finding.get('VulnerabilityID', 'unknown')} "
                     f"severity={_severity(finding)} target={target} package={finding.get('PkgName', '')}"
@@ -132,17 +216,13 @@ def validate_trivy_report(report: dict, policy: dict) -> tuple[list[str], dict]:
             name = str(finding.get("Name", finding.get("Category", "unknown")))
             if name in denied_licenses:
                 summary["denied_licenses"] += 1
-                errors.append(
-                    f"license blocked: {name} severity={_severity(finding)} target={target}"
-                )
+                errors.append(f"license blocked: {name} severity={_severity(finding)} target={target}")
         for finding in result.get("Secrets") or []:
             if not isinstance(finding, dict):
                 continue
             summary["secrets"] += 1
             if deny_secrets:
-                errors.append(
-                    f"secret finding blocked: {finding.get('RuleID', 'unknown')} target={target}"
-                )
+                errors.append(f"secret finding blocked: {finding.get('RuleID', 'unknown')} target={target}")
         for finding in result.get("Misconfigurations") or []:
             if not isinstance(finding, dict):
                 continue
@@ -176,6 +256,8 @@ def main() -> int:
     parser.add_argument("--policy", default="ci/supply-chain-policy.json")
     parser.add_argument("--report")
     parser.add_argument("--sbom")
+    parser.add_argument("--toolchain", default="")
+    parser.add_argument("--image-digest", default="")
     parser.add_argument("--dockerfiles", nargs="*")
     parser.add_argument(
         "--skip-dockerfiles",
@@ -208,7 +290,9 @@ def main() -> int:
         except ValueError as exc:
             errors.append(str(exc))
         else:
-            report_errors, summary = validate_trivy_report(report, policy)
+            report_errors, summary = validate_trivy_report(
+                report, policy, toolchain=args.toolchain, image_digest=args.image_digest
+            )
             errors.extend(report_errors)
 
     if args.sbom:

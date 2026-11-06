@@ -3,10 +3,13 @@
   "scanner": {
     "name": "trivy",
     "version": "v0.70.0",
-    "ignore_unfixed_vulnerabilities": true
+    "ignore_unfixed_vulnerabilities": false
   },
   "vulnerability": {
-    "deny_severities": ["HIGH", "CRITICAL"]
+    "deny_severities": [
+      "HIGH",
+      "CRITICAL"
+    ]
   },
   "license": {
     "deny_licenses": [
@@ -21,7 +24,10 @@
     "deny_any_finding": true
   },
   "misconfiguration": {
-    "deny_severities": ["HIGH", "CRITICAL"]
+    "deny_severities": [
+      "HIGH",
+      "CRITICAL"
+    ]
   },
   "container": {
     "require_base_image_digest": true,
@@ -32,5 +38,6 @@
     "require_sbom": true,
     "require_scan_report": true,
     "require_cosign_bundle_for_archive": true
-  }
+  },
+  "vulnerability_exceptions": []
 }

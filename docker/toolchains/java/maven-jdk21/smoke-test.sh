@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+test "$(java -version 2>&1 | sed -n '1s/.*version "\([^"]*\)".*/\1/p')" = "21.0.12.1"
+test "$(mvn --version 2>&1 | sed -n '1s/^Apache Maven \([^ ]*\).*/\1/p')" = "3.10.0"
+test "$(dpkg-query -W -f='${Version}' apt)" = "2.8.4ubuntu0.1"
+test -f "$MAVEN_HOME/lib/guava-33.7.2-jre.jar"
+test ! -e "$MAVEN_HOME/lib/guava-33.7.1-jre.jar"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/src/main/java"
+cat > "$tmp/pom.xml" <<'POM'
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion><groupId>ci.smoke</groupId><artifactId>jdk21-maven-consumer</artifactId><version>1.0.0</version>
+  <properties><maven.compiler.release>21</maven.compiler.release><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties>
+  <build><plugins><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version></plugin><plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-jar-plugin</artifactId><version>3.4.2</version><configuration><archive><manifest><mainClass>Smoke</mainClass></manifest></archive></configuration></plugin></plugins></build>
+</project>
+POM
+cat > "$tmp/src/main/java/Smoke.java" <<'JAVA'
+public class Smoke { public static void main(String[] args) { System.out.println("jdk21-maven-consumer-ok"); } }
+JAVA
+mvn --batch-mode --no-transfer-progress -f "$tmp/pom.xml" clean package
+java -jar "$tmp/target/jdk21-maven-consumer-1.0.0.jar" | grep -Fx jdk21-maven-consumer-ok

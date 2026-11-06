@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(gcc12_consumer LANGUAGES CXX)
+enable_testing()
+add_executable(gcc12-consumer src/main.cpp)
+target_compile_features(gcc12-consumer PRIVATE cxx_std_20)
+add_test(NAME gcc12-consumer-smoke COMMAND gcc12-consumer)

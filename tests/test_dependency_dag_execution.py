@@ -178,5 +178,21 @@ class DependencyDagExecutionTests(unittest.TestCase):
         self.assertIn("CI_UPSTREAM_ROOT", node)
 
 
+    def test_sample_project_graph_exercises_four_real_dag_levels(self) -> None:
+        from dependency_plan import build_plan
+        catalog = json.loads((ROOT / "ci" / "projects.json").read_text(encoding="utf-8"))
+        selected = {"hello-lib", "hello-cpp", "hello-service", "hello-release"}
+        plan = build_plan(catalog, selected)
+        self.assertEqual(4, plan["level_count"])
+        self.assertEqual(
+            [["hello-lib"], ["hello-cpp"], ["hello-service"], ["hello-release"]],
+            plan["levels"][:4],
+        )
+        service = next(project for project in catalog["projects"] if project["name"] == "hello-service")
+        release = next(project for project in catalog["projects"] if project["name"] == "hello-release")
+        self.assertEqual(["hello-cpp"], service["depends_on"])
+        self.assertEqual(["hello-service"], release["depends_on"])
+
+
 if __name__ == "__main__":
     unittest.main()

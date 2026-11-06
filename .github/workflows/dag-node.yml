@@ -311,7 +311,7 @@ jobs:
           scan-ref: source/${{ inputs.path }}
           scanners: vuln,license,secret,misconfig
           severity: HIGH,CRITICAL
-          ignore-unfixed: true
+          ignore-unfixed: false
           format: json
           output: security-evidence/security-scan.json
           exit-code: "0"

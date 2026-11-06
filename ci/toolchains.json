@@ -25,7 +25,8 @@
       "platforms": [
         "linux/amd64"
       ],
-      "smoke_command": "gcc --version && g++ --version && cmake --version && ccache --version && git --version"
+      "smoke_command": "gcc --version && g++ --version && cmake --version && ccache --version && git --version",
+      "compiler": "gcc-13/g++-13"
     },
     {
       "id": "rk-sdk-2026.08",
@@ -55,9 +56,9 @@
       "id": "java17-maven",
       "status": "candidate",
       "execution_mode": "container",
-      "description": "Candidate Java 17 build toolchain using Eclipse Temurin 17.0.21+9 and Apache Maven 3.10.0",
+      "description": "Candidate Java 17 build toolchain; previous digest cleared for Ubuntu APT/OpenSSL security reissue.",
       "image": "ghcr.io/iwacollection/cicd-toolchain-java17-maven",
-      "digest": "sha256:3b3c558e4a94ab6f71b059ccd7f23ea60a6f76082844b428645015b1413ce9f7",
+      "digest": "",
       "dockerfile": "docker/toolchains/java/maven-jdk17/Dockerfile",
       "context": "docker/toolchains/java/maven-jdk17",
       "platforms": [
@@ -69,18 +70,18 @@
       "jdk_version": "17.0.21+9",
       "maven_version": "3.10.0",
       "base_os": "Ubuntu 24.04",
-      "apt_snapshot": "20261029T000000Z",
+      "apt_snapshot": "20261105T000000Z",
       "owner": "ci-platform",
       "guava_version": "33.7.2-jre",
       "consumer_fixture": "examples/java17-maven-service",
-      "build_context_sha256": "156feed5a12816cd87b77009bf0519f84d85e4d2959f2d3fc3f9ab10fa13fd37",
-      "build_definition_sha256": "d3b6001d106ea4bd7f51678dd9958c066d873089939029f9ca1cc33979e5300d"
+      "build_context_sha256": "",
+      "build_definition_sha256": ""
     },
     {
       "id": "go126",
       "status": "candidate",
       "execution_mode": "container",
-      "description": "Candidate Go 1.26 build toolchain: Go 1.26.10 (linux/amd64) using the pinned official golang Bookworm image, GCC/libc6-dev/make for cgo, git and gotestsum v1.13.0",
+      "description": "Candidate Go 1.26 build toolchain: Go 1.26.10 (linux/amd64) on a pinned official Alpine 3.23 image, with GCC/musl development headers/make for cgo, git and gotestsum v1.13.0.",
       "image": "ghcr.io/iwacollection/cicd-toolchain-go126",
       "dockerfile": "docker/toolchains/go/go126/Dockerfile",
       "context": "docker/toolchains/go/go126",
@@ -91,10 +92,79 @@
       "language": "go",
       "go_version": "1.26.10",
       "gotestsum_version": "v1.13.0",
-      "base_os": "Debian 12 Bookworm",
-      "base_image": "golang:1.26.10-bookworm",
-      "base_digest": "sha256:23ce71337b726608afb1bc00986e630a05034a87a87ea1fc2cd1ae5cf33387eb",
-      "owner": "ci-platform"
+      "base_os": "Alpine 3.23",
+      "base_image": "golang:1.26.10-alpine3.23",
+      "base_digest": "sha256:264964005eb4582789b23e5c578b6d46096287ed7c6441b163b1d27e82dac041",
+      "owner": "ci-platform",
+      "verification_fixture": "examples/go-toolchain-consumer",
+      "verification_command": "go test ./... && go build -trimpath -o /tmp/go-toolchain-consumer ./cmd/app && /tmp/go-toolchain-consumer | grep -Fx 'go-toolchain-consumer-ok'"
+    },
+    {
+      "id": "java21-maven",
+      "status": "planned",
+      "execution_mode": "container",
+      "description": "Isolated planned Eclipse Temurin JDK 21.0.12.1+1 with Apache Maven 3.10.0 and patched bundled Guava 33.7.2-jre; digest remains empty until verification passes.",
+      "image": "ghcr.io/iwacollection/cicd-toolchain-java21-maven",
+      "digest": "",
+      "dockerfile": "docker/toolchains/java/maven-jdk21/Dockerfile",
+      "context": "docker/toolchains/java/maven-jdk21",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "smoke_command": "bash /usr/local/bin/java-toolchain-smoke",
+      "language": "java",
+      "jdk_vendor": "Eclipse Temurin",
+      "jdk_version": "21.0.12.1+1",
+      "maven_version": "3.10.0",
+      "guava_version": "33.7.2-jre",
+      "base_os": "Ubuntu 24.04",
+      "apt_snapshot": "20261105T000000Z",
+      "owner": "ci-platform",
+      "verification_fixture": "examples/java21-maven-service",
+      "verification_command": "mvn --batch-mode --no-transfer-progress clean verify && java -jar target/java21-maven-service-1.0.0.jar | grep -Fx java21-maven-consumer-ok"
+    },
+    {
+      "id": "go125",
+      "status": "retired",
+      "execution_mode": "container",
+      "description": "Retired: Go 1.25.14 is affected by upstream HIGH-severity standard-library vulnerabilities with no fixed Go 1.25 release. Kept for historical traceability; use the verified Go 1.26.10 toolchain or a newer supported release.",
+      "image": "ghcr.io/iwacollection/cicd-toolchain-go125",
+      "digest": "",
+      "dockerfile": "docker/toolchains/go/go125/Dockerfile",
+      "context": "docker/toolchains/go/go125",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "smoke_command": "bash /usr/local/bin/go-toolchain-smoke",
+      "language": "go",
+      "go_version": "1.25.14",
+      "base_os": "Ubuntu 24.04",
+      "apt_snapshot": "20261105T000000Z",
+      "owner": "ci-platform",
+      "verification_fixture": "examples/go125-service",
+      "verification_command": "go test -v ./..."
+    },
+    {
+      "id": "gcc12",
+      "status": "planned",
+      "execution_mode": "container",
+      "description": "Isolated planned GCC/G++ 12.5 toolchain installed from a fixed Ubuntu 26.10 APT snapshot; compiler major version is asserted by smoke tests.",
+      "image": "ghcr.io/iwacollection/cicd-toolchain-gcc12",
+      "digest": "",
+      "dockerfile": "docker/toolchains/gcc/gcc12/Dockerfile",
+      "context": "docker/toolchains/gcc/gcc12",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "smoke_command": "bash /usr/local/bin/gcc-toolchain-smoke",
+      "language": "cpp",
+      "compiler": "gcc-12/g++-12",
+      "base_os": "Ubuntu 26.10",
+      "apt_snapshot": "20261105T000000Z",
+      "owner": "ci-platform",
+      "verification_fixture": "examples/cpp-gcc12-service",
+      "verification_command": "cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=g++-12 && cmake --build build && ctest --test-dir build --output-on-failure",
+      "compiler_version": "12.5.0-9ubuntu1"
     }
   ]
 }

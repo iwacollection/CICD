@@ -225,22 +225,23 @@ def validate_published_candidate_context(item: dict, repository_root: Path) -> N
         )
 
 
-def build_publish_matrix(data: dict, repository_root: Path | None = None) -> dict:
+def build_publish_matrix(data: dict, repository_root: Path | None = None, include_planned: bool = False) -> dict:
+    """Build either the publishable Candidate matrix or a PR verification matrix.
+
+    Planned entries are build-tested on pull requests but never published.
+    """
     repository_root = repository_root or Path.cwd()
     include: list[dict] = []
+    allowed_statuses = {"candidate", "planned"} if include_planned else {"candidate"}
     for item in data.get("toolchains", []):
         if not isinstance(item, dict):
             continue
         if item.get("execution_mode") != "container" or not item.get("dockerfile"):
             continue
-        # Only Candidate images are built and published by this workflow.
-        # Active entries are immutable approved digests: rebuilding or publishing
-        # them during an unrelated catalog change would create an unapproved
-        # replacement and could make an existing project depend on a new image.
-        # An empty digest means this Candidate still needs a first publish
-        # or an explicitly requested rebuild. Once published, the registry
-        # pins the digest and this workflow must not replace it implicitly.
-        if item.get("status") != "candidate":
+        # Candidate entries with no digest are eligible for publication.
+        # Planned entries are verification-only: they are built on PRs but
+        # must never enter the publish matrix. Active images are immutable.
+        if item.get("status") not in allowed_statuses:
             continue
         if item.get("digest"):
             validate_published_candidate_context(item, repository_root)
@@ -253,6 +254,11 @@ def build_publish_matrix(data: dict, repository_root: Path | None = None) -> dic
                 "context": item["context"],
                 "smoke_command": item["smoke_command"],
                 "platform": item.get("platforms", ["linux/amd64"])[0],
+                "verification_fixture": item.get("verification_fixture", ""),
+                "verification_command": item.get("verification_command", ""),
+                "consumer_fixture": item.get("consumer_fixture", ""),
+                "jdk_version": item.get("jdk_version", ""),
+                "maven_version": item.get("maven_version", ""),
             }
         )
     return {"include": include}
@@ -270,7 +276,12 @@ def build_consumer_matrix(data: dict, repository_root: Path | None = None) -> di
         if item.get("execution_mode") != "container":
             raise ValueError(f"consumer fixture {item.get('id')} must use a container toolchain")
         if not item.get("digest"):
-            raise ValueError(f"consumer fixture {item.get('id')} requires a published immutable digest")
+            # A Candidate awaiting its first/replacement publication is tested
+            # against the locally built image in the Verify lane. The separate
+            # published-digest consumer lane starts only after a digest exists.
+            if item.get("status") == "candidate":
+                continue
+            raise ValueError(f"active consumer fixture {item.get('id')} requires a published immutable digest")
 
         validate_published_candidate_context(item, repository_root)
         fixture = Path(str(item["consumer_fixture"]))
@@ -315,10 +326,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", default="ci/toolchains.json")
     parser.add_argument("--matrix", action="store_true")
+    parser.add_argument("--verify-matrix", action="store_true")
     parser.add_argument("--consumer-matrix", action="store_true")
     args = parser.parse_args()
-    if args.matrix and args.consumer_matrix:
-        parser.error("--matrix and --consumer-matrix are mutually exclusive")
+    if sum((args.matrix, args.verify_matrix, args.consumer_matrix)) > 1:
+        parser.error("--matrix, --verify-matrix and --consumer-matrix are mutually exclusive")
 
     try:
         data = load_catalog(Path(args.catalog))
@@ -332,7 +344,7 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
-    if not args.matrix and not args.consumer_matrix:
+    if not args.matrix and not args.verify_matrix and not args.consumer_matrix:
         print(f"OK: {len(data['toolchains'])} toolchain definitions validated")
         return 0
 
@@ -340,7 +352,7 @@ def main() -> int:
         matrix = (
             build_consumer_matrix(data, Path.cwd())
             if args.consumer_matrix
-            else build_publish_matrix(data, Path.cwd())
+            else build_publish_matrix(data, Path.cwd(), include_planned=args.verify_matrix)
         )
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

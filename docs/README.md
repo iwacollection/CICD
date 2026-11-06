@@ -113,6 +113,8 @@
 
 - [业务 CI 能力扩展](business-ci-capabilities.md)：质量检查、自动化测试、容器构建和数据库迁移等能力怎样以可复用方式接入，避免每个项目重复造流水线。
 - [工具链供应链管理](toolchain-supply-chain.md)：JDK、编译器和厂商 SDK 如何登记、构建、扫描、批准、固定 digest，并在升级失败时回退。
+- [工具链候选登记、审核晋级与部署追溯](toolchain-promotion-runbook.md)：发布后的 digest 自动登记、SBOM/签名/provenance 独立验证、漏洞例外审批，以及业务制品到环境部署的追溯。
+- [Argo CD / Kubernetes 部署后运行验证](argocd-kubernetes-runtime-verification.md)：把 GitOps revision、Argo CD 健康状态和 Pod 实际运行 imageID digest 绑定成运行时证据。
 - [可复现构建门禁](reproducibility-gate.md)：怎样通过隔离的两次构建和文件摘要比较，判断同一份源码是否得到一致产物。
 - [业务仓库调用中央 CI](reusable-workflow.md)：中央平台升级后，业务仓库如何固定平台版本、分批接入和验收。
 

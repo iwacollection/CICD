@@ -41,6 +41,11 @@ jobs:
           python3 scripts/ci/toolchain_catalog.py
           python3 scripts/ci/hardware_catalog.py
 
+      - name: Validate language version registry and render matrix
+        run: |
+          python3 scripts/ci/toolchain_versions.py
+          python3 scripts/ci/toolchain_versions.py --matrix
+
       - name: Validate project catalog
         run: python3 scripts/ci/validate_config.py
 
@@ -74,7 +79,7 @@ jobs:
       - name: Validate database migration policy
         run: python3 scripts/ci/db_migration_policy.py --policy ci/db-migration-policy.json --validate-policy
 
-      - name: Render build matrix
+      - name: Render project build matrix
         run: python3 scripts/ci/discover_matrix.py
 
       - name: Run platform unit tests

@@ -157,3 +157,20 @@ production digest-A
 - Cosign: `v3.0.6`
 
 升级这些组件必须作为供应链变更走 PR、测试和 Required Gates。
+
+
+## 10. 工具链候选登记、证据独立验证与漏洞例外
+
+工具链镜像发布后，流水线必须把实际 GHCR digest 登记到 GitHub Deployment registry，而不是只上传短期 Actions artifact。中央 DAG、Reusable Build、Reusable Container 和工具链镜像扫描统一包含 unfixed vulnerability；只有工具链镜像支持精确 digest 例外，普通业务制品默认不豁免 HIGH/CRITICAL。登记前要求：
+
+- Cosign image signature 验证成功；
+- CycloneDX SBOM 以 Cosign attestation 绑定到同一 image digest，并能从 OCI referrer 独立取回；
+- Trivy vulnerability report 以 Cosign attestation 绑定到同一 image digest；
+- GitHub SLSA provenance 通过 `gh attestation verify oci://...` 验证仓库和 signer workflow；
+- SBOM、scan report 的 canonical SHA256 与候选登记记录一致。
+
+晋级 workflow 运行于 `toolchain-production` Protected Environment，审批后再次验证上述证据并重新扫描精确 digest。成功后创建 `toolchain-approved/<id>` Deployment，并自动打开更新 `ci/toolchains.json` 的 Promotion PR；只有正常合并后才能变为 active。
+
+漏洞扫描包含 unfixed HIGH/CRITICAL finding。例外必须在策略文件精确绑定 toolchain、image digest、CVE/GHSA、package 和 severity，并包含理由、owner、approved_by、工单、补偿控制及 UTC 到期时间；最长 90 天。例外不适用于 Secret、许可证或镜像配置 finding。digest 变化或到期后例外自动失效。
+
+业务制品的 Artifact Contract manifest、长期 Release asset digest map 和环境 Deployment pointer 共同保留从源码 commit、workflow run、toolchain image digest、依赖锁文件、bundle digest 到环境部署的追溯关系。新 Deployment pointer 额外记录 manifest SHA256、toolchain identity 和不可变 container image reference。
