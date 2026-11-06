@@ -24,7 +24,7 @@
 | Go | 1.26.10 | candidate | 官方 Go release SHA256；官方 golang base digest |
 | Go | 1.25.14 | planned | go.dev 官方 linux/amd64 archive SHA256；Ubuntu base digest；APT snapshot |
 | C/C++ | GCC 13 | active | 当前 GCC 容器工具链 |
-| C/C++ | GCC/G++ 12.5.0-9ubuntu1 | planned | Ubuntu base digest、固定 APT snapshot、精确 APT 包版本；smoke 强制检查完整编译器版本 |
+| C/C++ | GCC/G++ 12.4.0-2ubuntu1~24.04.1 | planned | Ubuntu base digest、固定 APT snapshot、精确 APT 包版本；smoke 强制检查完整编译器版本 |
 | C/C++ | Clang 18 | planned | 尚无独立镜像 |
 
 ## 镜像输入说明
@@ -32,7 +32,7 @@
 - 所有 Ubuntu 镜像使用固定 base image digest；APT 软件包从固定 snapshot 安装，APT 校验包索引和软件包哈希。
 - JDK 21 使用 Temurin 官方发行归档 SHA256；Maven 使用 Apache 官方 SHA512。
 - Go 1.25.14 使用 go.dev 官方发布页提供的 linux/amd64 SHA256。
-- GCC 12 使用 Ubuntu 24.04 固定 APT snapshot，精确安装 gcc-12/g++-12 12.5.0-9ubuntu1。APT 根据 Ubuntu 签名仓库元数据校验每个 .deb 的 SHA256，smoke test 同时断言 dpkg 包版本和编译器完整版本。
+- GCC 12 使用 Ubuntu 24.04 固定 APT snapshot，精确安装 gcc-12/g++-12 12.4.0-2ubuntu1~24.04.1。APT 根据 Ubuntu 签名仓库元数据校验每个 .deb 的 SHA256，smoke test 同时断言 dpkg 包版本和编译器完整版本。
 
 ## 验证边界
 
