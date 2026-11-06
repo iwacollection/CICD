@@ -25,6 +25,12 @@ def register_runtime(*, api_url: str, repository: str, token: str,
         raise ValueError("runtime evidence GitOps revision is invalid")
     if not evidence.get("application") or not evidence.get("namespace"):
         raise ValueError("runtime evidence application and namespace are required")
+    if not evidence.get("artifact_name") or not str(evidence.get("artifact_source_run_id", "")).isdigit():
+        raise ValueError("runtime evidence artifact identity is incomplete")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(evidence.get("bundle_sha256", ""))):
+        raise ValueError("runtime evidence bundle_sha256 is invalid")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(evidence.get("artifact_source_sha", ""))):
+        raise ValueError("runtime evidence artifact_source_sha is invalid")
     pods = evidence.get("verified_pods")
     if not isinstance(pods, list) or not pods or evidence.get("pod_count") != len(pods):
         raise ValueError("runtime evidence must contain a matching non-empty Pod list")
@@ -61,6 +67,7 @@ def register_runtime(*, api_url: str, repository: str, token: str,
     payload = {key: evidence[key] for key in (
         "schema_version", "kind", "application", "namespace", "pod_selector",
         "image_digest", "expected_image", "gitops_revision", "manifest_sha256",
+        "artifact_name", "bundle_sha256", "artifact_source_sha", "artifact_source_run_id",
         "argocd_sync", "argocd_health", "pod_count", "verified_at", "evidence_sha256")}
     payload["workflow_run_id"] = run_id
     payload["workflow_run_url"] = f"{server_url}/{repository}/actions/runs/{run_id}" if run_id else ""
