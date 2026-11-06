@@ -141,7 +141,14 @@ def _severity(item: dict) -> str:
     return str(item.get("Severity", "UNKNOWN")).upper()
 
 
-def validate_trivy_report(\n    report: dict, policy: dict, *, toolchain: str = "", image_digest: str = "", now: datetime | None = None\n) -> tuple[list[str], dict]:
+def validate_trivy_report(
+    report: dict,
+    policy: dict,
+    *,
+    toolchain: str = "",
+    image_digest: str = "",
+    now: datetime | None = None,
+) -> tuple[list[str], dict]:
     errors: list[str] = []
     summary = {
         "vulnerabilities": 0,
@@ -155,6 +162,26 @@ def validate_trivy_report(\n    report: dict, policy: dict, *, toolchain: str = 
     denied_licenses = set(policy.get("license", {}).get("deny_licenses", []))
     misconfig_denied = set(policy.get("misconfiguration", {}).get("deny_severities", []))
     deny_secrets = bool(policy.get("secret", {}).get("deny_any_finding", True))
+    now = now or datetime.now(timezone.utc)
+    exceptions = policy.get("vulnerability_exceptions", [])
+
+    def exception_for(finding: dict) -> dict | None:
+        for exception in exceptions:
+            if (
+                exception.get("toolchain") != toolchain
+                or exception.get("image_digest") != image_digest
+                or exception.get("vulnerability_id") != finding.get("VulnerabilityID")
+                or exception.get("package") != finding.get("PkgName")
+                or exception.get("severity") != _severity(finding)
+            ):
+                continue
+            try:
+                expiry = datetime.fromisoformat(str(exception["expires_at"]).replace("Z", "+00:00"))
+            except (KeyError, ValueError):
+                continue
+            if expiry.tzinfo is not None and expiry > now:
+                return exception
+        return None
 
     results = report.get("Results", [])
     if not isinstance(results, list):
@@ -168,6 +195,10 @@ def validate_trivy_report(\n    report: dict, policy: dict, *, toolchain: str = 
                 continue
             summary["vulnerabilities"] += 1
             if _severity(finding) in vuln_denied:
+                exception = exception_for(finding)
+                if exception is not None:
+                    summary["vulnerability_exceptions_applied"] += 1
+                    continue
                 errors.append(
                     f"vulnerability blocked: {finding.get('VulnerabilityID', 'unknown')} "
                     f"severity={_severity(finding)} target={target} package={finding.get('PkgName', '')}"
@@ -179,17 +210,13 @@ def validate_trivy_report(\n    report: dict, policy: dict, *, toolchain: str = 
             name = str(finding.get("Name", finding.get("Category", "unknown")))
             if name in denied_licenses:
                 summary["denied_licenses"] += 1
-                errors.append(
-                    f"license blocked: {name} severity={_severity(finding)} target={target}"
-                )
+                errors.append(f"license blocked: {name} severity={_severity(finding)} target={target}")
         for finding in result.get("Secrets") or []:
             if not isinstance(finding, dict):
                 continue
             summary["secrets"] += 1
             if deny_secrets:
-                errors.append(
-                    f"secret finding blocked: {finding.get('RuleID', 'unknown')} target={target}"
-                )
+                errors.append(f"secret finding blocked: {finding.get('RuleID', 'unknown')} target={target}")
         for finding in result.get("Misconfigurations") or []:
             if not isinstance(finding, dict):
                 continue
@@ -200,7 +227,6 @@ def validate_trivy_report(\n    report: dict, policy: dict, *, toolchain: str = 
                     f"severity={_severity(finding)} target={target}"
                 )
     return errors, summary
-
 
 def validate_sbom(sbom: dict) -> list[str]:
     errors: list[str] = []
