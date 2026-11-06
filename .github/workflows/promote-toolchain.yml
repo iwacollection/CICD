@@ -106,7 +106,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh attestation verify "oci://$IMAGE" \
+          gh attestation verify "oci://$IMAGE" --bundle-from-oci \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/toolchain-images.yml" \
             --source-ref "refs/heads/main"
