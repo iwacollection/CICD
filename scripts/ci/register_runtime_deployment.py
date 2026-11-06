@@ -28,8 +28,25 @@ def register_runtime(*, api_url: str, repository: str, token: str,
     pods = evidence.get("verified_pods")
     if not isinstance(pods, list) or not pods or evidence.get("pod_count") != len(pods):
         raise ValueError("runtime evidence must contain a matching non-empty Pod list")
-    if not re.fullmatch(r"[0-9a-f]{64}", str(evidence.get("evidence_sha256", ""))):
+    evidence_hash = str(evidence.get("evidence_sha256", ""))
+    if not re.fullmatch(r"[0-9a-f]{64}", evidence_hash):
         raise ValueError("runtime evidence evidence_sha256 is invalid")
+    unsigned_evidence = {key: value for key, value in evidence.items() if key != "evidence_sha256"}
+    import hashlib
+    canonical = json.dumps(unsigned_evidence, sort_keys=True, separators=(",", ":")).encode()
+    if hashlib.sha256(canonical).hexdigest() != evidence_hash:
+        raise ValueError("runtime evidence SHA256 does not match its contents")
+    expected_image = str(evidence.get("expected_image", ""))
+    expected_digest = str(evidence.get("image_digest", ""))
+    if not expected_image.endswith("@" + expected_digest):
+        raise ValueError("runtime evidence expected image and digest do not match")
+    for pod in pods:
+        images = pod.get("images") if isinstance(pod, dict) else None
+        if not isinstance(images, list) or not images:
+            raise ValueError("each verified Pod must include at least one verified image")
+        if any(item.get("image") != expected_image or expected_digest not in item.get("image_id", "")
+               for item in images):
+            raise ValueError("runtime Pod evidence contains a mismatched image or imageID")
     environment_name = evidence.get("environment")
     if environment_name not in {"dev", "staging", "production"}:
         raise ValueError("runtime evidence environment is invalid")
