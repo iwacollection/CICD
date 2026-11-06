@@ -1,8 +1,11 @@
 FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
 ARG DEBIAN_FRONTEND=noninteractive
-RUN printf '%s\n' 'APT::Snapshot "20261105T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+RUN sed -i 's|https://|http://|g' /etc/apt/sources.list.d/ubuntu.sources \
     && apt-get -o Acquire::Retries=5 -o Acquire::https::Timeout=60 -o APT::Update::Error-Mode=any update \
-    && apt-get -o Acquire::Retries=5 -o Acquire::https::Timeout=60 install -y --no-install-recommends ca-certificates apt=2.8.4ubuntu0.1 curl \
+    && apt-get -o Acquire::Retries=5 -o Acquire::https::Timeout=60 install -y --no-install-recommends ca-certificates \
+    && printf '%s\n' 'APT::Snapshot "20261105T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+    && apt-get -o Acquire::Retries=5 -o Acquire::https::Timeout=60 -o APT::Update::Error-Mode=any update \
+    && apt-get --allow-downgrades -o Acquire::Retries=5 -o Acquire::https::Timeout=60 install -y --no-install-recommends ca-certificates apt=2.8.4ubuntu0.1 curl \
     && rm -rf /var/lib/apt/lists/*
 ARG TEMURIN_VERSION=21.0.12.1
 ARG TEMURIN_BUILD=1
