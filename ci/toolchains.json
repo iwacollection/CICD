@@ -116,7 +116,9 @@
       "maven_version": "3.10.0",
       "base_os": "Ubuntu 24.04",
       "apt_snapshot": "20261029T000000Z",
-      "owner": "ci-platform"
+      "owner": "ci-platform",
+      "verification_fixture": "examples/java21-maven-service",
+      "verification_command": "mvn --batch-mode --no-transfer-progress clean verify && java -jar target/java21-maven-service-1.0.0.jar | grep -Fx java21-maven-consumer-ok"
     },
     {
       "id": "go125",
@@ -135,7 +137,9 @@
       "go_version": "1.25.12",
       "base_os": "Ubuntu 24.04",
       "apt_snapshot": "20261029T000000Z",
-      "owner": "ci-platform"
+      "owner": "ci-platform",
+      "verification_fixture": "examples/go125-service",
+      "verification_command": "go test -v ./..."
     },
     {
       "id": "gcc12",
@@ -154,7 +158,9 @@
       "compiler": "gcc-12/g++-12",
       "base_os": "Ubuntu 24.04",
       "apt_snapshot": "20260828T000000Z",
-      "owner": "ci-platform"
+      "owner": "ci-platform",
+      "verification_fixture": "examples/cpp-gcc12-service",
+      "verification_command": "cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=g++-12 && cmake --build build && ctest --test-dir build --output-on-failure"
     }
   ]
 }
