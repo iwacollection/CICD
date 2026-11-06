@@ -720,5 +720,6 @@ jobs:
             echo "- SBOM: BuildKit OCI attestation generated"
             echo "- Cosign: keyless signature verified"
             echo "- Provenance: GitHub build provenance attestation generated"
-            echo "- Registry: immutable Candidate digest recorded in GitHub Deployments"\n            echo "- Promotion: run Promote Toolchain Candidate; approval opens a catalog PR"
+            echo "- Registry: immutable Candidate digest recorded in GitHub Deployments"
+            echo "- Promotion: run Promote Toolchain Candidate; approval opens a catalog PR"
           } >> "$GITHUB_STEP_SUMMARY"
