@@ -1,0 +1,182 @@
+name: Verify Argo CD and Kubernetes Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: "Environment to verify"
+        required: true
+        type: choice
+        options: [dev, staging, production]
+      application:
+        description: "Exact Argo CD Application name"
+        required: true
+        type: string
+      namespace:
+        description: "Kubernetes namespace"
+        required: true
+        type: string
+      pod_selector:
+        description: "Label selector covering every Pod owned by this application"
+        required: true
+        type: string
+      expected_image:
+        description: "Exact repository@sha256 digest expected in Pod specs and runtime imageIDs"
+        required: true
+        type: string
+      expected_gitops_revision:
+        description: "Exact GitOps commit SHA expected in Argo CD"
+        required: true
+        type: string
+      manifest_sha256:
+        description: "Artifact Contract manifest SHA256"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: runtime-verify-\${{ inputs.target_environment }}-\${{ inputs.application }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: runtime-\${{ inputs.target_environment }}
+    steps:
+      - name: Checkout trusted verifier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Validate runtime configuration
+        shell: bash
+        env:
+          ARGOCD_SERVER: \${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: \${{ secrets.ARGOCD_AUTH_TOKEN }}
+          KUBECONFIG_BASE64: \${{ secrets.KUBECONFIG_BASE64 }}
+          APP: \${{ inputs.application }}
+          NAMESPACE: \${{ inputs.namespace }}
+          SELECTOR: \${{ inputs.pod_selector }}
+          IMAGE: \${{ inputs.expected_image }}
+          REVISION: \${{ inputs.expected_gitops_revision }}
+          MANIFEST: \${{ inputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "$ARGOCD_SERVER" || { echo "Missing ARGOCD_SERVER secret" >&2; exit 1; }
+          test -n "$ARGOCD_AUTH_TOKEN" || { echo "Missing ARGOCD_AUTH_TOKEN secret" >&2; exit 1; }
+          test -n "$KUBECONFIG_BASE64" || { echo "Missing KUBECONFIG_BASE64 secret" >&2; exit 1; }
+          [[ "$APP" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$ ]]
+          [[ "$NAMESPACE" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$ ]]
+          [[ "$REVISION" =~ ^[0-9a-f]{7,40}$ ]]
+          [[ "$MANIFEST" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]
+          [[ "$SELECTOR" != *$'\n'* && "$SELECTOR" != *$'\r'* ]]
+          case "$ARGOCD_SERVER" in https://*) ;; *) echo "ARGOCD_SERVER must use HTTPS" >&2; exit 1 ;; esac
+
+      - name: Configure read-only Kubernetes access
+        shell: bash
+        env:
+          KUBECONFIG_BASE64: \${{ secrets.KUBECONFIG_BASE64 }}
+        run: |
+          set -euo pipefail
+          install -m 0700 -d "$RUNNER_TEMP/kube"
+          printf '%s' "$KUBECONFIG_BASE64" | base64 --decode > "$RUNNER_TEMP/kube/config"
+          chmod 0600 "$RUNNER_TEMP/kube/config"
+          echo "KUBECONFIG=$RUNNER_TEMP/kube/config" >> "$GITHUB_ENV"
+
+      - name: Install pinned kubectl
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78e8e1c7e6e3d1 # v4
+        with:
+          version: v1.34.1
+
+      - name: Read Argo CD Application
+        shell: bash
+        env:
+          ARGOCD_SERVER: \${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: \${{ secrets.ARGOCD_AUTH_TOKEN }}
+          APP: \${{ inputs.application }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $ARGOCD_AUTH_TOKEN" \
+            --header "Accept: application/json" \
+            "\${ARGOCD_SERVER%/}/api/v1/applications/$APP" \
+            --output "$RUNNER_TEMP/argocd-app.json"
+
+      - name: Read every selected application Pod
+        shell: bash
+        env:
+          NAMESPACE: \${{ inputs.namespace }}
+          SELECTOR: \${{ inputs.pod_selector }}
+        run: |
+          set -euo pipefail
+          kubectl auth can-i get pods --namespace "$NAMESPACE" | grep -Fx yes
+          kubectl auth can-i list pods --namespace "$NAMESPACE" | grep -Fx yes
+          kubectl get pods --namespace "$NAMESPACE" --selector "$SELECTOR" \
+            --output json > "$RUNNER_TEMP/application-pods.json"
+
+      - name: Verify Argo CD state and actual container imageIDs
+        shell: bash
+        env:
+          APP: \${{ inputs.application }}
+          NAMESPACE: \${{ inputs.namespace }}
+          SELECTOR: \${{ inputs.pod_selector }}
+          IMAGE: \${{ inputs.expected_image }}
+          REVISION: \${{ inputs.expected_gitops_revision }}
+          MANIFEST: \${{ inputs.manifest_sha256 }}
+          TARGET_ENVIRONMENT: \${{ inputs.target_environment }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/verify_runtime_deployment.py \
+            --app-json "$RUNNER_TEMP/argocd-app.json" \
+            --pods-json "$RUNNER_TEMP/application-pods.json" \
+            --application "$APP" \
+            --namespace "$NAMESPACE" \
+            --selector "$SELECTOR" \
+            --expected-image "$IMAGE" \
+            --expected-revision "$REVISION" \
+            --manifest-sha256 "$MANIFEST" \
+            --environment "$TARGET_ENVIRONMENT" \
+            --output runtime-evidence.json
+
+      - name: Archive runtime evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-verification-\${{ inputs.target_environment }}-\${{ inputs.application }}-\${{ github.run_id }}
+          path: runtime-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Register verified runtime state as GitHub Deployment
+        id: deployment
+        shell: bash
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/register_runtime_deployment.py --evidence runtime-evidence.json
+
+      - name: Runtime verification summary
+        shell: bash
+        env:
+          APP: \${{ inputs.application }}
+          ENVIRONMENT: \${{ inputs.target_environment }}
+          IMAGE: \${{ inputs.expected_image }}
+          REVISION: \${{ inputs.expected_gitops_revision }}
+          DEPLOYMENT_ID: \${{ steps.deployment.outputs.deployment_id }}
+        run: |
+          {
+            echo "### Runtime verification passed"
+            echo "- Application: $APP"
+            echo "- Environment: $ENVIRONMENT"
+            echo "- Expected image: $IMAGE"
+            echo "- GitOps revision: $REVISION"
+            echo "- Runtime Deployment ID: $DEPLOYMENT_ID"
+            echo "- Evidence: runtime-evidence.json (90-day artifact)"
+          } >> "$GITHUB_STEP_SUMMARY"
