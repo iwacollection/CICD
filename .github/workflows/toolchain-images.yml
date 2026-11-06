@@ -563,11 +563,14 @@ jobs:
           java -jar target/java17-maven-service-1.0.0.jar | grep -Fx java17-maven-consumer-ok
           BUILD_COMMAND
           )"
-          EXPECTED_JAVA_VERSION="$expected_java_version" EXPECTED_MAVEN_VERSION="$MAVEN_VERSION" \
-            python3 scripts/ci/run_build.py \
-              --working-directory "$FIXTURE" \
-              --container-image "$IMAGE" \
-              --command "$build_command"
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
+            --env EXPECTED_JAVA_VERSION="$expected_java_version" \
+            --env EXPECTED_MAVEN_VERSION="$MAVEN_VERSION" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/$FIXTURE,dst=/workspace" \
+            --workdir /workspace \
+            "$IMAGE" bash -euo pipefail -c "$build_command"
 
       - name: Scan exact published digest
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
