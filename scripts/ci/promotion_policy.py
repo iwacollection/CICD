@@ -20,6 +20,9 @@ IDENTITY_FIELDS = (
     "source_sha",
     "source_run_id",
     "release_tag",
+    "toolchain_identity",
+    "container_image",
+    "manifest_sha256",
 )
 
 
@@ -95,6 +98,9 @@ def normalize_identity(
     source_sha: str,
     source_run_id: str,
     release_tag: str,
+    toolchain_identity: str = "",
+    container_image: str = "",
+    manifest_sha256: str = "",
 ) -> dict[str, str]:
     identity = {
         "artifact_name": artifact_name,
@@ -102,6 +108,9 @@ def normalize_identity(
         "source_sha": source_sha,
         "source_run_id": source_run_id,
         "release_tag": release_tag,
+        "toolchain_identity": toolchain_identity,
+        "container_image": container_image,
+        "manifest_sha256": manifest_sha256,
     }
     if not artifact_name:
         raise ValueError("artifact_name is required")
@@ -113,6 +122,10 @@ def normalize_identity(
         raise ValueError("source_run_id must be numeric")
     if not release_tag.startswith("artifact-v2-"):
         raise ValueError("release_tag must reference an Artifact Contract v2 archive")
+    if manifest_sha256 and (len(manifest_sha256) != 64 or any(c not in "0123456789abcdef" for c in manifest_sha256)):
+        raise ValueError("manifest_sha256 must be 64 lowercase hexadecimal characters")
+    if container_image and "@sha256:" not in container_image:
+        raise ValueError("container_image must use an immutable digest reference")
     return identity
 
 
@@ -217,6 +230,9 @@ def main() -> int:
     verify.add_argument("--source-sha", required=True)
     verify.add_argument("--source-run-id", required=True)
     verify.add_argument("--release-tag", required=True)
+    verify.add_argument("--toolchain-identity", default="")
+    verify.add_argument("--container-image", default="")
+    verify.add_argument("--manifest-sha256", default="")
 
     args = parser.parse_args()
     try:
@@ -234,6 +250,9 @@ def main() -> int:
             source_sha=args.source_sha,
             source_run_id=args.source_run_id,
             release_tag=args.release_tag,
+            toolchain_identity=args.toolchain_identity,
+            container_image=args.container_image,
+            manifest_sha256=args.manifest_sha256,
         )
         result = verify_promotion(
             policy=policy,
