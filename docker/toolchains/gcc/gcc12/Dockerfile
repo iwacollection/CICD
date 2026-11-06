@@ -1,10 +1,11 @@
 FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
 ARG DEBIAN_FRONTEND=noninteractive
+ARG GCC_PACKAGE_VERSION=12.5.0-9ubuntu1
 RUN printf '%s\n' 'APT::Snapshot "20260828T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
     && apt-get -o Acquire::https::Verify-Peer=false update \
     && apt-get -o Acquire::https::Verify-Peer=false install -y --no-install-recommends ca-certificates \
     && apt-get update \
-    && apt-get install -y --no-install-recommends gcc-12 g++-12 cmake ninja-build ccache git \
+    && apt-get install -y --no-install-recommends gcc-12=${GCC_PACKAGE_VERSION} g++-12=${GCC_PACKAGE_VERSION} cmake ninja-build ccache git \
     && rm -rf /var/lib/apt/lists/*
 RUN set -eux; test "$(gcc-12 -dumpfullversion -dumpversion | cut -d. -f1)" = "12"; \
     test "$(g++-12 -dumpfullversion -dumpversion | cut -d. -f1)" = "12"; \
