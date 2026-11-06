@@ -193,6 +193,7 @@ jobs:
           PREREQUISITE_DEPLOYMENT_ID: ${{ steps.promotion_path.outputs.prerequisite_deployment_id }}
           TOOLCHAIN_IDENTITY: ${{ steps.archive.outputs.toolchain_identity }}
           CONTAINER_IMAGE: ${{ steps.archive.outputs.container_image }}
+          APPLICATION_IMAGE: ${{ inputs.application_image }}
           MANIFEST_SHA256: ${{ steps.archive.outputs.manifest_sha256 }}
         run: |
           set -euo pipefail
