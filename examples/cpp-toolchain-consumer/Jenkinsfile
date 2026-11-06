@@ -1,0 +1,57 @@
+@Library('iwacollection-cicd') _
+
+/*
+ * Configure this file as the Jenkins job Script Path:
+ * examples/cpp-toolchain-consumer/Jenkinsfile
+ *
+ * Required controller configuration:
+ * - Shared Library iwacollection-cicd pinned to the approved CICD main SHA.
+ * - Secret Text credential cicd-platform-sha containing that exact 40-char SHA.
+ * - Username/password credential ghcr-readonly with read-only GHCR access.
+ * - A trusted main-branch job; PR/fork builds are intentionally rejected.
+ */
+
+pipeline {
+    agent {
+        label 'linux && docker && cpp-project-builder'
+    }
+
+    options {
+        timestamps()
+        timeout(time: 45, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+    }
+
+    stages {
+        stage('Checkout trusted source') {
+            steps {
+                checkout scm
+                sh '''
+                    set -euo pipefail
+                    test -n "${GIT_COMMIT:-}"
+                    test -n "${GIT_URL:-}"
+                    echo "C++ consumer source: $GIT_COMMIT"
+                '''
+            }
+        }
+
+        stage('Build, test and package with managed C++ toolchain') {
+            steps {
+                script {
+                    cppToolchainBuild(
+                        projectDir: 'examples/cpp-toolchain-consumer',
+                        registryCredentialsId: 'ghcr-readonly'
+                    )
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Inspect resolver, image signature, build, test, Artifact Contract and JUnit evidence.'
+        }
+    }
+}
