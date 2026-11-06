@@ -206,6 +206,16 @@ def approve_candidate(
     payload = {key: value for key, value in candidate.items() if key != "deployment_id"}
     payload["state"] = "approved"
     payload["candidate_deployment_id"] = candidate["deployment_id"]
+    # This identifies who requested the workflow, not who approved it.
+    # The independent reviewer identity remains in GitHub Environment's approval audit.
+    run_id = os.getenv("GITHUB_RUN_ID", "").strip()
+    server_url = os.getenv("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    payload["approval_workflow_run_id"] = run_id
+    payload["approval_workflow_run_url"] = (
+        f"{server_url}/{repository}/actions/runs/{run_id}" if run_id else ""
+    )
+    payload["approval_requested_by"] = os.getenv("GITHUB_ACTOR", "").strip()
+    payload["approval_environment"] = "toolchain-production"
     environment = _environment("approved", toolchain)
     existing = _list_all_pages(
         f"{api_url.rstrip('/')}/repos/{repository}/deployments?environment={environment}", token
