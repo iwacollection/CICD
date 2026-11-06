@@ -23,6 +23,8 @@ def validate_versions(data, catalog):
     policy = data.get('selection_policy', {})
     if policy.get('project_consumption_statuses') != ['active']:
         errors.append('project consumption must be active only')
+    if policy.get('verification_statuses') != ['active', 'candidate']:
+        errors.append('verification_statuses must be exactly active and candidate')
     if policy.get('planned_is_never_runnable') is not True:
         errors.append('planned entries must never be runnable')
     if policy.get('require_exact_version') is not True:
@@ -33,6 +35,7 @@ def validate_versions(data, catalog):
     errors.extend(validate_toolchain_catalog(catalog))
     catalog_index = index_toolchains(catalog)
     seen = set()
+    selection_keys = set()
     for i, item in enumerate(items):
         p = f'combinations[{i}]'
         if not isinstance(item, dict):
@@ -49,6 +52,10 @@ def validate_versions(data, catalog):
         for field in ('language_version', 'build_tool', 'build_tool_version'):
             if not isinstance(item.get(field), str) or not item.get(field):
                 errors.append(f'{p}.{field} is required')
+        selector = (item.get('language'), item.get('language_version'), item.get('build_tool'), item.get('build_tool_version'))
+        if selector in selection_keys:
+            errors.append(f'{p} duplicates a language/build-tool version selector')
+        selection_keys.add(selector)
         status = item.get('status')
         if status not in STATUSES:
             errors.append(f'{p}.status is invalid')
