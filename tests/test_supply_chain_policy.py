@@ -102,6 +102,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
         toolchain = (ROOT / ".github" / "workflows" / "toolchain-images.yml").read_text(encoding="utf-8")
         archive = (ROOT / ".github" / "workflows" / "archive-artifacts.yml").read_text(encoding="utf-8")
         promote = (ROOT / ".github" / "workflows" / "promote.yml").read_text(encoding="utf-8")
+        toolchain_promote = (ROOT / ".github" / "workflows" / "promote-toolchain.yml").read_text(encoding="utf-8")
         rollback = (ROOT / ".github" / "workflows" / "rollback.yml").read_text(encoding="utf-8")
 
         for workflow in (dag_node, reusable, toolchain):
@@ -118,6 +119,17 @@ class SupplyChainPolicyTests(unittest.TestCase):
 
         self.assertIn("sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6", toolchain)
         self.assertIn("cosign verify", toolchain)
+        self.assertIn("cosign attest --yes --type cyclonedx", toolchain)
+        self.assertIn("cosign attest --yes --type vuln", toolchain)
+        self.assertIn("gh attestation verify", toolchain)
+        self.assertIn("toolchain_registry.py register", toolchain)
+        self.assertIn("ignore-unfixed: false", toolchain)
+        self.assertIn("cosign verify-attestation --type cyclonedx", toolchain_promote)
+        self.assertIn("cosign verify-attestation --type vuln", toolchain_promote)
+        self.assertIn("gh attestation verify", toolchain_promote)
+        self.assertIn("environment: toolchain-production", toolchain_promote)
+        self.assertIn("toolchain_registry.py approve", toolchain_promote)
+        self.assertIn("gh pr create", toolchain_promote)
         self.assertIn("cosign sign-blob", archive)
         self.assertIn("id-token: write", archive)
 
