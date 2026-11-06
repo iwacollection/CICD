@@ -75,6 +75,25 @@
       "consumer_fixture": "examples/java17-maven-service",
       "build_context_sha256": "156feed5a12816cd87b77009bf0519f84d85e4d2959f2d3fc3f9ab10fa13fd37",
       "build_definition_sha256": "d3b6001d106ea4bd7f51678dd9958c066d873089939029f9ca1cc33979e5300d"
+    },
+    {
+      "id": "go126",
+      "status": "candidate",
+      "execution_mode": "container",
+      "description": "Candidate Go 1.26 build toolchain: Go 1.26.10 (linux/amd64) with gcc for cgo, git and gotestsum v1.13.0 on Ubuntu 24.04",
+      "image": "ghcr.io/iwacollection/cicd-toolchain-go126",
+      "dockerfile": "docker/toolchains/go/go126/Dockerfile",
+      "context": "docker/toolchains/go/go126",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "smoke_command": "bash /usr/local/bin/go-toolchain-smoke",
+      "language": "go",
+      "go_version": "1.26.10",
+      "gotestsum_version": "v1.13.0",
+      "base_os": "Ubuntu 24.04",
+      "apt_snapshot": "20261029T000000Z",
+      "owner": "ci-platform"
     }
   ]
 }
