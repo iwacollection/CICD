@@ -371,7 +371,10 @@ public class NativeToolchainSharedLibraryTest {
         Harness h = bind(script, "cpp-service", CPP_CONFIG,
                 resolution("gcc-host-container-v1", CPP_IMAGE));
 
-        script.invokeMethod("call", Map.of("language", "cpp", "projectDir", "services/cpp"));
+        script.invokeMethod("call", Map.of(
+                "language", "cpp",
+                "projectDir", "services/cpp",
+                "registryCredentialsId", "ghcr-readonly"));
 
         assertPlatformFlow(h);
         assertTrue(h.environmentAssignments.contains("CI_LANGUAGE=cpp"));
