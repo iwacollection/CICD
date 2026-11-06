@@ -285,7 +285,8 @@ def main() -> int:
             errors.append(str(exc))
         else:
             report_errors, summary = validate_trivy_report(
-                report, policy, toolchain=args.toolchain, image_digest=args.image_digest\n            )
+                report, policy, toolchain=args.toolchain, image_digest=args.image_digest
+            )
             errors.extend(report_errors)
 
     if args.sbom:
