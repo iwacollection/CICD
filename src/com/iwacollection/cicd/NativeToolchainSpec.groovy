@@ -77,16 +77,18 @@ class NativeToolchainSpec implements Serializable {
         }
         artifacts.each { validateRelativePath(it.toString(), 'artifact_globs entry') }
 
-        List locks = config.dependency_lock_files ?: []
-        if (!(locks instanceof List) || locks.any { !(it instanceof String) || !it.trim() }) {
+        Object rawLocks = config.containsKey('dependency_lock_files') ? config.dependency_lock_files : []
+        if (!(rawLocks instanceof List) || ((List) rawLocks).any { !(it instanceof String) || !it.trim() }) {
             throw new IllegalArgumentException('dependency_lock_files must be a string array')
         }
+        List locks = (List) rawLocks
         locks.each { validateRelativePath(it.toString(), 'dependency_lock_files entry') }
 
-        List reports = config.test_report_globs ?: []
-        if (!(reports instanceof List) || reports.any { !(it instanceof String) || !it.trim() }) {
+        Object rawReports = config.containsKey('test_report_globs') ? config.test_report_globs : []
+        if (!(rawReports instanceof List) || ((List) rawReports).any { !(it instanceof String) || !it.trim() }) {
             throw new IllegalArgumentException('test_report_globs must be a string array')
         }
+        List reports = (List) rawReports
         reports.each { validateRelativePath(it.toString(), 'test_report_globs entry') }
 
         ['test_command', 'verify_command', 'project_name'].each { String key ->
