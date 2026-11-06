@@ -134,6 +134,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertIn("cosign attest --yes --type vuln", toolchain)
         self.assertIn("gh attestation verify", toolchain)
         self.assertIn("toolchain_registry.py register", toolchain)
+        self.assertIn("Build and test Java consumer fixture against exact published digest", toolchain)
         self.assertIn("ignore-unfixed: false", toolchain)
         self.assertIn("cosign verify-attestation --type cyclonedx", toolchain_promote)
         self.assertIn("cosign verify-attestation --type vuln", toolchain_promote)
