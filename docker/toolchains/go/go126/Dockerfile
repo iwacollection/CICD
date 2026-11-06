@@ -18,24 +18,24 @@ RUN set -eux; \
     apt-get update; \
     apt-get upgrade -y; \
     apt-get install -y --no-install-recommends linux-libc-dev=6.12.115-2; \
-    test "$(dpkg-query -W -f='\${Version}' linux-libc-dev)" = "6.12.115-2"; \
-    test "$(go env GOVERSION)" = "go\${GO_VERSION}"; \
+    test "$(dpkg-query -W -f='${Version}' linux-libc-dev)" = "6.12.115-2"; \
+    test "$(go env GOVERSION)" = "go${GO_VERSION}"; \
     command -v gcc; \
     command -v git; \
     command -v make; \
     command -v curl; \
     test -r /usr/include/stdio.h; \
-    go_archive="go\${GO_VERSION}.linux-amd64.tar.gz"; \
+    go_archive="go${GO_VERSION}.linux-amd64.tar.gz"; \
     curl --fail --show-error --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 900 \
-      "https://go.dev/dl/\${go_archive}" --output "/tmp/\${go_archive}"; \
-    printf '%s  %s\n' "\${GO_SHA256}" "/tmp/\${go_archive}" | sha256sum --check -; \
-    rm -f "/tmp/\${go_archive}"; \
+      "https://go.dev/dl/${go_archive}" --output "/tmp/${go_archive}"; \
+    printf '%s  %s\n' "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum --check -; \
+    rm -f "/tmp/${go_archive}"; \
     tooling_dir="$(mktemp -d)"; \
     mkdir -p /tmp/gopath /tmp/gocache; \
     cd "$tooling_dir"; \
     GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go mod init cicd-toolchain-tools; \
-    GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go get "gotest.tools/gotestsum@\${GOTESTSUM_VERSION}"; \
-    GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go get "golang.org/x/mod@\${X_MOD_VERSION}" "golang.org/x/text@\${X_TEXT_VERSION}"; \
+    GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go get "gotest.tools/gotestsum@${GOTESTSUM_VERSION}"; \
+    GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go get "golang.org/x/mod@${X_MOD_VERSION}" "golang.org/x/text@${X_TEXT_VERSION}"; \
     GOTOOLCHAIN=local GOPATH=/tmp/gopath GOBIN=/usr/local/bin GOCACHE=/tmp/gocache \
       go install gotest.tools/gotestsum; \
     cd /; \
