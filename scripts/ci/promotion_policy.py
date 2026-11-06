@@ -130,7 +130,16 @@ def normalize_identity(
 
 
 def pointer_matches(pointer: dict[str, Any], identity: dict[str, str]) -> bool:
-    return all(str(pointer.get(field, "")) == identity[field] for field in IDENTITY_FIELDS)
+    # The five original fields remain the cross-environment identity contract.
+    # New trace fields are enforced whenever present; legacy deployments can
+    # still be traced through their immutable bundle -> manifest archive.
+    required = ("artifact_name", "bundle_sha256", "source_sha", "source_run_id", "release_tag")
+    if not all(str(pointer.get(field, "")) == identity[field] for field in required):
+        return False
+    for field in ("toolchain_identity", "container_image", "manifest_sha256"):
+        if field in pointer and str(pointer.get(field, "")) != identity[field]:
+            return False
+    return True
 
 
 def find_successful_prerequisite(
