@@ -64,6 +64,12 @@ class RuntimeVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "runtime imageID does not match"):
             verify_runtime(app, pods, **self.kwargs())
 
+    def test_tag_only_pod_spec_fails(self):
+        app, pods = fixture()
+        pods["items"][0]["spec"]["containers"][0]["image"] = "ghcr.io/example/payments:latest"
+        with self.assertRaisesRegex(ValueError, "does not declare expected image"):
+            verify_runtime(app, pods, **self.kwargs())
+
     def test_not_ready_pod_fails(self):
         app, pods = fixture()
         pods["items"][0]["status"]["conditions"][0]["status"] = "False"
