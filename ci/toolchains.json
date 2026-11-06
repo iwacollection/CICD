@@ -25,7 +25,8 @@
       "platforms": [
         "linux/amd64"
       ],
-      "smoke_command": "gcc --version && g++ --version && cmake --version && ccache --version && git --version"
+      "smoke_command": "gcc --version && g++ --version && cmake --version && ccache --version && git --version",
+      "compiler": "gcc-13/g++-13"
     },
     {
       "id": "rk-sdk-2026.08",
