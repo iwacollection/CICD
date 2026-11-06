@@ -167,7 +167,7 @@ jobs:
               and .artifact_name == $artifact
               and .bundle_sha256 == $bundle
               and .manifest_sha256 == $manifest
-              and .container_image == $image
+              and .application_image == $image
               and .source_sha == $source
               and .source_run_id == $run
             ' deployment-pointer.json >/dev/null
