@@ -88,7 +88,7 @@ class RuntimeVerificationTests(unittest.TestCase):
         module._request = fake_request
         try:
             result = register_runtime(api_url="https://api.github.com",
-                repository="example/repo", token="token", evidence=evidence)
+                repository="example/repo", token="token", workflow_sha="f" * 40, evidence=evidence)
         finally:
             module._request = original
         self.assertEqual("12345", result["deployment_id"])
@@ -102,7 +102,7 @@ class RuntimeVerificationTests(unittest.TestCase):
         evidence["argocd_health"] = "Degraded"
         with self.assertRaisesRegex(ValueError, "argocd_health"):
             register_runtime(api_url="https://api.github.com", repository="example/repo",
-                token="token", evidence=evidence)
+                token="token", workflow_sha="f" * 40, evidence=evidence)
 
 if __name__ == "__main__":
     unittest.main()
