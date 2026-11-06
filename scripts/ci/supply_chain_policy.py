@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import re
 import sys
@@ -101,8 +101,10 @@ def validate_policy(policy: dict) -> list[str]:
             expires_at = datetime.fromisoformat(str(exception.get("expires_at", "")).replace("Z", "+00:00"))
             if approved_at.tzinfo is None or expires_at.tzinfo is None or expires_at <= approved_at:
                 raise ValueError("timestamps must be timezone-aware and expires_at must be later")
-            if (expires_at - approved_at).days > 90:
+            if expires_at - approved_at > timedelta(days=90):
                 errors.append(f"{prefix} exception lifetime cannot exceed 90 days")
+            if approved_at > datetime.now(timezone.utc):
+                errors.append(f"{prefix}.approved_at cannot be in the future")
         except ValueError:
             errors.append(f"{prefix} approved_at/expires_at must be valid timezone-aware ISO-8601 timestamps")
 
@@ -164,9 +166,13 @@ def validate_trivy_report(
     deny_secrets = bool(policy.get("secret", {}).get("deny_any_finding", True))
     now = now or datetime.now(timezone.utc)
     exceptions = policy.get("vulnerability_exceptions", [])
+    if not isinstance(exceptions, list):
+        exceptions = []
 
     def exception_for(finding: dict) -> dict | None:
         for exception in exceptions:
+            if not isinstance(exception, dict):
+                continue
             if (
                 exception.get("toolchain") != toolchain
                 or exception.get("image_digest") != image_digest
