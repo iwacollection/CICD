@@ -15,6 +15,10 @@ on:
         description: "Exact archived bundle SHA256"
         required: true
         type: string
+      application_image:
+        description: "Optional immutable application image repository@sha256 digest to bind to this artifact"
+        required: false
+        type: string
       target_environment:
         description: "Promotion target"
         required: true
@@ -98,6 +102,7 @@ jobs:
           TOOLCHAIN_IDENTITY: ${{ steps.archive.outputs.toolchain_identity }}
           CONTAINER_IMAGE: ${{ steps.archive.outputs.container_image }}
           MANIFEST_SHA256: ${{ steps.archive.outputs.manifest_sha256 }}
+          APPLICATION_IMAGE: ${{ inputs.application_image }}
         run: >-
           python3 scripts/ci/promotion_policy.py
           --policy ci/promotion-policy.json
@@ -203,6 +208,7 @@ jobs:
             --promoted-from-deployment-id "$PREREQUISITE_DEPLOYMENT_ID" \
             --toolchain-identity "$TOOLCHAIN_IDENTITY" \
             --container-image "$CONTAINER_IMAGE" \
+            --application-image "$APPLICATION_IMAGE" \
             --manifest-sha256 "$MANIFEST_SHA256"
 
       - name: Promotion summary
