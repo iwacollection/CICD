@@ -4,8 +4,8 @@
 # published digest.
 set -euo pipefail
 
-expected_go="go${GO_TOOLCHAIN_VERSION:?GO_TOOLCHAIN_VERSION is not set in the image}"
-expected_gotestsum="${GOTESTSUM_TOOLCHAIN_VERSION:?GOTESTSUM_TOOLCHAIN_VERSION is not set in the image}"
+expected_go="go\${GO_TOOLCHAIN_VERSION:?GO_TOOLCHAIN_VERSION is not set in the image}"
+expected_gotestsum="\${GOTESTSUM_TOOLCHAIN_VERSION:?GOTESTSUM_TOOLCHAIN_VERSION is not set in the image}"
 
 actual_go="$(go env GOVERSION)"
 if [[ "$actual_go" != "$expected_go" ]]; then
@@ -14,8 +14,8 @@ if [[ "$actual_go" != "$expected_go" ]]; then
 fi
 
 for pair in GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local CGO_ENABLED=1; do
-  key="${pair%%=*}"
-  want="${pair#*=}"
+  key="\${pair%%=*}"
+  want="\${pair#*=}"
   got="$(go env "$key")"
   if [[ "$got" != "$want" ]]; then
     echo "go env $key mismatch: expected $want, got $got" >&2
@@ -23,14 +23,17 @@ for pair in GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local CGO_ENABLED=1; do
   fi
 done
 
-gotestsum --version | grep -F "${expected_gotestsum#v}" >/dev/null || {
+gotestsum --version | grep -F "\${expected_gotestsum#v}" >/dev/null || {
   echo "gotestsum version mismatch: expected $expected_gotestsum" >&2
   gotestsum --version >&2 || true
   exit 1
 }
 
 gcc --version | sed -n '1p'
+make --version | sed -n '1p'
 git --version
+curl --version | sed -n '1p'
+test -r /usr/include/stdio.h
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
