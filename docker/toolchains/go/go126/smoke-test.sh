@@ -32,8 +32,16 @@ gotestsum --version | grep -F "${expected_gotestsum#v}" >/dev/null || {
 }
 
 module_info="$(go version -m "$(command -v gotestsum)")"
-grep -F "golang.org/x/mod $expected_x_mod" <<<"$module_info" >/dev/null
-grep -F "golang.org/x/text $expected_x_text" <<<"$module_info" >/dev/null
+if ! grep -Eq "golang.org/x/mod[[:space:]]+${expected_x_mod}([[:space:]]|$)" <<<"$module_info"; then
+  echo "gotestsum golang.org/x/mod version mismatch: expected $expected_x_mod" >&2
+  echo "$module_info" >&2
+  exit 1
+fi
+if ! grep -Eq "golang.org/x/text[[:space:]]+${expected_x_text}([[:space:]]|$)" <<<"$module_info"; then
+  echo "gotestsum golang.org/x/text version mismatch: expected $expected_x_text" >&2
+  echo "$module_info" >&2
+  exit 1
+fi
 if command -v apt-get >/dev/null 2>&1; then
   echo "apt-get must not be present in the Go build-only image" >&2
   exit 1
