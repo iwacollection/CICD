@@ -9,26 +9,26 @@ ARG GOTESTSUM_VERSION=v1.13.0
 # as an independent supply-chain check; the pinned base digest fixes the
 # preinstalled toolchain and Debian build environment.
 RUN set -eux; \
-    test "$(go env GOVERSION)" = "go\${GO_VERSION}"; \
+    test "$(go env GOVERSION)" = "go${GO_VERSION}"; \
     command -v gcc; \
     command -v git; \
     command -v make; \
     command -v curl; \
     test -r /usr/include/stdio.h; \
-    go_archive="go\${GO_VERSION}.linux-amd64.tar.gz"; \
+    go_archive="go${GO_VERSION}.linux-amd64.tar.gz"; \
     curl --fail --show-error --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 900 \
-      "https://go.dev/dl/\${go_archive}" --output "/tmp/\${go_archive}"; \
-    printf '%s  %s\n' "\${GO_SHA256}" "/tmp/\${go_archive}" | sha256sum --check -; \
-    rm -f "/tmp/\${go_archive}"; \
+      "https://go.dev/dl/${go_archive}" --output "/tmp/${go_archive}"; \
+    printf '%s  %s\n' "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum --check -; \
+    rm -f "/tmp/${go_archive}"; \
     GOTOOLCHAIN=local GOPATH=/tmp/gopath GOBIN=/usr/local/bin GOCACHE=/tmp/gocache \
-      go install "gotest.tools/gotestsum@\${GOTESTSUM_VERSION}"; \
+      go install "gotest.tools/gotestsum${GOTESTSUM_VERSION}"; \
     rm -rf /tmp/gopath /tmp/gocache; \
     git config --system --add safe.directory /workspace; \
     mkdir -p /home/ci /workspace; \
     chown -R 10001:10001 /home/ci /workspace
 
-ENV GO_TOOLCHAIN_VERSION=\${GO_VERSION} \
-    GOTESTSUM_TOOLCHAIN_VERSION=\${GOTESTSUM_VERSION} \
+ENV GO_TOOLCHAIN_VERSION=${GO_VERSION} \
+    GOTESTSUM_TOOLCHAIN_VERSION=${GOTESTSUM_VERSION} \
     GOROOT=/usr/local/go \
     GOPATH=/workspace/.cache/go \
     GOCACHE=/workspace/.cache/go-build \
