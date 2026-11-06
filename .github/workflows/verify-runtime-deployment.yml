@@ -28,6 +28,10 @@ on:
         description: "Exact GitOps commit SHA expected in Argo CD"
         required: true
         type: string
+      deployment_pointer_id:
+        description: "Successful GitHub Deployment ID that binds this app image to the Artifact Contract"
+        required: true
+        type: string
       artifact_name:
         description: "Exact archived Artifact Contract name"
         required: true
@@ -104,7 +108,6 @@ jobs:
           ARTIFACT_NAME: ${{ inputs.artifact_name }}
           BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
           MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
-          EXPECTED_IMAGE: ${{ inputs.expected_image }}
         run: |
           set -euo pipefail
           python3 scripts/ci/artifact_archive.py download \
@@ -116,7 +119,6 @@ jobs:
           test -n "$manifest"
           actual_manifest="$(sha256sum "$manifest" | awk '{print $1}')"
           test "$actual_manifest" = "$MANIFEST_SHA256"
-          test "$(jq -r '.container_image' archive.json)" = "$EXPECTED_IMAGE"
           python3 scripts/ci/verify_artifact.py \
             --directory incoming \
             --expected-sha256 "$BUNDLE_SHA256" \
@@ -131,6 +133,40 @@ jobs:
             --sbom incoming/security-sbom.cdx.json \
             --toolchain "$TOOLCHAIN_ID" \
             --image-digest "$IMAGE_DIGEST"
+
+      - name: Verify application deployment pointer binds image to Artifact Contract
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          POINTER_ID: ${{ inputs.deployment_pointer_id }}
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+          MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+          EXPECTED_IMAGE: ${{ inputs.expected_image }}
+          SOURCE_SHA: ${{ steps.archive.outputs.source_sha }}
+          SOURCE_RUN_ID: ${{ steps.archive.outputs.workflow_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$POINTER_ID" =~ ^[0-9]+$ ]]
+          python3 scripts/ci/deployment_pointer.py inspect \
+            --repository "$GITHUB_REPOSITORY" \
+            --deployment-id "$POINTER_ID" > deployment-pointer.json
+          jq -e --arg env "$TARGET_ENVIRONMENT" \
+            --arg artifact "$ARTIFACT_NAME" \
+            --arg bundle "$BUNDLE_SHA256" \
+            --arg manifest "$MANIFEST_SHA256" \
+            --arg image "$EXPECTED_IMAGE" \
+            --arg source "$SOURCE_SHA" \
+            --arg run "$SOURCE_RUN_ID" '
+              .environment == $env
+              and .artifact_name == $artifact
+              and .bundle_sha256 == $bundle
+              and .manifest_sha256 == $manifest
+              and .container_image == $image
+              and .source_sha == $source
+              and .source_run_id == $run
+            ' deployment-pointer.json >/dev/null
 
       - name: Verify archived GitHub attestations
         shell: bash
@@ -226,6 +262,7 @@ jobs:
           MANIFEST: ${{ inputs.manifest_sha256 }}
           ARTIFACT_NAME: ${{ inputs.artifact_name }}
           BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+          POINTER_ID: ${{ inputs.deployment_pointer_id }}
           SOURCE_SHA: ${{ steps.archive.outputs.source_sha }}
           SOURCE_RUN_ID: ${{ steps.archive.outputs.workflow_run_id }}
           TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
@@ -242,6 +279,7 @@ jobs:
             --manifest-sha256 "$MANIFEST" \
             --artifact-name "$ARTIFACT_NAME" \
             --bundle-sha256 "$BUNDLE_SHA256" \
+            --deployment-pointer-id "$POINTER_ID" \
             --source-sha "$SOURCE_SHA" \
             --source-run-id "$SOURCE_RUN_ID" \
             --environment "$TARGET_ENVIRONMENT" \
