@@ -131,6 +131,11 @@ jobs:
             --sbom verified-sbom.cdx.json \
             --toolchain "$TOOLCHAIN" \
             --image-digest "$DIGEST"
+          python3 scripts/ci/supply_chain_policy.py \
+            --skip-dockerfiles \
+            --report promotion-security.json \
+            --toolchain "$TOOLCHAIN" \
+            --image-digest "$DIGEST"
         env:
           TOOLCHAIN: ${{ inputs.toolchain }}
           DIGEST: ${{ inputs.digest }}
