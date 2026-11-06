@@ -219,6 +219,10 @@ jobs:
           IMAGE: ${{ inputs.expected_image }}
           REVISION: ${{ inputs.expected_gitops_revision }}
           MANIFEST: ${{ inputs.manifest_sha256 }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+          SOURCE_SHA: ${{ steps.archive.outputs.source_sha }}
+          SOURCE_RUN_ID: ${{ steps.archive.outputs.workflow_run_id }}
           TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
         run: |
           set -euo pipefail
@@ -231,6 +235,10 @@ jobs:
             --expected-image "$IMAGE" \
             --expected-revision "$REVISION" \
             --manifest-sha256 "$MANIFEST" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --bundle-sha256 "$BUNDLE_SHA256" \
+            --source-sha "$SOURCE_SHA" \
+            --source-run-id "$SOURCE_RUN_ID" \
             --environment "$TARGET_ENVIRONMENT" \
             --output runtime-evidence.json
 
