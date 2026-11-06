@@ -10,7 +10,7 @@ SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 REVISION_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 def register_runtime(*, api_url: str, repository: str, token: str,
-                     evidence: dict[str, Any]) -> dict[str, Any]:
+                     workflow_sha: str, evidence: dict[str, Any]) -> dict[str, Any]:
     required = {"schema_version": 1, "kind": "argocd-kubernetes-runtime-verification",
                 "argocd_sync": "Synced", "argocd_health": "Healthy"}
     for key, expected in required.items():
@@ -51,6 +51,8 @@ def register_runtime(*, api_url: str, repository: str, token: str,
     if environment_name not in {"dev", "staging", "production"}:
         raise ValueError("runtime evidence environment is invalid")
 
+    if not re.fullmatch(r"[0-9a-f]{40}", workflow_sha):
+        raise ValueError("workflow_sha must be the 40-character CICD repository commit SHA")
     environment = f"runtime-{environment_name}"
     deployments_url = f"{api_url.rstrip('/')}/repos/{repository}/deployments"
     run_id = os.getenv("GITHUB_RUN_ID", "")
@@ -64,7 +66,7 @@ def register_runtime(*, api_url: str, repository: str, token: str,
     payload["workflow_run_url"] = f"{server_url}/{repository}/actions/runs/{run_id}" if run_id else ""
     payload["evidence_artifact_name"] = artifact_name
     deployment = _request(deployments_url, token, method="POST", payload={
-        "ref": revision, "task": "runtime-verification", "auto_merge": False,
+        "ref": workflow_sha, "task": "runtime-verification", "auto_merge": False,
         "required_contexts": [], "environment": environment,
         "description": f"Verified {evidence['application']} @ {evidence['image_digest']}",
         "transient_environment": False, "production_environment": environment_name == "production",
@@ -93,7 +95,9 @@ def main() -> int:
         evidence = json.loads(Path(args.evidence).read_text(encoding="utf-8"))
         if not isinstance(evidence, dict):
             raise ValueError("runtime evidence must be a JSON object")
-        result = register_runtime(api_url=args.api_url, repository=repository, token=token, evidence=evidence)
+        workflow_sha = os.getenv("GITHUB_SHA", "").strip()
+        result = register_runtime(api_url=args.api_url, repository=repository, token=token,
+                                  workflow_sha=workflow_sha, evidence=evidence)
     except (OSError, json.JSONDecodeError, ValueError, urllib.error.URLError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
