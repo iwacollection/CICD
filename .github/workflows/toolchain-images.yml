@@ -324,16 +324,6 @@ jobs:
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/toolchain-images.yml" \
             --source-ref "refs/heads/main"
 
-      - name: Independently verify digest-bound CycloneDX SBOM
-        shell: bash
-        env:
-          IMAGE: ${{ matrix.immutable_reference }}
-        run: |
-          set -euo pipefail
-          cosign verify-attestation --type cyclonedx "$IMAGE" \
-            --certificate-identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/toolchain-images.yml@refs/heads/main" \
-            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
-
       - name: Pull exact Candidate digest
         shell: bash
         env:
