@@ -10,29 +10,40 @@ ARG X_TEXT_VERSION=v0.41.0
 # make, git, curl and CA certificates. Verify the upstream Go release checksum
 # independently, then build gotestsum with patched, pinned Go module dependencies.
 RUN set -eux; \
-    test "$(go env GOVERSION)" = "go${GO_VERSION}"; \
+    printf '%s\n' \
+      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261106T000000Z trixie main' \
+      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20261106T000000Z trixie-security main' \
+      > /etc/apt/sources.list; \
+    rm -f /etc/apt/sources.list.d/debian.sources; \
+    apt-get update; \
+    apt-get upgrade -y; \
+    apt-get install -y --no-install-recommends linux-libc-dev=6.12.115-2; \
+    test "$(dpkg-query -W -f='\${Version}' linux-libc-dev)" = "6.12.115-2"; \
+    test "$(go env GOVERSION)" = "go\${GO_VERSION}"; \
     command -v gcc; \
     command -v git; \
     command -v make; \
     command -v curl; \
     test -r /usr/include/stdio.h; \
-    go_archive="go${GO_VERSION}.linux-amd64.tar.gz"; \
+    go_archive="go\${GO_VERSION}.linux-amd64.tar.gz"; \
     curl --fail --show-error --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 900 \
-      "https://go.dev/dl/${go_archive}" --output "/tmp/${go_archive}"; \
-    printf '%s  %s\n' "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum --check -; \
-    rm -f "/tmp/${go_archive}"; \
+      "https://go.dev/dl/\${go_archive}" --output "/tmp/\${go_archive}"; \
+    printf '%s  %s\n' "\${GO_SHA256}" "/tmp/\${go_archive}" | sha256sum --check -; \
+    rm -f "/tmp/\${go_archive}"; \
     tooling_dir="$(mktemp -d)"; \
     mkdir -p /tmp/gopath /tmp/gocache; \
     cd "$tooling_dir"; \
     GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go mod init cicd-toolchain-tools; \
-    GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go get "gotest.tools/gotestsum@${GOTESTSUM_VERSION}"; \
-    GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go get "golang.org/x/mod@${X_MOD_VERSION}" "golang.org/x/text@${X_TEXT_VERSION}"; \
+    GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go get "gotest.tools/gotestsum@\${GOTESTSUM_VERSION}"; \
+    GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go get "golang.org/x/mod@\${X_MOD_VERSION}" "golang.org/x/text@\${X_TEXT_VERSION}"; \
     GOTOOLCHAIN=local GOPATH=/tmp/gopath GOBIN=/usr/local/bin GOCACHE=/tmp/gocache \
       go install gotest.tools/gotestsum; \
     cd /; \
     rm -rf "$tooling_dir" /tmp/gopath /tmp/gocache /root/go/pkg/mod /root/.cache/go-build; \
+    rm -f /usr/local/go/src/crypto/internal/boring/Dockerfile /usr/local/go/src/crypto/internal/fips140/nistec/fiat/Dockerfile; \
     dpkg --purge apt libapt-pkg7.0; \
     ! command -v apt; \
+    rm -rf /var/lib/apt/lists/*; \
     git config --system --add safe.directory /workspace; \
     mkdir -p /home/ci /workspace; \
     chown -R 10001:10001 /home/ci /workspace
