@@ -45,6 +45,8 @@ def validate_policy(policy: dict) -> list[str]:
         errors.append("policy scanner.name must be trivy")
     elif not isinstance(scanner.get("version"), str) or not scanner.get("version"):
         errors.append("policy scanner.version must be pinned")
+    elif scanner.get("ignore_unfixed_vulnerabilities") is not False:
+        errors.append("policy must scan unfixed vulnerabilities; exceptions require explicit approval")
 
     _validate_severity_section(policy, "vulnerability", errors)
     _validate_severity_section(policy, "misconfiguration", errors)
