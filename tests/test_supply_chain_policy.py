@@ -39,10 +39,10 @@ class SupplyChainPolicyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             dockerfile = Path(directory) / "Dockerfile"
             dockerfile.write_text(
-                "FROM golang:1.26.10-trixie@sha256:" + "a" * 64 + "\\n"
+                "FROM golang:1.26.10-trixie@sha256:" + "a" * 64 + "\n"
                 "RUN echo 'deb [check-valid-until=no] "
                 "https://snapshot.debian.org/archive/debian/20261106T000000Z trixie main' "
-                "> /etc/apt/sources.list && apt-get update\\n",
+                "> /etc/apt/sources.list && apt-get update\n",
                 encoding="utf-8",
             )
             self.assertEqual(validate_dockerfile(dockerfile, self.policy), [])
