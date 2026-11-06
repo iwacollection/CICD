@@ -17,7 +17,7 @@ on:
       - "scripts/ci/resolve_toolchain.py"
       - "scripts/ci/package_artifact.py"
       - "scripts/ci/verify_artifact.py"
-      - "examples/java17-maven-service/**"
+      - "examples/**"
       - "src/**"
       - "vars/**"
       - "jenkins-shared-library-tests/**"
@@ -71,7 +71,7 @@ jobs:
             relevant=false
             while IFS= read -r path; do
               case "$path" in
-                ci/toolchains.json|ci/toolchain-versions.json|ci/supply-chain-policy.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|scripts/ci/toolchain_versions.py|scripts/ci/supply_chain_policy.py|scripts/ci/run_build.py|scripts/ci/collect_build_metadata.py|scripts/ci/resolve_toolchain.py|scripts/ci/package_artifact.py|scripts/ci/verify_artifact.py|examples/java17-maven-service/*|examples/java17-maven-service/**|src/*|src/**|vars/*|vars/**|jenkins-shared-library-tests/*|jenkins-shared-library-tests/**|.github/workflows/toolchain-images.yml)
+                ci/toolchains.json|ci/toolchain-versions.json|ci/supply-chain-policy.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|scripts/ci/toolchain_versions.py|scripts/ci/supply_chain_policy.py|scripts/ci/run_build.py|scripts/ci/collect_build_metadata.py|scripts/ci/resolve_toolchain.py|scripts/ci/package_artifact.py|scripts/ci/verify_artifact.py|examples/*|examples/**|src/*|src/**|vars/*|vars/**|jenkins-shared-library-tests/*|jenkins-shared-library-tests/**|.github/workflows/toolchain-images.yml)
                   relevant=true
                   break
                   ;;
@@ -173,6 +173,20 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm "ci-toolchain-verify:$GITHUB_SHA" bash -euo pipefail -c "$SMOKE_COMMAND"
+
+      - name: Build and test language consumer fixture
+        if: matrix.verification_fixture != ''
+        shell: bash
+        env:
+          FIXTURE: ${{ matrix.verification_fixture }}
+          COMMAND: ${{ matrix.verification_command }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/$FIXTURE,dst=/workspace" \
+            --workdir /workspace \
+            "ci-toolchain-verify:$GITHUB_SHA" \
+            bash -euo pipefail -c "$COMMAND"
 
       - name: Scan candidate vulnerabilities and licenses
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
@@ -487,6 +501,20 @@ jobs:
           immutable_image="${IMAGE}@${DIGEST}"
           docker pull "$immutable_image"
           docker run --rm "$immutable_image" bash -euo pipefail -c "$SMOKE_COMMAND"
+
+      - name: Build and test consumer fixture against exact published digest
+        if: matrix.verification_fixture != ''
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}@${{ steps.push.outputs.digest }}
+          FIXTURE: ${{ matrix.verification_fixture }}
+          COMMAND: ${{ matrix.verification_command }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/$FIXTURE,dst=/workspace" \
+            --workdir /workspace \
+            "$IMAGE" bash -euo pipefail -c "$COMMAND"
 
       - name: Scan exact published digest
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
