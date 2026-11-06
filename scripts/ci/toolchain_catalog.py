@@ -256,6 +256,9 @@ def build_publish_matrix(data: dict, repository_root: Path | None = None, includ
                 "platform": item.get("platforms", ["linux/amd64"])[0],
                 "verification_fixture": item.get("verification_fixture", ""),
                 "verification_command": item.get("verification_command", ""),
+                "consumer_fixture": item.get("consumer_fixture", ""),
+                "jdk_version": item.get("jdk_version", ""),
+                "maven_version": item.get("maven_version", ""),
             }
         )
     return {"include": include}
