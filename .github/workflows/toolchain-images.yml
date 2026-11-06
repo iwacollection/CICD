@@ -6,9 +6,11 @@ on:
     branches: [main]
     paths:
       - "ci/toolchains.json"
+      - "ci/toolchain-versions.json"
       - "ci/supply-chain-policy.json"
       - "docker/toolchains/**"
       - "scripts/ci/toolchain_catalog.py"
+      - "scripts/ci/toolchain_versions.py"
       - "scripts/ci/supply_chain_policy.py"
       - "scripts/ci/run_build.py"
       - "scripts/ci/collect_build_metadata.py"
@@ -67,7 +69,7 @@ jobs:
             relevant=false
             while IFS= read -r path; do
               case "$path" in
-                ci/toolchains.json|ci/supply-chain-policy.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|scripts/ci/supply_chain_policy.py|scripts/ci/run_build.py|scripts/ci/collect_build_metadata.py|scripts/ci/resolve_toolchain.py|scripts/ci/package_artifact.py|scripts/ci/verify_artifact.py|examples/java17-maven-service/*|examples/java17-maven-service/**|src/*|src/**|vars/*|vars/**|jenkins-shared-library-tests/*|jenkins-shared-library-tests/**|.github/workflows/toolchain-images.yml)
+                ci/toolchains.json|ci/toolchain-versions.json|ci/supply-chain-policy.json|docker/toolchains/*|scripts/ci/toolchain_catalog.py|scripts/ci/toolchain_versions.py|scripts/ci/supply_chain_policy.py|scripts/ci/run_build.py|scripts/ci/collect_build_metadata.py|scripts/ci/resolve_toolchain.py|scripts/ci/package_artifact.py|scripts/ci/verify_artifact.py|examples/java17-maven-service/*|examples/java17-maven-service/**|src/*|src/**|vars/*|vars/**|jenkins-shared-library-tests/*|jenkins-shared-library-tests/**|.github/workflows/toolchain-images.yml)
                   relevant=true
                   break
                   ;;
