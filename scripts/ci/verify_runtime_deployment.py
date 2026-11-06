@@ -111,7 +111,9 @@ def verify_runtime(app: dict[str, Any], pods: dict[str, Any], *,
 def main() -> int:
     parser = argparse.ArgumentParser()
     for arg in ("app-json", "pods-json", "application", "namespace", "selector",
-                "expected-image", "expected-revision", "manifest-sha256", "environment"):
+                "expected-image", "expected-revision", "manifest-sha256",
+                "artifact-name", "bundle-sha256", "source-sha", "source-run-id",
+                "environment"):
         parser.add_argument("--" + arg, required=True)
     parser.add_argument("--output", default="runtime-evidence.json")
     args = parser.parse_args()
