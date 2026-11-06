@@ -56,7 +56,7 @@
       "id": "java17-maven",
       "status": "candidate",
       "execution_mode": "container",
-      "description": "Candidate Java 17 build toolchain using Eclipse Temurin 17.0.21+9 and Apache Maven 3.10.0",
+      "description": "Candidate Java 17 build toolchain; previous digest cleared for Ubuntu APT/OpenSSL security reissue.",
       "image": "ghcr.io/iwacollection/cicd-toolchain-java17-maven",
       "digest": "",
       "dockerfile": "docker/toolchains/java/maven-jdk17/Dockerfile",
