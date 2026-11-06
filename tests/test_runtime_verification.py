@@ -102,6 +102,14 @@ class RuntimeVerificationTests(unittest.TestCase):
         self.assertEqual(2, len(calls))
         self.assertEqual("runtime-production", calls[0][2]["environment"])
 
+    def test_registry_refuses_tampered_evidence_hash(self):
+        app, pods = fixture()
+        evidence = verify_runtime(app, pods, **self.kwargs())
+        evidence["verified_pods"][0]["images"][0]["image_id"] = "sha256:" + "d" * 64
+        with self.assertRaisesRegex(ValueError, "evidence SHA256"):
+            register_runtime(api_url="https://api.github.com", repository="example/repo",
+                token="token", workflow_sha="f" * 40, evidence=evidence)
+
     def test_registry_refuses_unhealthy_evidence(self):
         app, pods = fixture()
         evidence = verify_runtime(app, pods, **self.kwargs())
