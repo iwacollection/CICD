@@ -39,6 +39,8 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       count: ${{ steps.matrix.outputs.count }}
+      verify_matrix: ${{ steps.verify_matrix.outputs.matrix }}
+      verify_count: ${{ steps.verify_matrix.outputs.count }}
       consumer_matrix: ${{ steps.consumers.outputs.consumer_matrix }}
       consumer_count: ${{ steps.consumers.outputs.consumer_count }}
       relevant: ${{ steps.scope.outputs.relevant }}
@@ -94,6 +96,20 @@ jobs:
             echo '{"include":[]}'
           fi
 
+      - name: Discover planned and candidate verification images
+        id: verify_matrix
+        shell: bash
+        env:
+          RELEVANT: ${{ steps.scope.outputs.relevant }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEVANT" == "true" ]]; then
+            python3 scripts/ci/toolchain_catalog.py --verify-matrix
+          else
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo 'count=0' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Discover pinned candidate consumers
         id: consumers
         shell: bash
@@ -114,12 +130,12 @@ jobs:
   verify:
     name: Verify / ${{ matrix.toolchain }}
     needs: discover
-    if: needs.discover.outputs.count != '0'
+    if: needs.discover.outputs.verify_count != '0'
     permissions:
       contents: read
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.discover.outputs.verify_matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -209,7 +225,7 @@ jobs:
         env:
           DISCOVER_RESULT: ${{ needs.discover.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
-          MATRIX_COUNT: ${{ needs.discover.outputs.count }}
+          MATRIX_COUNT: ${{ needs.discover.outputs.verify_count }}
           RELEVANT: ${{ needs.discover.outputs.relevant }}
           CONSUMER_COUNT: ${{ needs.discover.outputs.consumer_count }}
           CONSUMER_MATRIX: ${{ needs.discover.outputs.consumer_matrix }}
