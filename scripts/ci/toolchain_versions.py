@@ -98,9 +98,16 @@ def main():
     a = p.parse_args()
     try:
         data = load_versions(Path(a.registry)); catalog = load_toolchain_catalog(Path(a.catalog))
-        if a.matrix: result = build_matrix(data, catalog)
+        selector_values = (a.language, a.version, a.build_tool, a.build_tool_version)
+        if a.matrix:
+            if any(selector_values): p.error('--matrix cannot be combined with version selector arguments')
+            result = build_matrix(data, catalog)
+        elif not any(selector_values):
+            errors = validate_versions(data, catalog)
+            if errors: raise ValueError('invalid version registry: ' + '; '.join(errors))
+            result = {'valid': True, 'combinations': len(data['combinations'])}
         else:
-            if not all((a.language, a.version, a.build_tool, a.build_tool_version)): p.error('all version selector arguments are required')
+            if not all(selector_values): p.error('all version selector arguments are required')
             result = resolve_version(data, catalog, a.language, a.version, a.build_tool, a.build_tool_version, a.for_verification)
     except (OSError, ValueError) as exc:
         print(f'ERROR: {exc}', file=sys.stderr); return 1
