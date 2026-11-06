@@ -57,6 +57,8 @@ GitHub Deployments 是追加式登记记录，保留候选 digest、源码 commi
 - 添加 Environment secret `TOOLCHAIN_PROMOTION_TOKEN`：使用专用 fine-grained PAT，授予本仓库 Contents（读写）、Pull requests（读写）和 Administration（只读，用于检查环境保护规则）；不要使用个人全权限 Token。
 - 禁止部署分支绕过审批；仅允许 `main`。
 - 如组织支持，启用 Prevent self-review。
+- 在 main 的 Ruleset 中设置至少 1 个 required approving review，启用 CODEOWNERS 审批和最后一次 push 必须由其他人批准；CODEOWNERS 必须指向真实的独立安全/平台审批人或团队，不能把 PR 作者本人当成独立审批。
+- Promotion workflow 会读取环境配置并 fail-closed：必须存在 Required reviewers，且 Prevent self-review=true；如果 API token 无法读取环境保护规则或配置缺失，工作流不会登记 approved Deployment，也不会打开 catalog PR。
 
 如果没有配置 Required reviewers，GitHub Environment 不会自动产生人工审批；工作流虽然能运行，但不能据此声称具备人工晋级控制。该配置属于仓库管理权限，不由 PR 代码自动修改。
 
