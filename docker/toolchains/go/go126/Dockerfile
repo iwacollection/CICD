@@ -21,7 +21,7 @@ RUN set -eux; \
     printf '%s  %s\n' "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum --check -; \
     rm -f "/tmp/${go_archive}"; \
     GOTOOLCHAIN=local GOPATH=/tmp/gopath GOBIN=/usr/local/bin GOCACHE=/tmp/gocache \
-      go install "gotest.tools/gotestsum${GOTESTSUM_VERSION}"; \
+      go install "gotest.tools/gotestsum@${GOTESTSUM_VERSION}"; \
     rm -rf /tmp/gopath /tmp/gocache; \
     git config --system --add safe.directory /workspace; \
     mkdir -p /home/ci /workspace; \
