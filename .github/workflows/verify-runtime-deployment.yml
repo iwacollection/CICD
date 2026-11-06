@@ -142,6 +142,9 @@ jobs:
           EXPECTED_IMAGE: ${{ inputs.expected_image }}
           SOURCE_SHA: ${{ steps.archive.outputs.source_sha }}
           SOURCE_RUN_ID: ${{ steps.archive.outputs.workflow_run_id }}
+          RELEASE_TAG: ${{ steps.archive.outputs.release_tag }}
+          TOOLCHAIN_IDENTITY: ${{ steps.archive.outputs.toolchain_identity }}
+          TOOLCHAIN_CONTAINER_IMAGE: ${{ steps.archive.outputs.container_image }}
         run: |
           set -euo pipefail
           [[ "$POINTER_ID" =~ ^[0-9]+$ ]]
@@ -154,7 +157,10 @@ jobs:
             --arg manifest "$MANIFEST_SHA256" \
             --arg image "$EXPECTED_IMAGE" \
             --arg source "$SOURCE_SHA" \
-            --arg run "$SOURCE_RUN_ID" '
+            --arg run "$SOURCE_RUN_ID" \
+            --arg release "$RELEASE_TAG" \
+            --arg toolchain "$TOOLCHAIN_IDENTITY" \
+            --arg builder "$TOOLCHAIN_CONTAINER_IMAGE" '
               .environment == $env
               and .artifact_name == $artifact
               and .bundle_sha256 == $bundle
@@ -162,6 +168,9 @@ jobs:
               and .application_image == $image
               and .source_sha == $source
               and .source_run_id == $run
+              and .release_tag == $release
+              and .toolchain_identity == $toolchain
+              and .container_image == $builder
             ' deployment-pointer.json >/dev/null
 
       - name: Verify archived GitHub attestations
