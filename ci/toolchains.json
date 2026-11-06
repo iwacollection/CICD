@@ -148,7 +148,7 @@
       "id": "gcc12",
       "status": "planned",
       "execution_mode": "container",
-      "description": "Isolated planned GCC/G++ 12 toolchain installed from a fixed Ubuntu 24.04 APT snapshot; compiler major version is asserted by smoke tests.",
+      "description": "Isolated planned GCC/G++ 12.5 toolchain installed from a fixed Ubuntu 26.10 APT snapshot; compiler major version is asserted by smoke tests.",
       "image": "ghcr.io/iwacollection/cicd-toolchain-gcc12",
       "digest": "",
       "dockerfile": "docker/toolchains/gcc/gcc12/Dockerfile",
@@ -159,12 +159,12 @@
       "smoke_command": "bash /usr/local/bin/gcc-toolchain-smoke",
       "language": "cpp",
       "compiler": "gcc-12/g++-12",
-      "base_os": "Ubuntu 24.04",
+      "base_os": "Ubuntu 26.10",
       "apt_snapshot": "20261105T000000Z",
       "owner": "ci-platform",
       "verification_fixture": "examples/cpp-gcc12-service",
       "verification_command": "cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=g++-12 && cmake --build build && ctest --test-dir build --output-on-failure",
-      "compiler_version": "12.4.0-2ubuntu1~24.04.1"
+      "compiler_version": "12.5.0-9ubuntu1"
     }
   ]
 }
