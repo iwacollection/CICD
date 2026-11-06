@@ -96,7 +96,9 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertTrue(validate_sbom({"bomFormat": "SPDX"}))
 
     def test_capability_container_pins_security_fixed_ubuntu_packages(self) -> None:
-        dockerfile = (ROOT / "examples" / "capability-service" / "Dockerfile").read_text(encoding="utf-8")
+        dockerfile_path = ROOT / "examples" / "capability-service" / "Dockerfile"
+        dockerfile = dockerfile_path.read_text(encoding="utf-8")
+        self.assertEqual(validate_dockerfile(dockerfile_path, self.policy), [])
         self.assertIn('APT::Snapshot "20261105T000000Z"', dockerfile)
         self.assertIn("apt=2.8.4ubuntu0.1", dockerfile)
         self.assertIn("libssl3t64=3.0.13-0ubuntu3.16", dockerfile)
