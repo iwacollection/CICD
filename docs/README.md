@@ -40,6 +40,7 @@
 - [容器化构建环境](containerized-build-environments.md)：如何固定构建环境，减少机器差异。
 - [Java 工具链管理](java-toolchain-management.md)：管理不同版本 JDK 和 Java 构建工具。
 - [Jenkins Java Toolchain Shared Library](jenkins-shared-library.md)：Jenkins 项目如何调用统一 Java 工具链。
+- [Jenkins Go / C++ 端到端验收](native-jenkins-e2e-acceptance.md)：Go Candidate 晋级、Go/C++ 示例项目接入、Jenkins 凭据与真实验收证据。
 - [平台运维、可观测性与容量](operations-observability-and-capacity.md)：排查排队、执行时间和 Runner 容量问题。
 
 ### 4. 构建完成后，怎样证明制品可信
