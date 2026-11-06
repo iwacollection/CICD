@@ -509,6 +509,7 @@ jobs:
           IMAGE: ${{ matrix.image }}
           DIGEST: ${{ steps.push.outputs.digest }}
           DOCKERFILE: ${{ matrix.dockerfile }}
+          CONTEXT: ${{ matrix.context }}
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
@@ -517,7 +518,16 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import sys
           from pathlib import Path
+
+          sys.path.insert(0, "scripts/ci")
+          from toolchain_catalog import build_context_sha256, candidate_build_definition_sha256
+
+          catalog = json.loads(Path("ci/toolchains.json").read_text(encoding="utf-8"))
+          item = next(x for x in catalog["toolchains"] if x["id"] == os.environ["TOOLCHAIN"])
+          context_sha256 = build_context_sha256(Path.cwd(), os.environ["CONTEXT"])
+          definition_sha256 = candidate_build_definition_sha256(item, context_sha256)
 
           record = {
               "schema_version": 2,
@@ -528,6 +538,9 @@ jobs:
               "source_commit": os.environ["GITHUB_SHA"],
               "dockerfile": os.environ["DOCKERFILE"],
               "dockerfile_sha256": os.environ["DOCKERFILE_SHA"],
+              "context": os.environ["CONTEXT"],
+              "build_context_sha256": context_sha256,
+              "build_definition_sha256": definition_sha256,
               "platform": os.environ["PLATFORM"],
               "workflow_run_id": os.environ["GITHUB_RUN_ID"],
               "supply_chain_policy": "ci/supply-chain-policy.json",
