@@ -117,6 +117,7 @@ jobs:
           --toolchain-identity "$TOOLCHAIN_IDENTITY"
           --container-image "$CONTAINER_IMAGE"
           --manifest-sha256 "$MANIFEST_SHA256"
+          --application-image "$APPLICATION_IMAGE"
 
       - name: Verify archived bytes and manifest identity
         shell: bash
