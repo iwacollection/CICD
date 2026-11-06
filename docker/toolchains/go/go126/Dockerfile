@@ -1,4 +1,4 @@
-FROM golang:1.26.10-trixie@sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42
+FROM golang:1.26.10-bookworm@sha256:2dcb1e14f35e4cc1db2186947cba2d19a9fce4d48a27c50658bd203c90fcc183
 
 ARG GO_VERSION=1.26.10
 ARG GO_SHA256=ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5
@@ -11,14 +11,12 @@ ARG X_TEXT_VERSION=v0.41.0
 # independently, then build gotestsum with patched, pinned Go module dependencies.
 RUN set -eux; \
     printf '%s\n' \
-      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261106T000000Z trixie main' \
-      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20261106T000000Z trixie-security main' \
+      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261106T000000Z bookworm main' \
+      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20261106T000000Z bookworm-security main' \
       > /etc/apt/sources.list; \
     rm -f /etc/apt/sources.list.d/debian.sources; \
     apt-get update; \
     apt-get upgrade -y; \
-    apt-get install -y --no-install-recommends linux-libc-dev=6.12.115-2; \
-    test "$(dpkg-query -W -f='${Version}' linux-libc-dev)" = "6.12.115-2"; \
     test "$(go env GOVERSION)" = "go${GO_VERSION}"; \
     command -v gcc; \
     command -v git; \
@@ -41,7 +39,7 @@ RUN set -eux; \
     cd /; \
     rm -rf "$tooling_dir" /tmp/gopath /tmp/gocache /root/go/pkg/mod /root/.cache/go-build; \
     rm -f /usr/local/go/src/crypto/internal/boring/Dockerfile /usr/local/go/src/crypto/internal/fips140/nistec/fiat/Dockerfile; \
-    dpkg --purge apt libapt-pkg7.0; \
+    dpkg --purge apt libapt-pkg6.0; \
     ! command -v apt; \
     rm -rf /var/lib/apt/lists/*; \
     git config --system --add safe.directory /workspace; \
@@ -69,8 +67,8 @@ RUN chmod 0755 /usr/local/bin/go-toolchain-smoke
 
 LABEL org.opencontainers.image.title="CICD Go 1.26 toolchain" \
       org.opencontainers.image.description="Pinned official Go build image with cgo (gcc), git, make and gotestsum" \
-      org.opencontainers.image.base.name="golang:1.26.10-trixie" \
-      org.opencontainers.image.base.digest="sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42" \
+      org.opencontainers.image.base.name="golang:1.26.10-bookworm" \
+      org.opencontainers.image.base.digest="sha256:2dcb1e14f35e4cc1db2186947cba2d19a9fce4d48a27c50658bd203c90fcc183" \
       org.opencontainers.image.version="1.26.10" \
       org.opencontainers.image.vendor="The Go Authors / gotestsum"
 
