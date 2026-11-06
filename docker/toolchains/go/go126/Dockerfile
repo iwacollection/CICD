@@ -3,6 +3,11 @@ FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN printf '%s\n' 'APT::Snapshot "20261029T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+    && printf '%s\n' \
+       'Acquire::Retries "5";' \
+       'Acquire::https::Timeout "60";' \
+       'Acquire::http::Timeout "60";' \
+       > /etc/apt/apt.conf.d/80-retries \
     && apt-get -o Acquire::https::Verify-Peer=false update \
     && apt-get -o Acquire::https::Verify-Peer=false install -y --no-install-recommends ca-certificates \
     && apt-get update \
