@@ -1,0 +1,179 @@
+name: Promote Toolchain Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      toolchain:
+        description: "Exact candidate toolchain ID"
+        required: true
+        type: string
+      digest:
+        description: "Exact registered sha256 digest (not a tag)"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  attestations: read
+  contents: write
+  deployments: write
+  packages: read
+  pull-requests: write
+
+concurrency:
+  group: toolchain-promotion-${{ inputs.toolchain }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: toolchain-production
+    steps:
+      - name: Checkout trusted verifier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: true
+
+      - name: Login GHCR read-only
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2 / Cosign v3.0.6
+
+      - name: Load exact registered candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/toolchain_registry.py inspect \
+            --toolchain "$TOOLCHAIN" --digest "$DIGEST" > candidate.json
+          test "$(jq -r .toolchain candidate.json)" = "$TOOLCHAIN"
+          test "$(jq -r .digest candidate.json)" = "$DIGEST"
+          echo "IMAGE=$(jq -r .immutable_reference candidate.json)" >> "$GITHUB_ENV"
+          echo "SOURCE_COMMIT=$(jq -r .source_commit candidate.json)" >> "$GITHUB_ENV"
+
+      - name: Independently verify image signature
+        run: |
+          set -euo pipefail
+          cosign verify "$IMAGE" \
+            --certificate-identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/toolchain-images.yml@refs/heads/main" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+
+      - name: Independently verify digest-bound CycloneDX SBOM
+        run: |
+          set -euo pipefail
+          cosign verify-attestation --type cyclonedx "$IMAGE" \
+            --certificate-identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/toolchain-images.yml@refs/heads/main" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" > sbom-attestation.json
+          jq -e '.[0].payload' sbom-attestation.json >/dev/null
+          jq -r '.[0].payload' sbom-attestation.json | base64 --decode > sbom-statement.json
+          jq -e '.subject[] | select(.digest.sha256 == env.EXPECTED_DIGEST)' sbom-statement.json >/dev/null
+          jq '.predicate' sbom-statement.json > verified-sbom.cdx.json
+        env:
+          EXPECTED_DIGEST: ${{ inputs.digest }}
+
+      - name: Independently verify GitHub SLSA provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://$IMAGE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/toolchain-images.yml" \
+            --source-ref "refs/heads/main"
+
+      - name: Re-scan exact digest at promotion time
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: image
+          image-ref: ${{ inputs.digest != '' && format('{0}', env.IMAGE) || '' }}
+          scanners: vuln,misconfig,secret,license
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          format: json
+          output: promotion-security.json
+          exit-code: "0"
+          version: v0.70.0
+
+      - name: Enforce current scan and verified SBOM policy
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/supply_chain_policy.py \
+            --skip-dockerfiles \
+            --report promotion-security.json \
+            --sbom verified-sbom.cdx.json \
+            --toolchain "$TOOLCHAIN" \
+            --image-digest "$DIGEST"
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          DIGEST: ${{ inputs.digest }}
+
+      - name: Record human-approved candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/toolchain_registry.py approve \
+            --toolchain "$TOOLCHAIN" --digest "$DIGEST" > approval.json
+
+      - name: Open catalog promotion PR (does not merge)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          catalog_path = Path("ci/toolchains.json")
+          catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+          item = next((x for x in catalog["toolchains"] if x["id"] == os.environ["TOOLCHAIN"]), None)
+          if item is None or item.get("status") != "candidate":
+              raise SystemExit("only an existing candidate can be promoted")
+          candidate = json.loads(Path("candidate.json").read_text(encoding="utf-8"))
+          if candidate["digest"] != os.environ["DIGEST"]:
+              raise SystemExit("candidate digest changed during promotion")
+          item["digest"] = os.environ["DIGEST"]
+          item["status"] = "active"
+          item["promotion_deployment_id"] = json.loads(Path("approval.json").read_text(encoding="utf-8"))["deployment_id"]
+          catalog_path.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+          branch = "promote-toolchain-" + os.environ["TOOLCHAIN"] + "-" + os.environ["DIGEST"].split(":")[1][:12]
+          subprocess.run(["git", "switch", "-c", branch], check=True)
+          subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+          subprocess.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=True)
+          subprocess.run(["git", "add", str(catalog_path)], check=True)
+          subprocess.run(["git", "commit", "-m", "ci: promote " + os.environ["TOOLCHAIN"] + " to active"], check=True)
+          subprocess.run(["git", "push", "origin", "HEAD:refs/heads/" + branch], check=True)
+          title = "ci: promote " + os.environ["TOOLCHAIN"] + " " + os.environ["DIGEST"]
+          body = "Protected-environment approval completed.\n\n- Toolchain: " + os.environ["TOOLCHAIN"] + "\n- Immutable digest: " + os.environ["DIGEST"] + "\n- Candidate registry record and signature/SBOM/provenance were independently verified.\n- This PR requires normal code review and does not auto-merge."
+          subprocess.run(["gh", "pr", "create", "--base", "main", "--head", branch, "--title", title, "--body", body], check=True, env={**os.environ, "GH_TOKEN": os.environ["GH_TOKEN"]})
+          PY
+
+      - name: Promotion summary
+        run: |
+          {
+            echo "### Toolchain promotion review opened"
+            echo "- Toolchain: $TOOLCHAIN"
+            echo "- Immutable digest: $DIGEST"
+            echo "- Candidate registration: verified"
+            echo "- Cosign signature: independently verified"
+            echo "- CycloneDX SBOM attestation: independently verified"
+            echo "- GitHub SLSA provenance: independently verified"
+            echo "- Current vulnerability/secret/license/misconfiguration policy: passed"
+            echo "- Catalog update: PR opened; no automatic merge"
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          DIGEST: ${{ inputs.digest }}
