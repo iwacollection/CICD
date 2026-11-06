@@ -681,6 +681,7 @@ jobs:
               "scan_report_sha256": __import__("hashlib").sha256(json.dumps(json.loads(Path("published-security.json").read_text()), sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
               "signature_verified": True,
               "sbom_attestation_verified": True,
+              "scan_attestation_verified": True,
               "provenance_verified": True,
               "security_policy_passed": True,
               "supply_chain_policy": "ci/supply-chain-policy.json",
