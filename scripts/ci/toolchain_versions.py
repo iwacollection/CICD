@@ -1,6 +1,6 @@
 # Toolchain version resolver
 from __future__ import annotations
-import argparse, json, os, sys
+import argparse, json, os, re, sys
 from pathlib import Path
 from toolchain_catalog import immutable_reference, index_toolchains, load_toolchain_catalog, validate_toolchain_catalog
 
@@ -60,11 +60,29 @@ def validate_versions(data, catalog):
         if status not in STATUSES:
             errors.append(f'{p}.status is invalid')
         tid = item.get('toolchain_id', '')
-        if status in {'active', 'candidate'}:
-            if not tid or tid not in catalog_index:
+        if status in {'active', 'candidate', 'planned'}:
+            if status in {'active', 'candidate'} and not tid:
                 errors.append(f'{p} runnable combination requires a known toolchain_id')
-            elif catalog_index[tid].get('status') != status:
-                errors.append(f'{p} status does not match toolchain catalog')
+            elif tid and tid not in catalog_index:
+                errors.append(f'{p} references unknown toolchain_id: {tid}')
+            elif tid:
+                definition = catalog_index[tid]
+                if definition.get('status') != status:
+                    errors.append(f'{p} status does not match toolchain catalog')
+                if item.get('language') == 'java':
+                    if definition.get('jdk_version') != item.get('language_version'):
+                        errors.append(f'{p} JDK version does not match toolchain metadata')
+                    if definition.get('maven_version') != item.get('build_tool_version'):
+                        errors.append(f'{p} Maven version does not match toolchain metadata')
+                elif item.get('language') == 'go':
+                    if definition.get('go_version') != item.get('language_version'):
+                        errors.append(f'{p} Go version does not match toolchain metadata')
+                    if item.get('build_tool_version') != item.get('language_version'):
+                        errors.append(f'{p} Go build tool version must equal language version')
+                elif item.get('language') == 'cpp' and item.get('build_tool') == 'gcc':
+                    expected = f"gcc-{item.get('language_version')}/g++-{item.get('language_version')}"
+                    if definition.get('compiler') != expected:
+                        errors.append(f'{p} GCC compiler identity does not match toolchain metadata')
         elif tid:
             errors.append(f'{p} non-runnable combination must not bind a toolchain_id')
     return errors
