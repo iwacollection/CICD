@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 from pathlib import Path
@@ -135,9 +136,9 @@ def normalize_identity(
 
 
 def pointer_matches(pointer: dict[str, Any], identity: dict[str, str]) -> bool:
-    # The five original fields remain the cross-environment identity contract.
-    # New trace fields are enforced whenever present; legacy deployments can
-    # still be traced through their immutable bundle -> manifest archive.
+    # Every trace field, including application_image, is part of the exact
+    # cross-environment identity. An image digest cannot be silently dropped
+    # or changed between dev, staging and production.
     required = ("artifact_name", "bundle_sha256", "source_sha", "source_run_id", "release_tag")
     if not all(str(pointer.get(field, "")) == identity[field] for field in required):
         return False
