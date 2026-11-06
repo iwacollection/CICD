@@ -294,7 +294,8 @@ class CiPlatformTests(unittest.TestCase):
             item["toolchain"]
             for item in build_publish_matrix(self.toolchains)["include"]
         ]
-        self.assertNotIn("java17-maven", published_ids)
+        self.assertIn("java17-maven", published_ids)
+        self.assertIn("go126", published_ids)
 
     def test_published_candidate_context_mismatch_fails_closed(self) -> None:
         published = deepcopy(self.toolchains)
@@ -302,6 +303,7 @@ class CiPlatformTests(unittest.TestCase):
             item for item in published["toolchains"]
             if item["id"] == "java17-maven"
         )
+        java17["digest"] = "sha256:" + "a" * 64
         java17["build_context_sha256"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "build context changed.*clear digest"):
             build_publish_matrix(published)
@@ -312,6 +314,10 @@ class CiPlatformTests(unittest.TestCase):
             item for item in published["toolchains"]
             if item["id"] == "java17-maven"
         )
+        java17["digest"] = "sha256:" + "a" * 64
+        context_digest = build_context_sha256(ROOT, java17["context"])
+        java17["build_context_sha256"] = context_digest
+        java17["build_definition_sha256"] = candidate_build_definition_sha256(java17, context_digest)
         java17["smoke_command"] = "bash /usr/local/bin/skip-smoke"
         with self.assertRaisesRegex(ValueError, "build definition changed.*clear digest"):
             build_publish_matrix(published)
@@ -340,16 +346,17 @@ class CiPlatformTests(unittest.TestCase):
         self.assertEqual(java17["guava_version"], "33.7.2-jre")
         self.assertEqual(
             java17["digest"],
-            "sha256:3b3c558e4a94ab6f71b059ccd7f23ea60a6f76082844b428645015b1413ce9f7",
+            "",
         )
         self.assertEqual(
             java17["build_context_sha256"],
-            "156feed5a12816cd87b77009bf0519f84d85e4d2959f2d3fc3f9ab10fa13fd37",
+            "",
         )
         self.assertEqual(
             java17["build_definition_sha256"],
-            "d3b6001d106ea4bd7f51678dd9958c066d873089939029f9ca1cc33979e5300d",
+            "",
         )
+        self.assertEqual(java17["apt_snapshot"], "20261105T000000Z")
         self.assertEqual(
             java17["image"],
             "ghcr.io/iwacollection/cicd-toolchain-java17-maven",
