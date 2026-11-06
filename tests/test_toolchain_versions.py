@@ -29,6 +29,9 @@ class ToolchainVersionRegistryTests(unittest.TestCase):
     def test_planned_combination_is_not_runnable(self):
         with self.assertRaisesRegex(ValueError, 'is planned'):
             resolve_version(self.registry, self.catalog, 'go', '1.25.14', 'go', '1.25.14', True)
+    def test_retired_combination_is_not_runnable(self):
+        with self.assertRaisesRegex(ValueError, 'is retired'):
+            resolve_version(self.registry, self.catalog, 'go', '1.25.14', 'go', '1.25.14', True)
     def test_unknown_patch_version_fails_closed(self):
         with self.assertRaisesRegex(ValueError, 'matches=0'):
             resolve_version(self.registry, self.catalog, 'go', '1.26', 'go', '1.26', True)
