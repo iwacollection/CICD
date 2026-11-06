@@ -25,7 +25,8 @@ class ToolchainVersionRegistryTests(unittest.TestCase):
     def test_verification_can_resolve_candidate_digest(self):
         result = resolve_version(self.registry, self.catalog, 'java', '17.0.21+9', 'maven', '3.10.0', True)
         self.assertEqual('java17-maven', result['toolchain_id'])
-        self.assertIn('@sha256:', result['immutable_reference'])
+        self.assertEqual('', result['immutable_reference'])
+        self.assertTrue(result['verification_requires_image_build'])
     def test_planned_combination_is_not_runnable(self):
         with self.assertRaisesRegex(ValueError, 'is planned'):
             resolve_version(self.registry, self.catalog, 'java', '21.0.12.1+1', 'maven', '3.10.0', True)
