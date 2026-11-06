@@ -2,19 +2,19 @@ FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Pin the post-USN-8996-1 snapshot and install fixed APT/OpenSSL packages.
-# Retries are disabled until the fixed APT package is installed; this avoids
-# the retry condition in CVE-2026-109518 during the CA bootstrap.
-RUN printf '%s\n' 'APT::Snapshot "20261105T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
-    && apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
-    && apt-get -o Acquire::Retries=0 install -y --no-install-recommends ca-certificates \
-    && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
-    && apt-get -o Acquire::Retries=0 install -y --no-install-recommends \
-       apt=2.8.4ubuntu0.1 \
-       libapt-pkg6.0t64=2.8.4ubuntu0.1 \
-       libssl3t64=3.0.13-0ubuntu3.16 \
-    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+# Freeze the entire Ubuntu archive dependency graph at one UTC snapshot.
+# 2026-08-28 is deliberately after the Ubuntu 24.04 kernel security updates
+# that fixed CVE-2026-53224 / CVE-2026-64531 in linux 6.8.0-138.138.
+# The minimal Ubuntu base does not contain CA certificates. The first two APT
+# commands therefore disable only HTTPS peer verification while APT still
+# verifies the fixed Snapshot metadata and packages through Ubuntu's archive
+# signing key and package hashes. Once ca-certificates is installed, all
+# subsequent Snapshot access returns to normal TLS verification.
+RUN printf '%s\n' 'APT::Snapshot "20260828T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+    && apt-get -o Acquire::https::Verify-Peer=false update \
+    && apt-get -o Acquire::https::Verify-Peer=false install -y --no-install-recommends ca-certificates \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
        bash \
        build-essential \
        cmake \
