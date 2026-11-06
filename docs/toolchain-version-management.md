@@ -12,7 +12,7 @@ ci/toolchains.json 记录工具链实际执行身份：镜像、digest、Dockerf
 | Java | Temurin 21.0.12.1+1 + Maven 3.10.0 | planned | 需单独构建和验证 JDK 21 镜像 |
 | Go | Go 1.26.10 | candidate | 已登记构建定义，待镜像构建/发布闭环 |
 | Go | Go 1.25 | planned | 需选定具体补丁版本并固定上游校验和 |
-| C/C++ | GCC 13 | active | 当前 GCC 容器工具链；实际补丁版本以 smoke 输出为准 |
+| C/C++ | GCC 13 | active | 当前 GCC 容器工具链；GCC 13 主版本来自 Ubuntu 24.04 构建环境，需在后续 smoke 中加入强制断言 |
 | C/C++ | GCC 12 | planned | 需独立镜像，不能复用 GCC 13 镜像 |
 | C/C++ | Clang 18 | planned | 需独立镜像及链接器、运行时兼容性测试 |
 
@@ -28,7 +28,7 @@ planned 只代表已登记的版本目标，不代表仓库已有镜像，也不
 
     python3 scripts/ci/toolchain_versions.py --matrix
 
-矩阵只包含 active 与 candidate 组合，并携带组合 ID、语言版本、构建工具版本、工具链 ID、状态、镜像 digest、Dockerfile、构建上下文和 smoke 命令。
+矩阵只包含 active 与 candidate 组合，并携带组合 ID、语言版本、构建工具版本、工具链 ID、状态、镜像 digest、Dockerfile、构建上下文和 smoke 命令。工具链镜像工作流也监听版本注册表变更，以便候选镜像进入构建/扫描流程。
 
 - 有 digest 的组合：拉取并验证固定镜像。
 - 没有 digest 的候选组合：先构建候选镜像，再执行 smoke、安全扫描和 SBOM；发布后登记 digest。
