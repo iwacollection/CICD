@@ -22,14 +22,15 @@ RUN set -eux; \
     printf '%s  %s\\n' "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum --check -; \
     rm -f "/tmp/${go_archive}"; \
     tooling_dir="$(mktemp -d)"; \
+    mkdir -p /tmp/gopath /tmp/gocache; \
     cd "$tooling_dir"; \
-    GOTOOLCHAIN=local go mod init cicd-toolchain-tools; \
-    GOTOOLCHAIN=local go get "gotest.tools/gotestsum@${GOTESTSUM_VERSION}"; \
-    GOTOOLCHAIN=local go get "golang.org/x/mod@${X_MOD_VERSION}" "golang.org/x/text@${X_TEXT_VERSION}"; \
+    GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go mod init cicd-toolchain-tools; \
+    GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go get "gotest.tools/gotestsum@${GOTESTSUM_VERSION}"; \
+    GOTOOLCHAIN=local GOPATH=/tmp/gopath GOCACHE=/tmp/gocache go get "golang.org/x/mod@${X_MOD_VERSION}" "golang.org/x/text@${X_TEXT_VERSION}"; \
     GOTOOLCHAIN=local GOPATH=/tmp/gopath GOBIN=/usr/local/bin GOCACHE=/tmp/gocache \
       go install gotest.tools/gotestsum; \
     cd /; \
-    rm -rf "$tooling_dir" /tmp/gopath /tmp/gocache; \
+    rm -rf "$tooling_dir" /tmp/gopath /tmp/gocache /root/go/pkg/mod /root/.cache/go-build; \
     dpkg --purge apt libapt-pkg6.0; \
     ! command -v apt-get; \
     git config --system --add safe.directory /workspace; \
