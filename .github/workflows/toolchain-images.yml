@@ -148,23 +148,17 @@ jobs:
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build candidate locally
-        shell: bash
-        env:
-          DOCKERFILE: ${{ matrix.dockerfile }}
-          CONTEXT: ${{ matrix.context }}
-          PLATFORM: ${{ matrix.platform }}
-          TOOLCHAIN: ${{ matrix.toolchain }}
-        run: |
-          set -euo pipefail
-          docker buildx build \
-            --pull \
-            --load \
-            --platform "$PLATFORM" \
-            --cache-from "type=gha,scope=toolchain-$TOOLCHAIN" \
-            --cache-to "type=gha,mode=max,scope=toolchain-$TOOLCHAIN" \
-            -f "$DOCKERFILE" \
-            -t "ci-toolchain-verify:$GITHUB_SHA" \
-            "$CONTEXT"
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          tags: ci-toolchain-verify:${{ github.sha }}
+          load: true
+          # Base image digests are pinned; do not force a remote pull each run.
+          cache-from: type=gha,scope=toolchain-${{ matrix.toolchain }}
+          cache-to: type=gha,mode=max,scope=toolchain-${{ matrix.toolchain }}
+          provenance: false
 
       - name: Smoke test candidate
         shell: bash

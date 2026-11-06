@@ -1,10 +1,8 @@
 FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
 ARG DEBIAN_FRONTEND=noninteractive
-RUN printf '%s\n' 'APT::Snapshot "20261029T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
-    && apt-get -o Acquire::Retries=8 -o Acquire::https::Timeout=30 -o APT::Update::Error-Mode=any -o Acquire::https::Verify-Peer=false update \
-    && apt-get -o Acquire::Retries=8 -o Acquire::https::Timeout=30 -o Acquire::https::Verify-Peer=false install -y --no-install-recommends ca-certificates \
-    && apt-get -o Acquire::Retries=8 -o Acquire::https::Timeout=30 -o APT::Update::Error-Mode=any update \
-    && apt-get -o Acquire::Retries=8 -o Acquire::https::Timeout=30 install -y --no-install-recommends curl git build-essential \
+RUN printf '%s\n' 'APT::Snapshot "20261105T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+    && apt-get -o Acquire::Retries=0 -o Acquire::https::Timeout=30 -o Acquire::Queue-Mode=access -o APT::Update::Error-Mode=any -o Acquire::https::Verify-Peer=false update \
+    && apt-get -o Acquire::Retries=0 -o Acquire::https::Timeout=30 -o Acquire::Queue-Mode=access -o Acquire::https::Verify-Peer=false install -y --no-install-recommends ca-certificates apt=2.8.4ubuntu0.1 curl git build-essential \
     && rm -rf /var/lib/apt/lists/*
 ARG GO_VERSION=1.25.14
 ARG GO_SHA256=a21ae5633a269bcd7e90cf767e48225633795e99d831742cbf3397064fee7712

@@ -2,6 +2,9 @@
 set -euo pipefail
 test "$(java -version 2>&1 | sed -n '1s/.*version "\([^"]*\)".*/\1/p')" = "21.0.12.1"
 test "$(mvn --version 2>&1 | sed -n '1s/^Apache Maven \([^ ]*\).*/\1/p')" = "3.10.0"
+test "$(dpkg-query -W -f='${Version}' apt)" = "2.8.4ubuntu0.1"
+test -f "$MAVEN_HOME/lib/guava-33.7.2-jre.jar"
+test ! -e "$MAVEN_HOME/lib/guava-33.7.1-jre.jar"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/src/main/java"

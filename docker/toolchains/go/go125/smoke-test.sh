@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 test "$(go env GOVERSION)" = "go1.25.14"
+test "$(dpkg-query -W -f='${Version}' apt)" = "2.8.4ubuntu0.1"
 test "$(go env GOTOOLCHAIN)" = "local"
 test "$(go env CGO_ENABLED)" = "1"
 tmp="$(mktemp -d)"

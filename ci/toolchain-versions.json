@@ -30,7 +30,7 @@
       "build_tool_version": "3.10.0",
       "toolchain_id": "java21-maven",
       "status": "planned",
-      "notes": "Dedicated image definition added; remains planned until CI build, smoke, scan, SBOM, publication and consumer verification complete."
+      "notes": "Dedicated image pins Temurin, Maven and patched Guava 33.7.2-jre; remains planned until CI verification, SBOM and consumer checks complete."
     },
     {
       "id": "go-1.26.10",

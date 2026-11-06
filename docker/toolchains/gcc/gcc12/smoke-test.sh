@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+test "$(dpkg-query -W -f='${Version}' apt)" = "2.8.4ubuntu0.1"
 test "$(dpkg-query -W -f='${Version}' gcc-12)" = "12.4.0-2ubuntu1~24.04.1"
 test "$(dpkg-query -W -f='${Version}' g++-12)" = "12.4.0-2ubuntu1~24.04.1"
 test "$(gcc-12 -dumpfullversion -dumpversion)" = "12.4.0"
