@@ -182,7 +182,14 @@ jobs:
           COMMAND: ${{ matrix.verification_command }}
         run: |
           set -euo pipefail
+          # Match the mounted workspace to the Runner UID/GID. The toolchain image
+          # is intentionally non-root; without this mapping, Go/CMake cannot write
+          # build caches or outputs into the host-owned checkout mount.
           docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
+            --env GOPATH=/tmp/go \
+            --env GOCACHE=/tmp/go-build \
             --mount "type=bind,src=$GITHUB_WORKSPACE/$FIXTURE,dst=/workspace" \
             --workdir /workspace \
             "ci-toolchain-verify:$GITHUB_SHA" \
