@@ -197,7 +197,7 @@ jobs:
           image-ref: ci-toolchain-verify:${{ github.sha }}
           scanners: vuln,misconfig,secret,license
           severity: HIGH,CRITICAL
-          ignore-unfixed: true
+          ignore-unfixed: false
           format: json
           output: toolchain-security.json
           exit-code: "0"
@@ -218,6 +218,8 @@ jobs:
           --skip-dockerfiles
           --report toolchain-security.json
           --sbom toolchain-sbom.cdx.json
+          --toolchain "${{ matrix.toolchain }}"
+          --image-digest "$(docker image inspect ci-toolchain-verify:$GITHUB_SHA --format '{{.Id}}')"
 
       - name: Verify source identity
         shell: bash
@@ -309,6 +311,27 @@ jobs:
           set -euo pipefail
           cosign verify "$IMAGE" \
             --certificate-identity="https://github.com/${{ github.repository }}/.github/workflows/toolchain-images.yml@refs/heads/main" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+
+      - name: Independently verify Candidate provenance
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.immutable_reference }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "oci://$IMAGE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/toolchain-images.yml" \
+            --source-ref "refs/heads/main"
+
+      - name: Independently verify digest-bound CycloneDX SBOM
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.immutable_reference }}
+        run: |
+          set -euo pipefail
+          cosign verify-attestation --type cyclonedx "$IMAGE" \
+            --certificate-identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/toolchain-images.yml@refs/heads/main" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
 
       - name: Pull exact Candidate digest
@@ -456,6 +479,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+      deployments: write
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -554,9 +578,24 @@ jobs:
           --skip-dockerfiles
           --report published-security.json
           --sbom published-sbom.cdx.json
+          --toolchain "${{ matrix.toolchain }}"
+          --image-digest "${{ steps.push.outputs.digest }}"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2 / Cosign v3.0.6
+
+      - name: Attach digest-bound CycloneDX SBOM attestation
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          immutable_image="${IMAGE}@${DIGEST}"
+          cosign attest --yes --type cyclonedx --predicate published-sbom.cdx.json "$immutable_image"
+          cosign verify-attestation --type cyclonedx "$immutable_image" \
+            --certificate-identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/toolchain-images.yml@refs/heads/main" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
 
       - name: Cosign exact published digest
         shell: bash
@@ -577,6 +616,20 @@ jobs:
           subject-name: ${{ matrix.image }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+      - name: Independently verify GitHub provenance for exact digest
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
+          gh attestation verify "oci://${IMAGE}@${DIGEST}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/toolchain-images.yml" \
+            --source-ref "refs/heads/main"
 
       - name: Generate promotion record
         shell: bash
@@ -606,7 +659,8 @@ jobs:
           definition_sha256 = candidate_build_definition_sha256(item, context_sha256)
 
           record = {
-              "schema_version": 2,
+              "schema_version": 3,
+              "kind": "toolchain-image-registry",
               "toolchain": os.environ["TOOLCHAIN"],
               "image": os.environ["IMAGE"],
               "digest": os.environ["DIGEST"],
@@ -619,6 +673,13 @@ jobs:
               "build_definition_sha256": definition_sha256,
               "platform": os.environ["PLATFORM"],
               "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
+              "sbom_sha256": __import__("hashlib").sha256(Path("published-sbom.cdx.json").read_bytes()).hexdigest(),
+              "scan_report_sha256": __import__("hashlib").sha256(Path("published-security.json").read_bytes()).hexdigest(),
+              "signature_verified": True,
+              "sbom_attestation_verified": True,
+              "provenance_verified": True,
+              "security_policy_passed": True,
               "supply_chain_policy": "ci/supply-chain-policy.json",
               "cosign_verified": True,
               "buildkit_sbom": True,
@@ -629,6 +690,13 @@ jobs:
           )
           PY
           cat "promotion-$TOOLCHAIN.json"
+
+      - name: Register immutable Candidate digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/toolchain_registry.py register --record "promotion-${{ matrix.toolchain }}.json"
 
       - name: Upload promotion record
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
