@@ -32,7 +32,7 @@ RUN set -eux; \
     cd /; \
     rm -rf "$tooling_dir" /tmp/gopath /tmp/gocache /root/go/pkg/mod /root/.cache/go-build; \
     dpkg --purge apt libapt-pkg6.0; \
-    ! command -v apt-get; \
+    ! command -v apt; \
     git config --system --add safe.directory /workspace; \
     mkdir -p /home/ci /workspace; \
     chown -R 10001:10001 /home/ci /workspace
