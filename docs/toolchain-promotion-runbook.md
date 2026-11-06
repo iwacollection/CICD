@@ -54,6 +54,7 @@ GitHub Deployments 是追加式登记记录，保留候选 digest、源码 commi
 
 - `toolchain-production`
 - 配置 Required reviewers（至少一名安全/平台审批人）。
+- 添加 Environment secret `TOOLCHAIN_PROMOTION_TOKEN`：使用专用 fine-grained PAT，仅授予本仓库 Contents（读写）和 Pull requests（读写）；不要使用个人全权限 Token。
 - 禁止部署分支绕过审批；仅允许 `main`。
 - 如组织支持，启用 Prevent self-review。
 
