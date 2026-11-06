@@ -161,7 +161,7 @@
       "owner": "ci-platform",
       "verification_fixture": "examples/cpp-gcc12-service",
       "verification_command": "cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=g++-12 && cmake --build build && ctest --test-dir build --output-on-failure",
-      "compiler_version": "12.5.0-9ubuntu1"
+      "compiler_version": "12.4.0-2ubuntu1~24.04.1"
     }
   ]
 }
