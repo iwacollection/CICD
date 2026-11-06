@@ -151,7 +151,13 @@ def register_candidate(
         if not isinstance(payload, dict) or payload.get("kind") != REGISTRY_KIND:
             continue
         if payload.get("digest") == record["digest"] and payload.get("source_commit") == record["source_commit"]:
-            return {"status": "already-registered", "deployment_id": str(deployment["id"]), **payload}
+            deployment_id = str(deployment.get("id", ""))
+            statuses = _list_all_pages(
+                f"{api_url.rstrip('/')}/repos/{repository}/deployments/{deployment_id}/statuses", token
+            )
+            if not any(item.get("state") == "success" for item in statuses):
+                raise ValueError(f"existing candidate registry entry {deployment_id} has no successful status")
+            return {"status": "already-registered", "deployment_id": deployment_id, **payload}
     payload = _deployment_payload(record, state="candidate")
     deployment_id = _create_deployment(
         api_url=api_url, repository=repository, token=token, environment=environment,
@@ -177,7 +183,7 @@ def inspect_candidate(
             payload = json.loads(payload)
         if not deployment_id.isdigit() or not isinstance(payload, dict):
             continue
-        if payload.get("kind") != REGISTRY_KIND or payload.get("digest") != digest:
+        if payload.get("kind") != REGISTRY_KIND or payload.get("schema_version") != 3 or payload.get("digest") != digest:
             continue
         if payload.get("toolchain") != toolchain or payload.get("state") != "candidate":
             continue
@@ -201,6 +207,26 @@ def approve_candidate(
     payload["state"] = "approved"
     payload["candidate_deployment_id"] = candidate["deployment_id"]
     environment = _environment("approved", toolchain)
+    existing = _list_all_pages(
+        f"{api_url.rstrip('/')}/repos/{repository}/deployments?environment={environment}", token
+    )
+    for deployment in existing:
+        existing_payload = deployment.get("payload", {})
+        if isinstance(existing_payload, str):
+            existing_payload = json.loads(existing_payload)
+        if (
+            isinstance(existing_payload, dict)
+            and existing_payload.get("candidate_deployment_id") == candidate["deployment_id"]
+            and existing_payload.get("digest") == digest
+            and existing_payload.get("state") == "approved"
+        ):
+            existing_id = str(deployment.get("id", ""))
+            statuses = _list_all_pages(
+                f"{api_url.rstrip('/')}/repos/{repository}/deployments/{existing_id}/statuses", token
+            )
+            if any(item.get("state") == "success" for item in statuses):
+                return {"status": "already-approved", "deployment_id": existing_id, **existing_payload}
+            raise ValueError(f"existing approval record {existing_id} has no successful status")
     deployment_id = _create_deployment(
         api_url=api_url, repository=repository, token=token, environment=environment,
         ref=payload["source_commit"], payload=payload,
