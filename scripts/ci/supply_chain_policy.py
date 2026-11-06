@@ -228,6 +228,7 @@ def validate_trivy_report(
                 )
     return errors, summary
 
+
 def validate_sbom(sbom: dict) -> list[str]:
     errors: list[str] = []
     if sbom.get("bomFormat") != "CycloneDX":
@@ -249,6 +250,8 @@ def main() -> int:
     parser.add_argument("--policy", default="ci/supply-chain-policy.json")
     parser.add_argument("--report")
     parser.add_argument("--sbom")
+    parser.add_argument("--toolchain", default="")
+    parser.add_argument("--image-digest", default="")
     parser.add_argument("--dockerfiles", nargs="*")
     parser.add_argument(
         "--skip-dockerfiles",
