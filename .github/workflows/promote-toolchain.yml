@@ -48,6 +48,7 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2 / Cosign v3.0.6
 
       - name: Load exact registered candidate
+        id: candidate
         env:
           GH_TOKEN: ${{ github.token }}
           TOOLCHAIN: ${{ inputs.toolchain }}
@@ -113,7 +114,7 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
         with:
           scan-type: image
-          image-ref: ${{ env.IMAGE }}
+          image-ref: ${{ steps.candidate.outputs.immutable_reference }}
           scanners: vuln,misconfig,secret,license
           severity: HIGH,CRITICAL
           ignore-unfixed: false
@@ -169,6 +170,8 @@ jobs:
           if candidate["digest"] != os.environ["DIGEST"]:
               raise SystemExit("candidate digest changed during promotion")
           item["digest"] = os.environ["DIGEST"]
+          item["build_context_sha256"] = candidate["build_context_sha256"]
+          item["build_definition_sha256"] = candidate["build_definition_sha256"]
           item["status"] = "active"
           item["promotion_deployment_id"] = json.loads(Path("approval.json").read_text(encoding="utf-8"))["deployment_id"]
           catalog_path.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
