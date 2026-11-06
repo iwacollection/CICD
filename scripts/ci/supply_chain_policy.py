@@ -149,6 +149,7 @@ def validate_trivy_report(\n    report: dict, policy: dict, *, toolchain: str = 
         "denied_licenses": 0,
         "secrets": 0,
         "misconfigurations": 0,
+        "vulnerability_exceptions_applied": 0,
     }
     vuln_denied = set(policy.get("vulnerability", {}).get("deny_severities", []))
     denied_licenses = set(policy.get("license", {}).get("deny_licenses", []))
