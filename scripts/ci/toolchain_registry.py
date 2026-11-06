@@ -67,6 +67,8 @@ def validate_record(record: object) -> list[str]:
         errors.append("GitHub provenance must be independently verified")
     if record.get("security_policy_passed") is not True:
         errors.append("security policy must pass before registration")
+    if record.get("scan_attestation_verified") is not True:
+        errors.append("digest-bound vulnerability scan attestation must be independently verified")
     if not isinstance(record.get("workflow_ref"), str) or not record["workflow_ref"]:
         errors.append("workflow_ref is required")
     return errors
@@ -100,6 +102,7 @@ def _deployment_payload(record: dict[str, Any], *, state: str) -> dict[str, Any]
         "sbom_attestation_verified": True,
         "provenance_verified": True,
         "security_policy_passed": True,
+        "scan_attestation_verified": True,
         "candidate_deployment_id": str(record.get("candidate_deployment_id", "")),
     }
 
