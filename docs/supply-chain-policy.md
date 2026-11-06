@@ -161,7 +161,7 @@ production digest-A
 
 ## 10. 工具链候选登记、证据独立验证与漏洞例外
 
-工具链镜像发布后，流水线必须把实际 GHCR digest 登记到 GitHub Deployment registry，而不是只上传短期 Actions artifact。登记前要求：
+工具链镜像发布后，流水线必须把实际 GHCR digest 登记到 GitHub Deployment registry，而不是只上传短期 Actions artifact。中央 DAG、Reusable Build、Reusable Container 和工具链镜像扫描统一包含 unfixed vulnerability；只有工具链镜像支持精确 digest 例外，普通业务制品默认不豁免 HIGH/CRITICAL。登记前要求：
 
 - Cosign image signature 验证成功；
 - CycloneDX SBOM 以 Cosign attestation 绑定到同一 image digest，并能从 OCI referrer 独立取回；
