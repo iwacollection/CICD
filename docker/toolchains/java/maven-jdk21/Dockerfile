@@ -1,10 +1,10 @@
 FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
 ARG DEBIAN_FRONTEND=noninteractive
 RUN printf '%s\n' 'APT::Snapshot "20261029T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
-    && apt-get -o Acquire::https::Verify-Peer=false update \
-    && apt-get -o Acquire::https::Verify-Peer=false install -y --no-install-recommends ca-certificates \
+    && apt-get -o Acquire::Retries=8 -o Acquire::https::Timeout=30 -o APT::Update::Error-Mode=any -o Acquire::https::Verify-Peer=false update \
+    && apt-get -o Acquire::Retries=8 -o Acquire::https::Timeout=30 -o Acquire::https::Verify-Peer=false install -y --no-install-recommends ca-certificates \
     && apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get -o Acquire::Retries=8 -o Acquire::https::Timeout=30 install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 ARG TEMURIN_VERSION=21.0.12.1
 ARG TEMURIN_BUILD=1
