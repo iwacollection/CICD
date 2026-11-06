@@ -35,13 +35,22 @@ class ArtifactLifecycleTests(unittest.TestCase):
             source_run_id="123",
             release_tag="artifact-v2-" + "c" * 64,
             reason="promotion",
+            toolchain_identity="sha256:" + "d" * 64,
+            container_image="ghcr.io/example/toolchain@sha256:" + "d" * 64,
+            manifest_sha256="e" * 64,
         )
         self.assertEqual(result["deployment_id"], "321")
+        self.assertEqual(result["toolchain_identity"], "sha256:" + "d" * 64)
+        self.assertEqual(result["container_image"], "ghcr.io/example/toolchain@sha256:" + "d" * 64)
+        self.assertEqual(result["manifest_sha256"], "e" * 64)
         self.assertEqual(result["bundle_sha256"], "a" * 64)
         create_payload = request.call_args_list[0].kwargs["payload"]
         self.assertEqual(create_payload["environment"], "production")
         self.assertEqual(create_payload["payload"]["artifact_name"], "artifact-a")
         self.assertEqual(create_payload["payload"]["bundle_sha256"], "a" * 64)
+        self.assertEqual(create_payload["payload"]["toolchain_identity"], "sha256:" + "d" * 64)
+        self.assertEqual(create_payload["payload"]["container_image"], "ghcr.io/example/toolchain@sha256:" + "d" * 64)
+        self.assertEqual(create_payload["payload"]["manifest_sha256"], "e" * 64)
         status_payload = request.call_args_list[1].kwargs["payload"]
         self.assertEqual(status_payload["state"], "success")
         self.assertTrue(status_payload["auto_inactive"])
