@@ -39,4 +39,14 @@ class ToolchainVersionRegistryTests(unittest.TestCase):
         broken = json.loads(json.dumps(self.registry)); broken['combinations'].append(dict(broken['combinations'][0]))
         self.assertTrue(any('duplicate version combination id' in e for e in validate_versions(broken, self.catalog)))
 
+    def test_planned_toolchains_have_executable_consumer_fixtures(self):
+        from toolchain_catalog import build_publish_matrix
+        matrix = build_publish_matrix(self.catalog, ROOT, include_planned=True)
+        by_id = {row["toolchain"]: row for row in matrix["include"]}
+        self.assertEqual("examples/go-toolchain-consumer", by_id["go126"]["verification_fixture"])
+        self.assertIn("go test ./...", by_id["go126"]["verification_command"])
+        self.assertEqual("examples/java21-maven-service", by_id["java21-maven"]["verification_fixture"])
+        self.assertEqual("examples/cpp-gcc12-service", by_id["gcc12"]["verification_fixture"])
+
+
 if __name__ == '__main__': unittest.main()

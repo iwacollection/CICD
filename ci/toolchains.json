@@ -95,7 +95,9 @@
       "base_os": "Debian 12 Bookworm",
       "base_image": "golang:1.26.10-bookworm",
       "base_digest": "sha256:23ce71337b726608afb1bc00986e630a05034a87a87ea1fc2cd1ae5cf33387eb",
-      "owner": "ci-platform"
+      "owner": "ci-platform",
+      "verification_fixture": "examples/go-toolchain-consumer",
+      "verification_command": "go test ./... && go build -trimpath -o /tmp/go-toolchain-consumer ./cmd/app && /tmp/go-toolchain-consumer | grep -Fx 'go-toolchain-consumer-ok'"
     },
     {
       "id": "java21-maven",
