@@ -540,6 +540,35 @@ jobs:
             --workdir /workspace \
             "$IMAGE" bash -euo pipefail -c "$COMMAND"
 
+      - name: Build and test Java consumer fixture against exact published digest
+        if: matrix.consumer_fixture != ''
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}@${{ steps.push.outputs.digest }}
+          FIXTURE: ${{ matrix.consumer_fixture }}
+          JDK_VERSION: ${{ matrix.jdk_version }}
+          MAVEN_VERSION: ${{ matrix.maven_version }}
+        run: |
+          set -euo pipefail
+          expected_java_version="${JDK_VERSION%%+*}"
+          build_command="$(cat <<'BUILD_COMMAND'
+          set -euo pipefail
+          actual_java_version="$(java -version 2>&1 | sed -n '1s/.*version "\([^"]*\)".*/\1/p')"
+          actual_java_spec="$(java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/^[[:space:]]*java.specification.version =/ { print $2; exit }')"
+          actual_maven_version="$(mvn --version 2>&1 | sed -n '1s/^Apache Maven \([^ ]*\).*/\1/p')"
+          test "$actual_java_version" = "$EXPECTED_JAVA_VERSION"
+          test "$actual_java_spec" = "17"
+          test "$actual_maven_version" = "$EXPECTED_MAVEN_VERSION"
+          mvn --batch-mode --no-transfer-progress clean verify
+          java -jar target/java17-maven-service-1.0.0.jar | grep -Fx java17-maven-consumer-ok
+          BUILD_COMMAND
+          )"
+          EXPECTED_JAVA_VERSION="$expected_java_version" EXPECTED_MAVEN_VERSION="$MAVEN_VERSION" \
+            python3 scripts/ci/run_build.py \
+              --working-directory "$FIXTURE" \
+              --container-image "$IMAGE" \
+              --command "$build_command"
+
       - name: Scan exact published digest
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
         with:
