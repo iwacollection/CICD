@@ -5,10 +5,10 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Freeze Ubuntu packages to a known archive state. Ubuntu 24.04 supports
 # Snapshot IDs directly through APT; the first install bootstraps CA roots.
 RUN printf '%s\n' 'APT::Snapshot "20261105T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
-    && apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
-    && apt-get -o Acquire::Retries=0 install -y --no-install-recommends ca-certificates \
+    && apt-get -o Acquire::https::Verify-Peer=false -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
+    && apt-get -o Acquire::https::Verify-Peer=false -o Acquire::Retries=0 install -y --no-install-recommends ca-certificates \
     && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
+    && apt-get -o Acquire::https::Verify-Peer=false -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=0 install -y --no-install-recommends apt=2.8.4ubuntu0.1 libapt-pkg6.0t64=2.8.4ubuntu0.1 libssl3t64=3.0.13-0ubuntu3.16 curl \
     && rm -rf /var/lib/apt/lists/*
 
