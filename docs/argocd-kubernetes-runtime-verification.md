@@ -18,7 +18,7 @@ CI 构建成功只证明制品构建出来了；GitOps PR 合并只证明期望�
 
 .github/workflows/verify-runtime-deployment.yml 只允许从 main 手动触发，并使用 runtime-dev、runtime-staging 或 runtime-production Environment。
 
-管理员需要在 GitHub Settings → Secrets and variables → Actions 中配置：
+管理员需要先创建 runtime-dev、runtime-staging、runtime-production 三个 GitHub Environment，并在 production 环境配置 Required reviewers、Prevent self-review 和只允许 main 部署。随后在 GitHub Settings → Secrets and variables → Actions 中配置：
 
 - ARGOCD_SERVER：Argo CD HTTPS 地址，不带路径；
 - ARGOCD_AUTH_TOKEN：只读 Argo CD token，至少能读取目标 Application；
@@ -34,6 +34,7 @@ CI 构建成功只证明制品构建出来了；GitOps PR 合并只证明期望�
 4. expected_image 必须是 registry/repository@sha256:...，禁止只填 tag。
 5. expected_gitops_revision 填 GitOps 仓库完整 commit SHA。
 6. manifest_sha256 填构建归档中的 Artifact Contract manifest SHA256。
+7. kubectl_version 选择与目标集群版本兼容的 kubectl（优先使用相同 minor 版本，遵守 Kubernetes 官方版本偏差策略）。
 
 工作流读取 Argo CD API 和 Kubernetes API。任何配置缺失、TLS 请求失败、Application 非 Synced/Healthy、revision 不匹配、没有 Pod、Pod 未 Ready、镜像声明不匹配或运行时 imageID digest 不匹配都会失败，不会登记成功 Deployment。
 
