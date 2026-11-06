@@ -211,6 +211,16 @@ jobs:
           echo "Dockerfile SHA256: $(sha256sum "$DOCKERFILE" | awk '{print $1}')"
           docker image inspect "ci-toolchain-verify:$GITHUB_SHA" --format 'Local image ID: {{.Id}}'
 
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: toolchain-verification-${{ matrix.toolchain }}-${{ github.sha }}
+          path: |
+            toolchain-security.json
+            toolchain-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
   gate:
     name: Toolchain gate
     needs: [discover, verify]
