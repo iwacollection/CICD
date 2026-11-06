@@ -44,6 +44,8 @@ class ToolchainVersionRegistryTests(unittest.TestCase):
         from toolchain_catalog import build_publish_matrix
         matrix = build_publish_matrix(self.catalog, ROOT, include_planned=True)
         by_id = {row["toolchain"]: row for row in matrix["include"]}
+        self.assertEqual("examples/java17-maven-service", by_id["java17-maven"]["consumer_fixture"])
+        self.assertEqual("17.0.21+9", by_id["java17-maven"]["jdk_version"])
         self.assertEqual("examples/go-toolchain-consumer", by_id["go126"]["verification_fixture"])
         self.assertIn("go test ./...", by_id["go126"]["verification_command"])
         self.assertEqual("examples/java21-maven-service", by_id["java21-maven"]["verification_fixture"])
