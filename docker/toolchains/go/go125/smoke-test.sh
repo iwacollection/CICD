@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-test "$(go env GOVERSION)" = "go1.25.12"
+test "$(go env GOVERSION)" = "go1.25.14"
 test "$(go env GOTOOLCHAIN)" = "local"
 test "$(go env CGO_ENABLED)" = "1"
 tmp="$(mktemp -d)"
