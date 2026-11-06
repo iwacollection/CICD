@@ -111,6 +111,5 @@ cppToolchainBuild(projectDir: '.', registryCredentialsId: 'ghcr-readonly')
 | Go 版本或 SHA256 检查失败 | 基础镜像内版本与声明不一致，或 Go 官方发布包内容不匹配 | 停止构建，核对基础镜像 digest 和 Go 官方发布校验和 |
 | 缺少 gcc / 头文件 / make | 基础镜像依赖不满足 | 停止构建，检查固定的官方 Go 镜像，不要在构建时临时 apt install |
 | 漏洞扫描发现 apt 或 gotestsum 的 Go 依赖高危漏洞 | 基础镜像或工具自身带入了已知漏洞组件 | 不降低门禁等级；移除运行时不需要的 apt，并升级、固定 gotestsum 的受影响依赖版本 |
-| 漏洞扫描发现 apt 或 gotestsum 的 Go 依赖高危漏洞 | 基础镜像或工具自身带入了已知漏洞组件 | 不降低门禁等级；移除运行时不需要的 apt，并升级、固定 gotestsum 的受影响依赖版本 |
 | 构建时 \`error obtaining VCS status\` | 没用本镜像的 \`GOFLAGS\` | 确认用的是 \`go126\` 镜像，不要在命令里覆盖 \`GOFLAGS\` |
 | 构建失败但没有测试报告 | 失败发生在测试之前 | 正常；\`junit\` 允许空结果，看控制台日志 |
