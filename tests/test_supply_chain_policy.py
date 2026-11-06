@@ -129,7 +129,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertIn("gh attestation verify", toolchain_promote)
         self.assertIn("environment: toolchain-production", toolchain_promote)
         self.assertIn("toolchain_registry.py approve", toolchain_promote)
-        self.assertIn("gh pr create", toolchain_promote)
+        self.assertIn('["gh", "pr", "create"', toolchain_promote)
         self.assertIn("cosign sign-blob", archive)
         self.assertIn("id-token: write", archive)
 
