@@ -518,7 +518,13 @@ jobs:
           COMMAND: ${{ matrix.verification_command }}
         run: |
           set -euo pipefail
+          # Keep published-digest consumer builds consistent with PR verification:
+          # map the non-root container to the Runner identity for writable bind mounts.
           docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
+            --env GOPATH=/tmp/go \
+            --env GOCACHE=/tmp/go-build \
             --mount "type=bind,src=$GITHUB_WORKSPACE/$FIXTURE,dst=/workspace" \
             --workdir /workspace \
             "$IMAGE" bash -euo pipefail -c "$COMMAND"
