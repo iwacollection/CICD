@@ -45,12 +45,12 @@
     {
       "id": "go-1.25",
       "language": "go",
-      "language_version": "1.25.12",
+      "language_version": "1.25.14",
       "build_tool": "go",
-      "build_tool_version": "1.25.12",
+      "build_tool_version": "1.25.14",
       "toolchain_id": "go125",
       "status": "planned",
-      "notes": "Go 1.25.12 upstream SHA256 is pinned; remains planned pending full verification and publication."
+      "notes": "Pinned Go 1.25.14 linux/amd64 official go.dev release SHA256; remains planned pending full verification and publication."
     },
     {
       "id": "cpp-gcc-13",
