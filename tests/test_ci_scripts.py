@@ -170,6 +170,10 @@ class CiPlatformTests(unittest.TestCase):
         self.assertLess(smoke, attest)
         self.assertIn('immutable_image="${IMAGE}@${DIGEST}"', workflow[smoke:attest])
         self.assertIn('docker pull "$immutable_image"', workflow[smoke:attest])
+        self.assertEqual(workflow.count("scanners: vuln,misconfig,secret,license"), 2)
+        self.assertIn("--sbom toolchain-sbom.cdx.json", workflow)
+        self.assertIn("--sbom published-sbom.cdx.json", workflow)
+        self.assertIn("name: Generate published digest SBOM", workflow)
 
     def test_fast_lane_can_select_projects_and_fast_test(self) -> None:
         data = {
