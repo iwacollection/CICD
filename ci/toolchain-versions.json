@@ -28,9 +28,9 @@
       "language_version": "21.0.12.1+1",
       "build_tool": "maven",
       "build_tool_version": "3.10.0",
-      "toolchain_id": "",
+      "toolchain_id": "java21-maven",
       "status": "planned",
-      "notes": "Requires a separately built, scanned, smoke-tested and digest-pinned JDK 21 image before activation."
+      "notes": "Dedicated image definition added; remains planned until CI build, smoke, scan, SBOM, publication and consumer verification complete."
     },
     {
       "id": "go-1.26.10",
@@ -49,8 +49,8 @@
       "build_tool": "go",
       "build_tool_version": "1.25.12",
       "toolchain_id": "go125",
-      "status": "candidate",
-      "notes": "Pinned Go 1.25.12 linux/amd64 upstream SHA256; candidate gate requires build, smoke, scan, SBOM and consumer test."
+      "status": "planned",
+      "notes": "Go 1.25.12 upstream SHA256 is pinned; remains planned pending full verification and publication."
     },
     {
       "id": "cpp-gcc-13",
@@ -69,8 +69,8 @@
       "build_tool": "gcc",
       "build_tool_version": "12",
       "toolchain_id": "gcc12",
-      "status": "candidate",
-      "notes": "Dedicated GCC/G++ 12 image definition with fixed Ubuntu APT snapshot and compiler major-version smoke assertion."
+      "status": "planned",
+      "notes": "Dedicated GCC/G++ 12 image definition with fixed Ubuntu APT snapshot; remains planned pending full verification and publication."
     },
     {
       "id": "cpp-clang-18",
