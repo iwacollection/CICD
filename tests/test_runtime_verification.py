@@ -30,7 +30,9 @@ class RuntimeVerificationTests(unittest.TestCase):
         return {"application": "payments", "namespace": "production",
                 "selector": "app.kubernetes.io/instance=payments",
                 "expected_image": IMAGE, "expected_revision": REVISION,
-                "manifest_sha256": MANIFEST, "target_environment": "production"}
+                "manifest_sha256": MANIFEST, "artifact_name": "payments-release",
+                "bundle_sha256": "e" * 64, "source_sha": "f" * 40,
+                "source_run_id": "45678", "target_environment": "production"}
 
     def test_exact_argo_revision_and_runtime_image_digest_pass(self):
         app, pods = fixture()
