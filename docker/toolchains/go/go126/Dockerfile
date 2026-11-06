@@ -30,7 +30,6 @@ RUN set -eux; \
       go install gotest.tools/gotestsum; \
     cd /; \
     rm -rf "$tooling_dir" /tmp/gopath /tmp/gocache; \
-    # APT is not used by this build-only image; remove the vulnerable package manager. \
     dpkg --purge apt libapt-pkg6.0; \
     ! command -v apt-get; \
     git config --system --add safe.directory /workspace; \
