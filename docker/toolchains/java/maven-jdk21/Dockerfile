@@ -1,9 +1,9 @@
 FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
+RUN printf '%s\n' 'APT::Snapshot "20261105T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+    && apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=0 install -y --no-install-recommends ca-certificates \
     && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
-    && printf '%s\n' 'APT::Snapshot "20261105T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
     && apt-get -o Acquire::Retries=0 -o Acquire::https::Timeout=60 -o APT::Update::Error-Mode=any update \
     && apt-get --allow-downgrades -o Acquire::Retries=0 -o Acquire::https::Timeout=60 install -y --no-install-recommends ca-certificates apt=2.8.4ubuntu0.1 libapt-pkg6.0t64=2.8.4ubuntu0.1 libssl3t64=3.0.13-0ubuntu3.16 curl \
     && rm -rf /var/lib/apt/lists/*
