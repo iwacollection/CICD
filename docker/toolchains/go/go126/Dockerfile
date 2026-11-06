@@ -1,4 +1,4 @@
-FROM golang:1.26.10-bookworm@sha256:2dcb1e14f35e4cc1db2186947cba2d19a9fce4d48a27c50658bd203c90fcc183
+FROM golang:1.26.10-alpine3.23@sha256:264964005eb4582789b23e5c578b6d46096287ed7c6441b163b1d27e82dac041
 
 ARG GO_VERSION=1.26.10
 ARG GO_SHA256=ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5
@@ -6,17 +6,10 @@ ARG GOTESTSUM_VERSION=v1.13.0
 ARG X_MOD_VERSION=v0.40.0
 ARG X_TEXT_VERSION=v0.41.0
 
-# The official Go image already contains Go, GCC, libc development headers,
-# make, git, curl and CA certificates. Verify the upstream Go release checksum
-# independently, then build gotestsum with patched, pinned Go module dependencies.
+# Alpine avoids carrying Debian's vulnerable kernel-header and general-purpose
+# package set. build-base provides GCC, musl-dev headers and make for CGO.
 RUN set -eux; \
-    printf '%s\n' \
-      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261106T000000Z bookworm main' \
-      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20261106T000000Z bookworm-security main' \
-      > /etc/apt/sources.list; \
-    rm -f /etc/apt/sources.list.d/debian.sources; \
-    apt-get update; \
-    apt-get upgrade -y; \
+    apk add --no-cache build-base ca-certificates curl git; \
     test "$(go env GOVERSION)" = "go${GO_VERSION}"; \
     command -v gcc; \
     command -v git; \
@@ -26,7 +19,7 @@ RUN set -eux; \
     go_archive="go${GO_VERSION}.linux-amd64.tar.gz"; \
     curl --fail --show-error --location --retry 3 --retry-all-errors --connect-timeout 20 --max-time 900 \
       "https://go.dev/dl/${go_archive}" --output "/tmp/${go_archive}"; \
-    printf '%s  %s\n' "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum --check -; \
+    printf '%s  %s\\n' "${GO_SHA256}" "/tmp/${go_archive}" | sha256sum --check -; \
     rm -f "/tmp/${go_archive}"; \
     tooling_dir="$(mktemp -d)"; \
     mkdir -p /tmp/gopath /tmp/gocache; \
@@ -39,9 +32,6 @@ RUN set -eux; \
     cd /; \
     rm -rf "$tooling_dir" /tmp/gopath /tmp/gocache /root/go/pkg/mod /root/.cache/go-build; \
     rm -f /usr/local/go/src/crypto/internal/boring/Dockerfile /usr/local/go/src/crypto/internal/fips140/nistec/fiat/Dockerfile; \
-    dpkg --purge apt libapt-pkg6.0; \
-    ! command -v apt; \
-    rm -rf /var/lib/apt/lists/*; \
     git config --system --add safe.directory /workspace; \
     mkdir -p /home/ci /workspace; \
     chown -R 10001:10001 /home/ci /workspace
@@ -66,9 +56,9 @@ COPY smoke-test.sh /usr/local/bin/go-toolchain-smoke
 RUN chmod 0755 /usr/local/bin/go-toolchain-smoke
 
 LABEL org.opencontainers.image.title="CICD Go 1.26 toolchain" \
-      org.opencontainers.image.description="Pinned official Go build image with cgo (gcc), git, make and gotestsum" \
-      org.opencontainers.image.base.name="golang:1.26.10-bookworm" \
-      org.opencontainers.image.base.digest="sha256:2dcb1e14f35e4cc1db2186947cba2d19a9fce4d48a27c50658bd203c90fcc183" \
+      org.opencontainers.image.description="Pinned official Go build image with cgo (GCC/musl), git, make and gotestsum" \
+      org.opencontainers.image.base.name="golang:1.26.10-alpine3.23" \
+      org.opencontainers.image.base.digest="sha256:264964005eb4582789b23e5c578b6d46096287ed7c6441b163b1d27e82dac041" \
       org.opencontainers.image.version="1.26.10" \
       org.opencontainers.image.vendor="The Go Authors / gotestsum"
 
