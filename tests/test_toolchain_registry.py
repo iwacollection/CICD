@@ -64,7 +64,7 @@ class ToolchainRegistryTests(unittest.TestCase):
         record = valid_record()
         with patch("toolchain_registry._list_all_pages", side_effect=[
             [{"id": 77, "payload": {
-                "kind": "toolchain-image-registry", "toolchain": "go126",
+                "kind": "toolchain-image-registry", "schema_version": 3, "toolchain": "go126",
                 "digest": record["digest"], "state": "candidate",
             }}],
             [{"state": "success"}],
