@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "language": "cpp",
+  "project_name": "cpp-toolchain-consumer",
+  "toolchain": "gcc-host-container-v1",
+  "build_command": "cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel",
+  "test_command": "mkdir -p reports && ctest --test-dir build --output-junit ../reports/ctest.xml --output-on-failure",
+  "verify_command": "./build/cpp-toolchain-consumer | grep -Fx 'cpp-toolchain-consumer-ok'",
+  "artifact_globs": [
+    "build/cpp-toolchain-consumer"
+  ],
+  "dependency_lock_files": [
+    "CMakeLists.txt"
+  ],
+  "test_report_globs": [
+    "reports/*.xml"
+  ]
+}
