@@ -43,6 +43,9 @@ def _validate_payload(payload: dict[str, Any]) -> None:
     container_image = payload.get("container_image", "")
     if container_image and "@sha256:" not in container_image:
         raise ValueError("deployment payload container_image must be immutable")
+    application_image = payload.get("application_image", "")
+    if application_image and not re.fullmatch(r"[^@\\s]+@sha256:[0-9a-f]{64}", application_image):
+        raise ValueError("deployment payload application_image must be an immutable repository@sha256 reference")
 
 
 def create_pointer(
@@ -61,6 +64,7 @@ def create_pointer(
     promoted_from_deployment_id: str = "",
     toolchain_identity: str = "",
     container_image: str = "",
+    application_image: str = "",
     manifest_sha256: str = "",
 ) -> dict:
     if not ENV_RE.fullmatch(environment):
@@ -93,6 +97,10 @@ def create_pointer(
         payload["toolchain_identity"] = toolchain_identity
     if container_image:
         payload["container_image"] = container_image
+    if application_image:
+        if not re.fullmatch(r"[^@\\s]+@sha256:[0-9a-f]{64}", application_image):
+            raise ValueError("application_image must be an immutable repository@sha256 reference")
+        payload["application_image"] = application_image
     if manifest_sha256:
         payload["manifest_sha256"] = manifest_sha256
     _validate_payload(payload)
@@ -229,6 +237,7 @@ def main() -> int:
     create_parser.add_argument("--promoted-from-deployment-id", default="")
     create_parser.add_argument("--toolchain-identity", default="")
     create_parser.add_argument("--container-image", default="")
+    create_parser.add_argument("--application-image", default="")
     create_parser.add_argument("--manifest-sha256", default="")
 
     inspect_parser = subparsers.add_parser("inspect")
@@ -260,6 +269,7 @@ def main() -> int:
                 promoted_from_deployment_id=args.promoted_from_deployment_id,
                 toolchain_identity=args.toolchain_identity,
                 container_image=args.container_image,
+                application_image=args.application_image,
                 manifest_sha256=args.manifest_sha256,
             )
         elif args.command == "inspect":
