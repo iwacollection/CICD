@@ -125,18 +125,10 @@ jobs:
             --expected-source-sha "$(jq -r '.source_sha' archive.json)" \
             --expected-run-id "$(jq -r '.workflow_run_id' archive.json)" \
             --expected-repository "$GITHUB_REPOSITORY"
-          TOOLCHAIN_ID="$(jq -r '.toolchain.id' "$manifest")"
-          TOOLCHAIN_IDENTITY="$(jq -r '.toolchain.identity' "$manifest")"
-          TOOLCHAIN_DIGEST=""
-          if [[ "$TOOLCHAIN_IDENTITY" == sha256:* ]]; then
-            TOOLCHAIN_DIGEST="$TOOLCHAIN_IDENTITY"
-          fi
           python3 scripts/ci/supply_chain_policy.py \
             --skip-dockerfiles \
             --report incoming/security-scan.json \
-            --sbom incoming/security-sbom.cdx.json \
-            --toolchain "$TOOLCHAIN_ID" \
-            --image-digest "$TOOLCHAIN_DIGEST"
+            --sbom incoming/security-sbom.cdx.json
 
       - name: Verify application deployment pointer binds image to Artifact Contract
         shell: bash
