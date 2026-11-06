@@ -38,7 +38,7 @@ permissions:
   deployments: write
 
 concurrency:
-  group: runtime-verify-\${{ inputs.target_environment }}-\${{ inputs.application }}
+  group: runtime-verify-${{ inputs.target_environment }}-${{ inputs.application }}
   cancel-in-progress: false
 
 jobs:
@@ -46,7 +46,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: runtime-\${{ inputs.target_environment }}
+    environment: runtime-${{ inputs.target_environment }}
     steps:
       - name: Checkout trusted verifier
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -57,15 +57,15 @@ jobs:
       - name: Validate runtime configuration
         shell: bash
         env:
-          ARGOCD_SERVER: \${{ secrets.ARGOCD_SERVER }}
-          ARGOCD_AUTH_TOKEN: \${{ secrets.ARGOCD_AUTH_TOKEN }}
-          KUBECONFIG_BASE64: \${{ secrets.KUBECONFIG_BASE64 }}
-          APP: \${{ inputs.application }}
-          NAMESPACE: \${{ inputs.namespace }}
-          SELECTOR: \${{ inputs.pod_selector }}
-          IMAGE: \${{ inputs.expected_image }}
-          REVISION: \${{ inputs.expected_gitops_revision }}
-          MANIFEST: \${{ inputs.manifest_sha256 }}
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+          KUBECONFIG_BASE64: ${{ secrets.KUBECONFIG_BASE64 }}
+          APP: ${{ inputs.application }}
+          NAMESPACE: ${{ inputs.namespace }}
+          SELECTOR: ${{ inputs.pod_selector }}
+          IMAGE: ${{ inputs.expected_image }}
+          REVISION: ${{ inputs.expected_gitops_revision }}
+          MANIFEST: ${{ inputs.manifest_sha256 }}
         run: |
           set -euo pipefail
           test -n "$ARGOCD_SERVER" || { echo "Missing ARGOCD_SERVER secret" >&2; exit 1; }
@@ -82,7 +82,7 @@ jobs:
       - name: Configure read-only Kubernetes access
         shell: bash
         env:
-          KUBECONFIG_BASE64: \${{ secrets.KUBECONFIG_BASE64 }}
+          KUBECONFIG_BASE64: ${{ secrets.KUBECONFIG_BASE64 }}
         run: |
           set -euo pipefail
           install -m 0700 -d "$RUNNER_TEMP/kube"
@@ -98,22 +98,22 @@ jobs:
       - name: Read Argo CD Application
         shell: bash
         env:
-          ARGOCD_SERVER: \${{ secrets.ARGOCD_SERVER }}
-          ARGOCD_AUTH_TOKEN: \${{ secrets.ARGOCD_AUTH_TOKEN }}
-          APP: \${{ inputs.application }}
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+          APP: ${{ inputs.application }}
         run: |
           set -euo pipefail
           curl --fail --silent --show-error \
             --header "Authorization: Bearer $ARGOCD_AUTH_TOKEN" \
             --header "Accept: application/json" \
-            "\${ARGOCD_SERVER%/}/api/v1/applications/$APP" \
+            "${ARGOCD_SERVER%/}/api/v1/applications/$APP" \
             --output "$RUNNER_TEMP/argocd-app.json"
 
       - name: Read every selected application Pod
         shell: bash
         env:
-          NAMESPACE: \${{ inputs.namespace }}
-          SELECTOR: \${{ inputs.pod_selector }}
+          NAMESPACE: ${{ inputs.namespace }}
+          SELECTOR: ${{ inputs.pod_selector }}
         run: |
           set -euo pipefail
           kubectl auth can-i get pods --namespace "$NAMESPACE" | grep -Fx yes
@@ -124,13 +124,13 @@ jobs:
       - name: Verify Argo CD state and actual container imageIDs
         shell: bash
         env:
-          APP: \${{ inputs.application }}
-          NAMESPACE: \${{ inputs.namespace }}
-          SELECTOR: \${{ inputs.pod_selector }}
-          IMAGE: \${{ inputs.expected_image }}
-          REVISION: \${{ inputs.expected_gitops_revision }}
-          MANIFEST: \${{ inputs.manifest_sha256 }}
-          TARGET_ENVIRONMENT: \${{ inputs.target_environment }}
+          APP: ${{ inputs.application }}
+          NAMESPACE: ${{ inputs.namespace }}
+          SELECTOR: ${{ inputs.pod_selector }}
+          IMAGE: ${{ inputs.expected_image }}
+          REVISION: ${{ inputs.expected_gitops_revision }}
+          MANIFEST: ${{ inputs.manifest_sha256 }}
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
         run: |
           set -euo pipefail
           python3 scripts/ci/verify_runtime_deployment.py \
@@ -148,7 +148,7 @@ jobs:
       - name: Archive runtime evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: runtime-verification-\${{ inputs.target_environment }}-\${{ inputs.application }}-\${{ github.run_id }}
+          name: runtime-verification-${{ inputs.target_environment }}-${{ inputs.application }}-${{ github.run_id }}
           path: runtime-evidence.json
           if-no-files-found: error
           retention-days: 90
@@ -157,7 +157,8 @@ jobs:
         id: deployment
         shell: bash
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_EVIDENCE_ARTIFACT: runtime-verification-${{ inputs.target_environment }}-${{ inputs.application }}-${{ github.run_id }}
         run: |
           set -euo pipefail
           python3 scripts/ci/register_runtime_deployment.py --evidence runtime-evidence.json
@@ -165,11 +166,11 @@ jobs:
       - name: Runtime verification summary
         shell: bash
         env:
-          APP: \${{ inputs.application }}
-          ENVIRONMENT: \${{ inputs.target_environment }}
-          IMAGE: \${{ inputs.expected_image }}
-          REVISION: \${{ inputs.expected_gitops_revision }}
-          DEPLOYMENT_ID: \${{ steps.deployment.outputs.deployment_id }}
+          APP: ${{ inputs.application }}
+          ENVIRONMENT: ${{ inputs.target_environment }}
+          IMAGE: ${{ inputs.expected_image }}
+          REVISION: ${{ inputs.expected_gitops_revision }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
         run: |
           {
             echo "### Runtime verification passed"
