@@ -29,7 +29,6 @@ class PromotionPathPolicyTests(unittest.TestCase):
             source_sha="b" * 40,
             source_run_id="123",
             release_tag="artifact-v2-" + "c" * 64,
-            application_image="ghcr.io/example/app@sha256:" + "f" * 64,
         )
 
     def test_new_deployment_trace_fields_must_match_when_present(self) -> None:
@@ -45,7 +44,8 @@ class PromotionPathPolicyTests(unittest.TestCase):
         legacy = {key: value for key, value in self.identity.items() if key in {
             "artifact_name", "bundle_sha256", "source_sha", "source_run_id", "release_tag"
         }}
-        self.assertTrue(pointer_matches(legacy, identity))
+        self.assertFalse(pointer_matches(legacy, identity))
+        self.assertTrue(pointer_matches(self.identity, self.identity))
         app_identity = normalize_identity(
             artifact_name="app-a", bundle_sha256="a" * 64, source_sha="b" * 40,
             source_run_id="123", release_tag="artifact-v2-" + "c" * 64,
