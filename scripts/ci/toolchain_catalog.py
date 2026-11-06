@@ -273,7 +273,12 @@ def build_consumer_matrix(data: dict, repository_root: Path | None = None) -> di
         if item.get("execution_mode") != "container":
             raise ValueError(f"consumer fixture {item.get('id')} must use a container toolchain")
         if not item.get("digest"):
-            raise ValueError(f"consumer fixture {item.get('id')} requires a published immutable digest")
+            # A Candidate awaiting its first/replacement publication is tested
+            # against the locally built image in the Verify lane. The separate
+            # published-digest consumer lane starts only after a digest exists.
+            if item.get("status") == "candidate":
+                continue
+            raise ValueError(f"active consumer fixture {item.get('id')} requires a published immutable digest")
 
         validate_published_candidate_context(item, repository_root)
         fixture = Path(str(item["consumer_fixture"]))
