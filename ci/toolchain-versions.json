@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "selection_policy": {
+    "project_consumption_statuses": ["active"],
+    "verification_statuses": ["active", "candidate"],
+    "planned_is_never_runnable": true,
+    "require_exact_version": true
+  },
+  "combinations": [
+    {"id":"java-temurin-17-maven-3.10","language":"java","language_version":"17.0.21+9","build_tool":"maven","build_tool_version":"3.10.0","toolchain_id":"java17-maven","status":"candidate","notes":"Existing pinned candidate image; consumer verification is available."},
+    {"id":"java-temurin-21-maven-3.10","language":"java","language_version":"21.0.12.1+1","build_tool":"maven","build_tool_version":"3.10.0","toolchain_id":"","status":"planned","notes":"Requires a separately built, scanned, smoke-tested and digest-pinned JDK 21 image before activation."},
+    {"id":"go-1.26.10","language":"go","language_version":"1.26.10","build_tool":"go","build_tool_version":"1.26.10","toolchain_id":"go126","status":"candidate","notes":"Existing Go candidate; image build and smoke verification are available."},
+    {"id":"go-1.25","language":"go","language_version":"1.25","build_tool":"go","build_tool_version":"1.25","toolchain_id":"","status":"planned","notes":"Requires a pinned patch release, upstream checksum, image build and smoke verification."},
+    {"id":"cpp-gcc-13","language":"cpp","language_version":"13","build_tool":"gcc","build_tool_version":"13","toolchain_id":"gcc-host-container-v1","status":"active","notes":"Current Ubuntu 24.04 container toolchain; exact installed compiler version is checked by smoke tests."},
+    {"id":"cpp-gcc-12","language":"cpp","language_version":"12","build_tool":"gcc","build_tool_version":"12","toolchain_id":"","status":"planned","notes":"Requires a dedicated GCC 12 image and digest; do not alias it to GCC 13."},
+    {"id":"cpp-clang-18","language":"cpp","language_version":"18","build_tool":"clang","build_tool_version":"18","toolchain_id":"","status":"planned","notes":"Requires a dedicated Clang 18 image, linker/runtime compatibility tests and digest."}
+  ]
+}
