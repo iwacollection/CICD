@@ -32,9 +32,13 @@ CI 构建成功只证明制品构建出来了；GitOps PR 合并只证明期望�
 2. namespace 指向工作负载所在命名空间。
 3. pod_selector 必须覆盖该 Application 的全部目标 Pod，不能只选一个健康副本。
 4. expected_image 必须是 registry/repository@sha256:...，禁止只填 tag。
-5. expected_gitops_revision 填 GitOps 仓库完整 commit SHA。
-6. manifest_sha256 填构建归档中的 Artifact Contract manifest SHA256。
-7. kubectl_version 选择与目标集群版本兼容的 kubectl（优先使用相同 minor 版本，遵守 Kubernetes 官方版本偏差策略）。
+5. artifact_name 填构建工作流登记的 Artifact Contract 名称。
+6. bundle_sha256 填归档记录中的 bundle SHA256。
+7. manifest_sha256 填归档记录中的 manifest SHA256。
+8. expected_gitops_revision 填 GitOps 仓库完整 commit SHA。
+9. kubectl_version 选择与目标集群版本兼容的 kubectl（优先使用相同 minor 版本，遵守 Kubernetes 官方版本偏差策略）。
+
+工作流先从长期归档下载精确 Artifact Contract，校验 bundle SHA256、manifest SHA256、manifest 中的 container_image，并重新验证 bundle 内容、GitHub attestations、Cosign 签名和 SBOM/扫描策略。只有归档里的镜像 digest 与运行时检查输入一致，才继续访问 Argo CD 和 Kubernetes。
 
 工作流读取 Argo CD API 和 Kubernetes API。任何配置缺失、TLS 请求失败、Application 非 Synced/Healthy、revision 不匹配、没有 Pod、Pod 未 Ready、镜像声明不匹配或运行时 imageID digest 不匹配都会失败，不会登记成功 Deployment。
 
