@@ -44,7 +44,7 @@ def _validate_payload(payload: dict[str, Any]) -> None:
     if container_image and "@sha256:" not in container_image:
         raise ValueError("deployment payload container_image must be immutable")
     application_image = payload.get("application_image", "")
-    if application_image and not re.fullmatch(r"[^@\\s]+@sha256:[0-9a-f]{64}", application_image):
+    if application_image and not re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", application_image):
         raise ValueError("deployment payload application_image must be an immutable repository@sha256 reference")
 
 
@@ -98,7 +98,7 @@ def create_pointer(
     if container_image:
         payload["container_image"] = container_image
     if application_image:
-        if not re.fullmatch(r"[^@\\s]+@sha256:[0-9a-f]{64}", application_image):
+        if not re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", application_image):
             raise ValueError("application_image must be an immutable repository@sha256 reference")
         payload["application_image"] = application_image
     if manifest_sha256:
