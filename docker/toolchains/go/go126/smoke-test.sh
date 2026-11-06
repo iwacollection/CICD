@@ -6,6 +6,8 @@ set -euo pipefail
 
 expected_go="go${GO_TOOLCHAIN_VERSION:?GO_TOOLCHAIN_VERSION is not set in the image}"
 expected_gotestsum="${GOTESTSUM_TOOLCHAIN_VERSION:?GOTESTSUM_TOOLCHAIN_VERSION is not set in the image}"
+expected_x_mod="${GOTESTSUM_X_MOD_VERSION:?GOTESTSUM_X_MOD_VERSION is not set in the image}"
+expected_x_text="${GOTESTSUM_X_TEXT_VERSION:?GOTESTSUM_X_TEXT_VERSION is not set in the image}"
 
 actual_go="$(go env GOVERSION)"
 if [[ "$actual_go" != "$expected_go" ]]; then
@@ -28,6 +30,14 @@ gotestsum --version | grep -F "${expected_gotestsum#v}" >/dev/null || {
   gotestsum --version >&2 || true
   exit 1
 }
+
+module_info="$(go version -m "$(command -v gotestsum)")"
+grep -F "golang.org/x/mod $expected_x_mod" <<<"$module_info" >/dev/null
+grep -F "golang.org/x/text $expected_x_text" <<<"$module_info" >/dev/null
+if command -v apt-get >/dev/null 2>&1; then
+  echo "apt-get must not be present in the Go build-only image" >&2
+  exit 1
+fi
 
 gcc --version | sed -n '1p'
 make --version | sed -n '1p'
