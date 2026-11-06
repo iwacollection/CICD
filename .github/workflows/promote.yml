@@ -95,6 +95,9 @@ jobs:
           SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           RELEASE_TAG: ${{ steps.archive.outputs.release_tag }}
+          TOOLCHAIN_IDENTITY: ${{ steps.archive.outputs.toolchain_identity }}
+          CONTAINER_IMAGE: ${{ steps.archive.outputs.container_image }}
+          MANIFEST_SHA256: ${{ steps.archive.outputs.manifest_sha256 }}
         run: >-
           python3 scripts/ci/promotion_policy.py
           --policy ci/promotion-policy.json
@@ -106,6 +109,9 @@ jobs:
           --source-sha "$SOURCE_SHA"
           --source-run-id "$SOURCE_RUN_ID"
           --release-tag "$RELEASE_TAG"
+          --toolchain-identity "$TOOLCHAIN_IDENTITY"
+          --container-image "$CONTAINER_IMAGE"
+          --manifest-sha256 "$MANIFEST_SHA256"
 
       - name: Verify archived bytes and manifest identity
         shell: bash
@@ -180,6 +186,9 @@ jobs:
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           RELEASE_TAG: ${{ steps.archive.outputs.release_tag }}
           PREREQUISITE_DEPLOYMENT_ID: ${{ steps.promotion_path.outputs.prerequisite_deployment_id }}
+          TOOLCHAIN_IDENTITY: ${{ steps.archive.outputs.toolchain_identity }}
+          CONTAINER_IMAGE: ${{ steps.archive.outputs.container_image }}
+          MANIFEST_SHA256: ${{ steps.archive.outputs.manifest_sha256 }}
         run: |
           set -euo pipefail
           python3 scripts/ci/deployment_pointer.py create \
@@ -191,7 +200,10 @@ jobs:
             --source-run-id "$SOURCE_RUN_ID" \
             --release-tag "$RELEASE_TAG" \
             --reason promotion \
-            --promoted-from-deployment-id "$PREREQUISITE_DEPLOYMENT_ID"
+            --promoted-from-deployment-id "$PREREQUISITE_DEPLOYMENT_ID" \
+            --toolchain-identity "$TOOLCHAIN_IDENTITY" \
+            --container-image "$CONTAINER_IMAGE" \
+            --manifest-sha256 "$MANIFEST_SHA256"
 
       - name: Promotion summary
         env:
