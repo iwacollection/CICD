@@ -67,10 +67,10 @@
       "language": "cpp",
       "language_version": "12",
       "build_tool": "gcc",
-      "build_tool_version": "12",
+      "build_tool_version": "12.5.0",
       "toolchain_id": "gcc12",
       "status": "planned",
-      "notes": "Dedicated GCC/G++ 12.4 image definition pinned to Ubuntu 24.04 package version 12.4.0-2ubuntu1~24.04.1; remains planned pending full verification and publication."
+      "notes": "Dedicated GCC/G++ 12.5 image pinned to Ubuntu 26.10 and APT snapshot 20261105T000000Z; remains planned until full verification, SBOM and consumer checks pass. Ubuntu 26.10 is an interim release supported through July 2027; this toolchain is build-only."
     },
     {
       "id": "cpp-clang-18",
