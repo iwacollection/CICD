@@ -135,6 +135,7 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix: ${{ fromJSON(needs.discover.outputs.verify_matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -456,6 +457,7 @@ jobs:
       attestations: write
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
