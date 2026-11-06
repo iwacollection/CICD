@@ -32,6 +32,10 @@ on:
         description: "Artifact Contract manifest SHA256"
         required: true
         type: string
+      kubectl_version:
+        description: "kubectl version compatible with the target cluster (same minor preferred)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -66,6 +70,7 @@ jobs:
           IMAGE: ${{ inputs.expected_image }}
           REVISION: ${{ inputs.expected_gitops_revision }}
           MANIFEST: ${{ inputs.manifest_sha256 }}
+          KUBECTL_VERSION: ${{ inputs.kubectl_version }}
         run: |
           set -euo pipefail
           test -n "$ARGOCD_SERVER" || { echo "Missing ARGOCD_SERVER secret" >&2; exit 1; }
@@ -75,6 +80,7 @@ jobs:
           [[ "$NAMESPACE" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$ ]]
           [[ "$REVISION" =~ ^[0-9a-f]{7,40}$ ]]
           [[ "$MANIFEST" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$KUBECTL_VERSION" =~ ^v1\.[0-9]+\.[0-9]+$ ]]
           [[ "$IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]
           [[ "$SELECTOR" != *$'\n'* && "$SELECTOR" != *$'\r'* ]]
           case "$ARGOCD_SERVER" in https://*) ;; *) echo "ARGOCD_SERVER must use HTTPS" >&2; exit 1 ;; esac
@@ -93,7 +99,7 @@ jobs:
       - name: Install pinned kubectl
         uses: azure/setup-kubectl@776406bce94f63e41d621b960d78e8e1c7e6e3d1 # v4
         with:
-          version: v1.34.1
+          version: ${{ inputs.kubectl_version }}
 
       - name: Read Argo CD Application
         shell: bash
