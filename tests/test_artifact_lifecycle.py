@@ -37,11 +37,13 @@ class ArtifactLifecycleTests(unittest.TestCase):
             reason="promotion",
             toolchain_identity="sha256:" + "d" * 64,
             container_image="ghcr.io/example/toolchain@sha256:" + "d" * 64,
+            application_image="ghcr.io/example/app@sha256:" + "f" * 64,
             manifest_sha256="e" * 64,
         )
         self.assertEqual(result["deployment_id"], "321")
         self.assertEqual(result["toolchain_identity"], "sha256:" + "d" * 64)
         self.assertEqual(result["container_image"], "ghcr.io/example/toolchain@sha256:" + "d" * 64)
+        self.assertEqual(result["application_image"], "ghcr.io/example/app@sha256:" + "f" * 64)
         self.assertEqual(result["manifest_sha256"], "e" * 64)
         self.assertEqual(result["bundle_sha256"], "a" * 64)
         create_payload = request.call_args_list[0].kwargs["payload"]
@@ -50,6 +52,7 @@ class ArtifactLifecycleTests(unittest.TestCase):
         self.assertEqual(create_payload["payload"]["bundle_sha256"], "a" * 64)
         self.assertEqual(create_payload["payload"]["toolchain_identity"], "sha256:" + "d" * 64)
         self.assertEqual(create_payload["payload"]["container_image"], "ghcr.io/example/toolchain@sha256:" + "d" * 64)
+        self.assertEqual(create_payload["payload"]["application_image"], "ghcr.io/example/app@sha256:" + "f" * 64)
         self.assertEqual(create_payload["payload"]["manifest_sha256"], "e" * 64)
         status_payload = request.call_args_list[1].kwargs["payload"]
         self.assertEqual(status_payload["state"], "success")
