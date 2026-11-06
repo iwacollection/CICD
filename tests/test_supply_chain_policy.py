@@ -50,7 +50,8 @@ class SupplyChainPolicyTests(unittest.TestCase):
     def test_gcc_toolchain_does_not_disable_apt_tls_verification(self) -> None:
         dockerfile = ROOT / "docker" / "toolchains" / "gcc" / "gcc12" / "Dockerfile"
         self.assertNotIn("Verify-Peer=false", dockerfile.read_text(encoding="utf-8"))
-\n    def test_floating_container_base_is_rejected(self) -> None:
+
+    def test_floating_container_base_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             dockerfile = Path(directory) / "Dockerfile"
             dockerfile.write_text(
