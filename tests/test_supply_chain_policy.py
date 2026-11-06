@@ -105,10 +105,11 @@ class SupplyChainPolicyTests(unittest.TestCase):
         toolchain_promote = (ROOT / ".github" / "workflows" / "promote-toolchain.yml").read_text(encoding="utf-8")
         rollback = (ROOT / ".github" / "workflows" / "rollback.yml").read_text(encoding="utf-8")
 
-        for workflow in (dag_node, reusable, toolchain):
+        for workflow in (dag_node, reusable, reusable_container, toolchain):
             self.assertIn("aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25", workflow)
             self.assertIn("v0.70.0", workflow)
             self.assertIn("supply_chain_policy.py", workflow)
+            self.assertIn("ignore-unfixed: false", workflow)
 
         self.assertIn("dag-node.yml", central)
         self.assertIn("supply_chain_policy.py", central)
