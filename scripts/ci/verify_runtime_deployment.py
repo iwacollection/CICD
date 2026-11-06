@@ -19,15 +19,25 @@ def _read_json(path: str) -> dict[str, Any]:
 def verify_runtime(app: dict[str, Any], pods: dict[str, Any], *,
                    application: str, namespace: str, selector: str,
                    expected_image: str, expected_revision: str,
-                   manifest_sha256: str, target_environment: str) -> dict[str, Any]:
+                   manifest_sha256: str, artifact_name: str,
+                   bundle_sha256: str, source_sha: str, source_run_id: str,
+                   target_environment: str) -> dict[str, Any]:
     if not NAME_RE.fullmatch(application):
         raise ValueError("application name is invalid")
     if not NAME_RE.fullmatch(namespace):
         raise ValueError("namespace is invalid")
     if not selector or len(selector) > 256 or any(c in selector for c in "\r\n"):
         raise ValueError("pod selector is invalid")
-    if not DIGEST_RE.fullmatch(manifest_sha256):
+    if not DIGEST_RE.fullmatch("sha256:" + manifest_sha256):
         raise ValueError("manifest SHA256 is invalid")
+    if not DIGEST_RE.fullmatch("sha256:" + bundle_sha256):
+        raise ValueError("bundle SHA256 is invalid")
+    if not REVISION_RE.fullmatch(source_sha) or len(source_sha) != 40:
+        raise ValueError("artifact source commit must be a 40-character SHA")
+    if not str(source_run_id).isdigit():
+        raise ValueError("artifact source workflow run ID must be numeric")
+    if not artifact_name or len(artifact_name) > 128:
+        raise ValueError("artifact name is invalid")
     if not REVISION_RE.fullmatch(expected_revision):
         raise ValueError("expected GitOps revision must be a 7-40 character commit SHA")
     if target_environment not in {"dev", "staging", "production"}:
@@ -88,6 +98,8 @@ def verify_runtime(app: dict[str, Any], pods: dict[str, Any], *,
         "environment": target_environment, "application": application, "namespace": namespace,
         "pod_selector": selector, "expected_image": expected_image, "image_digest": image_digest,
         "gitops_revision": actual_revision, "manifest_sha256": manifest_sha256,
+        "artifact_name": artifact_name, "bundle_sha256": bundle_sha256,
+        "artifact_source_sha": source_sha, "artifact_source_run_id": str(source_run_id),
         "argocd_sync": sync.get("status"), "argocd_health": health.get("status"),
         "pod_count": len(verified_pods), "verified_pods": sorted(verified_pods, key=lambda p: p["name"]),
         "verified_at": datetime.now(timezone.utc).isoformat(),
@@ -108,7 +120,9 @@ def main() -> int:
             _read_json(args.app_json), _read_json(args.pods_json),
             application=args.application, namespace=args.namespace, selector=args.selector,
             expected_image=args.expected_image, expected_revision=args.expected_revision,
-            manifest_sha256=args.manifest_sha256, target_environment=args.environment)
+            manifest_sha256=args.manifest_sha256, artifact_name=args.artifact_name,
+            bundle_sha256=args.bundle_sha256, source_sha=args.source_sha,
+            source_run_id=args.source_run_id, target_environment=args.environment)
         Path(args.output).write_text(json.dumps(evidence, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
