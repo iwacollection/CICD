@@ -12,7 +12,7 @@ CI 构建成功只证明制品构建出来了；GitOps PR 合并只证明期望�
 - Kubernetes selector 命中的全部 Pod；
 - Pod Ready 状态；
 - 容器运行时 status.containerStatuses[].imageID 中的真实 sha256 digest；
-- GitHub runtime Deployment ID 和完整 JSON evidence artifact。
+- GitHub runtime Deployment ID、工作流运行记录和完整 JSON evidence artifact。
 
 ## 工作流
 
@@ -59,7 +59,7 @@ image 是 Pod Spec 中声明的镜像；imageID 是容器运行时实际拉取/�
 - 当前实现验证一个应用中的一个精确业务镜像仓库 digest；如果应用包含多个需要分别追溯的业务镜像，应扩展为多镜像期望清单，不要把 sidecar digest 混同为主业务镜像 digest。
 - selector 必须覆盖全部目标 Pod。若 selector 选入其他工作负载，验证会因缺少目标镜像而失败；若 selector 漏掉副本，则会造成证据不完整。
 - kubectl 凭据应使用只读 RBAC；Argo CD token 应使用只读权限。
-- 运行时 Deployment 是追加式证据记录，不会改变工具链 catalog，也不代表执行了发布。
+- 运行时 Deployment 是追加式证据记录。Deployment 的 ref 指向 CICD 仓库执行验证的 commit；GitOps revision 单独保存在 payload 中，避免把另一个仓库的 commit 当成本仓库 ref。它不会改变工具链 catalog，也不代表执行了发布。
 - 90 天 Artifact 用于保留完整 Pod/imageID 明细；GitHub Deployment payload 保留 revision、digest、manifest、Pod 明细和证据 SHA256。
 
 ## 尚需真实环境验收
