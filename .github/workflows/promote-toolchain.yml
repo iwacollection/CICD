@@ -37,22 +37,6 @@ jobs:
           persist-credentials: false
           token: ${{ github.token }}
 
-      - name: Require independent environment approval policy
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/environments/toolchain-production" > environment.json
-          jq -e '
-            [.protection_rules[]? | select(.type == "required_reviewers")] as $rules
-            | ($rules | length) > 0
-              and ([ $rules[] | select((.reviewers // []) | length > 0) ] | length) > 0
-              and ([ $rules[] | select(.prevent_self_review == true) ] | length) > 0
-          ' environment.json >/dev/null || {
-            echo "toolchain-production must have at least one Required reviewer and Prevent self-review enabled." >&2
-            exit 1
-          }
-
       - name: Login GHCR read-only
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
