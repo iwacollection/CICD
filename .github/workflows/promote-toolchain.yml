@@ -83,14 +83,14 @@ jobs:
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com" > sbom-attestation.json
           jq -e '.payload' sbom-attestation.json >/dev/null
           jq -r '.payload' sbom-attestation.json | base64 --decode > sbom-statement.json
-          jq -e '.subject[] | select(.digest.sha256 == env.EXPECTED_DIGEST)' sbom-statement.json >/dev/null
+          jq -e '.subject[] | select(.digest.sha256 == (env.EXPECTED_DIGEST | sub("^sha256:"; "")))' sbom-statement.json >/dev/null
           jq '.predicate' sbom-statement.json > verified-sbom.cdx.json
           cosign verify-attestation --type vuln "$IMAGE" \
             --certificate-identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/toolchain-images.yml@refs/heads/main" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com" > scan-attestation.json
           jq -e '.payload' scan-attestation.json >/dev/null
           jq -r '.payload' scan-attestation.json | base64 --decode > scan-statement.json
-          jq -e '.subject[] | select(.digest.sha256 == env.EXPECTED_DIGEST)' scan-statement.json >/dev/null
+          jq -e '.subject[] | select(.digest.sha256 == (env.EXPECTED_DIGEST | sub("^sha256:"; "")))' scan-statement.json >/dev/null
           jq '.predicate' scan-statement.json > verified-scan.json
           python3 - <<'PY'
           import hashlib, json
