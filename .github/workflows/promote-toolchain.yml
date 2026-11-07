@@ -186,6 +186,7 @@ jobs:
           }
 
       - name: Re-check exact registered candidate after approval
+        id: approved_candidate
         env:
           GH_TOKEN: ${{ github.token }}
           TOOLCHAIN: ${{ inputs.toolchain }}
@@ -201,6 +202,38 @@ jobs:
             *@${DIGEST}) ;;
             *) echo "Candidate immutable reference does not match the requested digest." >&2; exit 1 ;;
           esac
+
+      - name: Login GHCR read-only for fresh post-approval scan
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Re-scan exact digest after production approval
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.approved_candidate.outputs.immutable_reference }}
+          scanners: vuln,misconfig,secret,license
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          format: json
+          output: post-approval-security.json
+          exit-code: "0"
+          version: v0.70.0
+
+      - name: Enforce fresh post-approval security policy
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/supply_chain_policy.py \\
+            --skip-dockerfiles \\
+            --report post-approval-security.json \\
+            --toolchain "$TOOLCHAIN" \\
+            --image-digest "$DIGEST"
 
       - name: Record human-approved candidate
         env:
