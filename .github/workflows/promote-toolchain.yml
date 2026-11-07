@@ -230,10 +230,10 @@ jobs:
           DIGEST: ${{ inputs.digest }}
         run: |
           set -euo pipefail
-          python3 scripts/ci/supply_chain_policy.py \\
-            --skip-dockerfiles \\
-            --report post-approval-security.json \\
-            --toolchain "$TOOLCHAIN" \\
+          python3 scripts/ci/supply_chain_policy.py \
+            --skip-dockerfiles \
+            --report post-approval-security.json \
+            --toolchain "$TOOLCHAIN" \
             --image-digest "$DIGEST"
 
       - name: Record human-approved candidate
