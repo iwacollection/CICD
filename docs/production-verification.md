@@ -1,6 +1,8 @@
 # 生产生命周期真实验收记录
 
-本文不是设计说明，而是 **CICD 平台在 2026-08-30 实际执行过的 GitHub Actions 交付生命周期验收记录**。
+本文不是设计说明，而是 **CICD 平台在 2026-08-30 实际执行过的 GitHub Actions 交付生命周期历史验收记录**。
+
+> **请注意：本文是 2026-08-30 的历史快照，不是当前实时状态看板。** 它证明当时指定的 C/C++ 示例制品完成了 GitHub 侧 Build、Archive、Promotion pointer 和历史 digest rollback；它不代表 2026-11-07 的工具链 Candidate 晋级已通过，也不代表真实 Jenkins、Harbor、Argo CD、Kubernetes 或硬件环境已经验收。当前工具链状态以 `ci/toolchains.json` 和[工具链 Candidate 晋级操作手册](toolchain-promotion-runbook.md)为准。
 
 **重要边界：**本文中的 `dev`、`staging`、`production` 是 GitHub Deployment / 制品晋级状态所使用的环境名称。这里验证的是构建、制品证明、归档、环境晋级和历史 digest 回滚；它不代表制品已经部署到真实企业 Kubernetes 集群，也不代表真实业务流量已经切换。当前工作流没有执行 `kubectl apply`，真实集群控制器和外部基础设施仍需单独接入、验收。
 
