@@ -82,6 +82,8 @@
 
 如果生产出现问题，回滚是重新指向之前验证过的制品，不是临时重新构建一个“旧版本”。
 
+这里说的是**业务制品晋级**，不是工具链镜像晋级，也不是 Kubernetes 实际部署。工具链镜像从 Candidate 进入 Active，要另看[工具链 Candidate 晋级操作手册](toolchain-promotion-runbook.md)。集群是否运行了目标镜像，则要看[Argo CD / Kubernetes 部署后运行验证](argocd-kubernetes-runtime-verification.md)。
+
 ## 其他专题什么时候再看
 
 | 你想弄明白的问题 | 再看这份文档 |
@@ -126,10 +128,13 @@
 
 - 普通应用构建、依赖 DAG、制品校验、供应链检查和发布状态管理：仓库内已有实现及自动化验证。
 - 生产生命周期验收记录中的 `dev`、`staging`、`production`，指 GitHub Deployment / 制品晋级记录中的环境名称；它证明制品身份、晋级顺序和历史 digest 回滚流程已执行，不代表已经向真实企业 Kubernetes 集群部署或切换用户流量。
-- Java 17：已有 Candidate 工具链和示例消费者验证；**还不能据此认定企业 Jenkins Controller / Agent 已完成验收**。
+- Java 17 和 Java 21：当前中央目录均登记为 Candidate，不能作为 Active 工具链供正式业务消费。Java 21 最近一次晋级运行在扫描报告 evidence hash 校验处失败，未进入独立审批；具体运行证据和边界见[工具链 Candidate 晋级操作手册](toolchain-promotion-runbook.md)。
+- Jenkins Shared Library：仓库代码和 Mock Pipeline 测试已实现；**尚不能据此认定企业 Jenkins Controller / Agent 已完成真实接入验收**。
 - Harbor：当前已验证链路使用 GHCR，企业 Harbor 的真实接入和扫描闭环仍需单独验收。
 - Argo CD / Argo Rollouts：仓库已有接入契约、策略和验证代码；**不代表已经连接真实生产集群并执行发布**。
 - RK 真机、高通和联发科：必须拿到真实 Runner、SDK、License 和硬件后才能完成物理验收。
+
+文档的维护范围和当前审核状态见[技术文档审核记录](documentation-review.md)。
 
 ## 学习时记住
 
