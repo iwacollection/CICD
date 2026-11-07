@@ -1496,20 +1496,34 @@ RTO/RPO 必须根据实际 Harbor 规模、存储架构和业务要求通过演�
 
 ## 34. 当前仓库事实、目标架构和未完成事项必须分开
 
-| 能力 | 当前仓库可确认的状态 | 本方案目标 | 尚未完成的内容 |
-|---|---|---|---|
-| 中央工具链注册表 | 已有 `ci/toolchains.json`；Java 17 Candidate 已登记并固定已发布 digest | 继续复用唯一 Registry | 未完成 Candidate → Active Promotion |
-| 工具链矩阵 | 只构建/发布 digest 为空的 Candidate；Active 与已发布 Candidate 不会被无关提交重建 | 保持候选构建与正式消费解耦 | Active digest 的定期远端复扫需独立安全运营任务 |
-| GHCR 工具链发布 | Java 17 Candidate 已真实发布，digest 为 `sha256:3b3c558e…13ce9f7`；远端 smoke、扫描、签名、Provenance 均成功 | 复用现有供应链能力 | 无 |
-| Java JDK Dockerfile | Java 17 Dockerfile 与 smoke test 已实现，JDK/Maven/Guava 和基础镜像输入固定 | 后续按项目需求增加 JDK 8/11/21、Gradle 组合 | 其他 JDK 版本尚未实施 |
-| Java Toolchain Active | `java17-maven` 当前仍为 Candidate，没有业务项目引用 | 代表项目双跑、审批后晋级 | 不能把 Candidate 说成生产 Active |
-| Harbor 企业服务 | 当前仓库未配置企业 Harbor endpoint/Robot | 企业部署时接入 | Harbor HA、Robot、API 扫描适配器尚未接入 |
-| Harbor Scan Gate | 本方案定义适配器契约；当前实际跑通的是 GHCR + Trivy 工作流门禁 | 按所选 Harbor 版本开发和测试 | 不能声称 Harbor 异步扫描适配器已运行 |
-| Jenkins Shared Library | vars/javaToolchainBuild.groovy 已实现；GitHub Actions 在 Java 17 容器中编译并执行 Mock Pipeline，8/8 测试通过（run #159） | 受保护 Shared Library 解析并消费 Active digest | PR #48 已于 2026-11-01 合并；企业 Jenkins Controller/Agent/Global Library/Credentials 尚未接入，真实 Controller 调用未验收 |
-| Java 代表项目 | 当前完成的是独立 smoke Maven 项目，不是企业业务项目 | 至少一个真实项目兼容性双跑 | 真实业务项目兼容性验收未完成 |
-| DR | 文档定义恢复范围和演练要求 | 实施备份、灾备和恢复演练 | 不能声称 RTO/RPO 已达成 |
+> **当前状态快照：2026-11-07，审核基线 main `2dcb37ee6ff142c6fe8cb21c9becf1429caa63d0`。**  
+> 版本组合和工具链状态以 `ci/toolchain-versions.json`、`ci/toolchains.json` 为准；下面的表格解释当前仓库事实，不替代中央配置。
 
-**上线状态只有在运行证据存在时才能更新。** 文档合并、JSON 校验或 GitHub PR 通过，只能证明文档和仓库变更进入版本控制，不能证明 Harbor、Jenkins、Registry 或生产项目已完成部署。
+| 能力 | 当前仓库可确认的状态 | 目标 | 尚未完成的事项 |
+|---|---|---|---|
+| 中央工具链注册表 | `ci/toolchains.json` 是唯一目录；Java 17 和 Java 21 均登记为 `candidate` | 继续复用唯一 Registry | Candidate 不能被当作 Active；状态必须由通过审批的目录 PR 改变 |
+| Java 17 工具链 | `java17-maven` 当前为 Candidate；主分支目录中的 digest 为空 | 固定 JDK / Maven / 基础镜像后，以精确 digest 晋级 | 目前不能按 Active 工具链供正式业务项目消费；历史发布记录不能覆盖当前目录状态 |
+| Java 21 工具链 | `java21-maven` 当前为 Candidate；本次 Candidate 记录中的镜像 digest 为 `sha256:8f771c4a767d85a9500543a601f36ef94140b34325a0ff2c778d9dd34c2805d6` | 完成签名、SBOM、漏洞证明、SLSA、当前安全扫描、独立审批和目录 PR | 最近晋级运行 #42336243998 在漏洞扫描报告 evidence SHA256 交叉校验处失败；没有进入 SLSA、晋级前新 Trivy 扫描或独立审批 |
+| Java 版本组合 | `ci/toolchain-versions.json` 中 `java-temurin-17-maven-3.10` 与 `java-temurin-21-maven-3.10` 均为 Candidate | 按业务兼容性逐个晋级 | Candidate 状态不等于可被生产项目消费 |
+| 工具链证据链 | `.github/workflows/promote-toolchain.yml` 已实现审批前 Pre-flight 和审批后重新扫描；PR #59 修正了 in-toto subject digest 表示格式 | 让登记证据与实际 Attestation 内容在每个摘要层面一致 | PR #59 的格式修复不代表 evidence SHA256、SLSA 和 Trivy 后续门禁已经全部通过 |
+| Jenkins Shared Library | `vars/javaToolchainBuild.groovy`、Java Toolchain Spec 和 Mock Pipeline 测试已在仓库中 | 连接受保护的企业 Shared Library，消费 Active digest | 企业 Jenkins Controller、Agent、全局 Library 和 Credentials 尚未形成真实端到端验收 |
+| 企业 Harbor | 当前仓库已验证的镜像链路使用 GHCR；未见企业 Harbor endpoint / Robot / API 扫描轮询配置 | 按企业实际 Harbor 版本接入并完成 HA、扫描和灾备验收 | Harbor 的真实服务、扫描适配器和恢复演练未验收 |
+| Java 代表项目 | 仓库有独立 Maven 消费样例和 Mock/自动化验证 | 使用真实业务项目完成兼容性双跑 | 尚无真实企业业务项目兼容性验收记录 |
+| 灾备 | 文档有备份、恢复和校验设计 | 保护镜像、元数据、扫描和签名证据 | 没有真实 Harbor/Artifact Repository 灾备演练，不能声称 RTO/RPO 已达成 |
+
+### 34.1 最新 Java 21 晋级运行的准确结论
+
+[Promote Toolchain Candidate #42336243998](https://github.com/iwacollection/CICD/actions/runs/42336243998) 在提交 `2dcb37ee6ff142c6fe8cb21c9becf1429caa63d0` 上执行，结果为 `failure`。
+
+- Candidate 身份检查和镜像签名验证成功。
+- SBOM 与漏洞扫描 Attestation 的 subject digest 比对已通过。
+- 随后校验 `verified-scan.json` 的 canonical SHA256 时，与 Candidate 登记的扫描报告摘要不一致，Pre-flight 失败。
+- GitHub SLSA Provenance、晋级前重新运行的 Trivy 和当前安全策略复核均未执行（skipped）。
+- `toolchain-production` 独立审批 Job 为 skipped；没有审批完成，没有 catalog Promotion PR，也没有 Active 状态。
+
+这不是“Trivy 已经发现漏洞”的证据，也不是“Provenance 已通过”的证据。当前已知失败点是证据内容摘要不一致；其根因尚待单独定位。旧的 2026-10-30 Java 17 Candidate 发布记录保留为历史事件，不应拿来覆盖此处的当前目录状态。
+
+**上线状态只有在对应运行证据存在时才能更新。** 文档合并、JSON 校验、PR 检查通过或镜像 Push 成功，都不能代替 Candidate 晋级完成。
 
 ---
 

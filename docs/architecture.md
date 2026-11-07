@@ -187,9 +187,23 @@ examples/              可跑通的最小示例
 
 如果专题需要增加新细节，优先更新其主文档，再从其他文档链接过去；不要在多处复制同一套命令、阈值和状态表。
 
+## 9. 三条不同的交付控制链
+
+不要把工具链晋级、业务制品晋级和 Kubernetes 运行时验证合并成一个“发布成功”状态。
+
+| 控制链 | 操作对象 | 权威入口 | 成功状态的含义 |
+|---|---|---|---|
+| 工具链晋级 | JDK / 编译器 / SDK 容器镜像 | `.github/workflows/promote-toolchain.yml` | Candidate 证据验证和独立审批通过，catalog PR 合并后才是 Active |
+| 业务制品晋级 | Artifact Contract v2 Bundle | `.github/workflows/promote.yml` | 同一个 Bundle digest 按环境顺序写入 GitHub Deployment pointer |
+| 运行时验证 | 应用 Pod、GitOps revision、imageID | `.github/workflows/verify-runtime-deployment.yml` | 只读确认集群实际运行镜像与预期一致，不会部署或修复应用 |
+
+另外，`.github/workflows/release.yml` 调用 `release_strategy.py` 生成渐进式发布期望状态。它与业务制品 Promotion pointer 不是同一个动作；在没有外部控制器执行和运行时反馈证据时，不应把渲染结果写成真实切流。
+
+工具链 Candidate 晋级的详细步骤见[工具链 Candidate 晋级操作手册](toolchain-promotion-runbook.md)；业务制品身份和环境指针见[制品、长期归档、晋级与回滚](artifacts-promotion-and-rollback.md)；集群镜像 readback 见[Argo CD / Kubernetes 部署后运行验证](argocd-kubernetes-runtime-verification.md)。
+
 ## 10. 制品晋级与发布控制：必须区分“授权”和“上线”
 
-当前仓库有两条不同的控制链：
+本节只讨论业务制品晋级与渐进式发布这两条业务发布控制链：
 
 **制品晋级（已实现 GitHub 侧记录）**
 
