@@ -15,44 +15,27 @@ on:
 permissions:
   actions: read
   attestations: read
-  contents: write
-  deployments: write
+  contents: read
+  deployments: read
   packages: read
-  pull-requests: write
 
 concurrency:
   group: toolchain-promotion-${{ inputs.toolchain }}
   cancel-in-progress: false
 
 jobs:
-  promote:
+  preflight:
+    name: Verify candidate before production approval
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: toolchain-production
     steps:
       - name: Checkout trusted verifier
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: main
-          persist-credentials: true
-          token: ${{ secrets.TOOLCHAIN_PROMOTION_TOKEN }}
-
-      - name: Require independent environment approval policy
-        env:
-          GH_TOKEN: ${{ secrets.TOOLCHAIN_PROMOTION_TOKEN }}
-        run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/environments/toolchain-production" > environment.json
-          jq -e '
-            [.protection_rules[]? | select(.type == "required_reviewers")] as $rules
-            | ($rules | length) > 0
-              and ([ $rules[] | select((.reviewers // []) | length > 0) ] | length) > 0
-              and ([ $rules[] | select(.prevent_self_review == true) ] | length) > 0
-          ' environment.json >/dev/null || {
-            echo "toolchain-production must have at least one Required reviewer and Prevent self-review enabled." >&2
-            exit 1
-          }
+          persist-credentials: false
+          token: ${{ github.token }}
 
       - name: Login GHCR read-only
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -163,6 +146,95 @@ jobs:
         env:
           TOOLCHAIN: ${{ inputs.toolchain }}
           DIGEST: ${{ inputs.digest }}
+
+
+  promote:
+    name: Approve and open promotion PR
+    needs: preflight
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: toolchain-production
+    permissions:
+      actions: read
+      contents: write
+      deployments: write
+      packages: read
+      pull-requests: write
+    steps:
+      - name: Checkout trusted verifier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: true
+          token: ${{ secrets.TOOLCHAIN_PROMOTION_TOKEN }}
+
+      - name: Require independent environment approval policy
+        env:
+          GH_TOKEN: ${{ secrets.TOOLCHAIN_PROMOTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/environments/toolchain-production" > environment.json
+          jq -e '
+            [.protection_rules[]? | select(.type == "required_reviewers")] as $rules
+            | ($rules | length) > 0
+              and ([ $rules[] | select((.reviewers // []) | length > 0) ] | length) > 0
+              and ([ $rules[] | select(.prevent_self_review == true) ] | length) > 0
+          ' environment.json >/dev/null || {
+            echo "toolchain-production must have at least one Required reviewer and Prevent self-review enabled." >&2
+            exit 1
+          }
+
+      - name: Re-check exact registered candidate after approval
+        id: approved_candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/toolchain_registry.py inspect \
+            --toolchain "$TOOLCHAIN" --digest "$DIGEST" > candidate.json
+          test "$(jq -r .toolchain candidate.json)" = "$TOOLCHAIN"
+          test "$(jq -r .digest candidate.json)" = "$DIGEST"
+          IMMUTABLE_REFERENCE="$(jq -er .immutable_reference candidate.json)"
+          case "$IMMUTABLE_REFERENCE" in
+            *@${DIGEST}) ;;
+            *) echo "Candidate immutable reference does not match the requested digest." >&2; exit 1 ;;
+          esac
+          echo "immutable_reference=$IMMUTABLE_REFERENCE" >> "$GITHUB_OUTPUT"
+
+      - name: Login GHCR read-only for fresh post-approval scan
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Re-scan exact digest after production approval
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.approved_candidate.outputs.immutable_reference }}
+          scanners: vuln,misconfig,secret,license
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          format: json
+          output: post-approval-security.json
+          exit-code: "0"
+          version: v0.70.0
+
+      - name: Enforce fresh post-approval security policy
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/supply_chain_policy.py \
+            --skip-dockerfiles \
+            --report post-approval-security.json \
+            --toolchain "$TOOLCHAIN" \
+            --image-digest "$DIGEST"
 
       - name: Record human-approved candidate
         env:
