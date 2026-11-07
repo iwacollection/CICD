@@ -198,17 +198,24 @@ python3 scripts/ci/toolchain_catalog.py --consumer-matrix
 ```text
 修改 Dockerfile / build context / toolchain catalog
   -> Pull Request
-  -> Toolchain Verify（构建、冒烟、扫描、策略检查）
-  -> Platform Validate
+  -> Toolchain Verify + Platform Validate
   -> 合并 main
-  -> Toolchain Supply Chain 发布 Candidate
-  -> 记录精确 image@sha256、SBOM 和 provenance
-  -> 人工审查 Promotion PR
-  -> catalog 状态改为 active 并写入真实 digest
+  -> Toolchain Supply Chain 构建并发布 Candidate
+  -> 登记精确 image@sha256、SBOM、扫描证明和来源证明
+  -> 手动启动 Promote Toolchain Candidate（main）
+  -> Pre-flight：验镜像签名、SBOM / vuln Attestation、证据摘要、SLSA、Trivy 和当前策略
+  -> Pre-flight 全部成功后，才进入 toolchain-production 独立审批
+  -> 审批后重新读取同一个 Candidate digest，再跑 Trivy 和当前策略
+  -> 写入 human-approved Candidate 记录
+  -> 自动创建 catalog Promotion PR（不自动合并）
+  -> PR 正常检查和合并
+  -> ci/toolchains.json 状态才变为 active
   -> 业务构建引用 Toolchain ID
 ```
 
-不要在 PR 阶段给业务项目开放 Candidate 消费权限。也不要因为镜像 push 成功就把它称为 Active。
+**审批顺序不能反过来：Pre-flight 必须在独立人工审批之前完成。** Pre-flight 任一门禁失败时，审批 Job 应为 skipped；skipped 不代表通过。审批后还要对精确 digest 做新的 Trivy 扫描，避免审批等待期间安全状态变化。详细输入、操作、失败判读和当前 Java 21 状态以[工具链 Candidate 晋级操作手册](toolchain-promotion-runbook.md)为准。
+
+不要在 PR 阶段给业务项目开放 Candidate 消费权限。也不要因为镜像 push 成功、签名存在或审批人点击通过，就把它称为 Active。
 
 ### 3. 发布后必须核对什么
 
