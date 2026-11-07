@@ -26,10 +26,18 @@ Candidate
    | PR Verify: build + smoke test
    | main Publish: push + SBOM + provenance
    v
-Promotion Record
+Candidate 审核工作流
    |
-   | 人工/自动审核真实 digest
-   | 修改 ci/toolchains.json
+   | Pre-flight：签名 / SBOM / 扫描证明 / 摘要 / SLSA / Trivy / 策略
+   | 全部成功后才进入独立 Environment 审批
+   v
+审批后复扫 + human-approved 记录
+   |
+   | 自动创建 catalog Promotion PR（不自动合并）
+   v
+PR 检查与正常合并
+   |
+   | ci/toolchains.json 状态更新
    v
 Active
    |
@@ -145,7 +153,7 @@ Runner Image Prewarm
 - `active`：已经批准的不可变镜像身份。新工具链的 PR 不能触发 Active 镜像重建或重新发布，也不能把 Active 的 digest 静默替换为新构建结果。
 - `retired`：不参与构建和消费，历史 digest 保留用于审计和恢复。
 
-这样可以避免一个新 Candidate 的提交触发全仓库 Active 镜像重建，也避免某个旧 Active 镜像的当前漏洞扫描结果阻塞无关的 Candidate 构建。Candidate 的 digest 为空表示尚待首次发布或经审批请求重建；发布成功后，流水线会自动将真实 digest 和完整 build context SHA256 登记到 GitHub Deployment registry。人工审核晋级通过后会自动创建 catalog Promotion PR，把真实 digest 与完整 build context/build definition SHA256 写回 Registry；PR 仍需正常代码审查和合并。后续矩阵会跳过已有 digest 的 Candidate，但在跳过之前会重新计算 Docker build context 的目录与文件内容摘要；只要 Dockerfile、上下文文件新增/删除/修改，或镜像地址、Dockerfile 路径、平台、smoke command 等目录定义字段变化，摘要/构建定义指纹就会不匹配并让校验失败，而不是静默跳过。需要重新构建时，必须通过 PR 显式清空该 Candidate digest，再更新输入并重新走构建、扫描、签名和发布流程。
+这样可以避免一个新 Candidate 的提交触发全仓库 Active 镜像重建，也避免某个旧 Active 镜像的当前漏洞扫描结果阻塞无关的 Candidate 构建。Candidate 的 digest 为空表示尚待首次发布或经审批请求重建；发布成功后，流水线会自动将真实 digest 和完整 build context SHA256 登记到 GitHub Deployment registry。随后由 `.github/workflows/promote-toolchain.yml` 执行独立晋级：先在 Pre-flight 中核验镜像签名、SBOM 与漏洞扫描 Attestation、subject digest、证据内容摘要、GitHub SLSA Provenance、精确 digest 的新 Trivy 扫描和当前策略；Pre-flight 全部成功后，才进入 `toolchain-production` Environment 等待独立审批。审批后再次读取同一个 digest、重新扫描并通过当前策略，才记录 human-approved Candidate 并自动创建 catalog Promotion PR。该 PR 不会自动合并；只有 PR 按仓库规则合并后，`ci/toolchains.json` 才更新为 Active。不要把 Environment 审批当作 catalog PR 审查，也不要把 catalog PR 合并当作真实 Jenkins / Kubernetes 部署验收。后续矩阵会跳过已有 digest 的 Candidate，但在跳过之前会重新计算 Docker build context 的目录与文件内容摘要；只要 Dockerfile、上下文文件新增/删除/修改，或镜像地址、Dockerfile 路径、平台、smoke command 等目录定义字段变化，摘要/构建定义指纹就会不匹配并让校验失败，而不是静默跳过。需要重新构建时，必须通过 PR 显式清空该 Candidate digest，再更新输入并重新走构建、扫描、签名和发布流程。
 
 Active 镜像的持续漏洞复扫属于独立的 Registry/安全运营任务，应按 Active digest 扫描并触发准入阻断或升级流程；不能通过重新构建 Active 镜像来代替复扫。
 
