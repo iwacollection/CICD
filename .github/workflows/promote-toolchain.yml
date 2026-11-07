@@ -76,7 +76,13 @@ jobs:
             --toolchain "$TOOLCHAIN" --digest "$DIGEST" > candidate.json
           test "$(jq -r .toolchain candidate.json)" = "$TOOLCHAIN"
           test "$(jq -r .digest candidate.json)" = "$DIGEST"
-          echo "IMAGE=$(jq -r .immutable_reference candidate.json)" >> "$GITHUB_ENV"
+          IMMUTABLE_REFERENCE="$(jq -er .immutable_reference candidate.json)"
+          test "$IMMUTABLE_REFERENCE" = "ghcr.io/iwacollection/cicd-toolchain-${TOOLCHAIN#*-}@${DIGEST}" || {
+            echo "Candidate immutable reference does not match the requested digest." >&2
+            exit 1
+          }
+          echo "immutable_reference=$IMMUTABLE_REFERENCE" >> "$GITHUB_OUTPUT"
+          echo "IMAGE=$IMMUTABLE_REFERENCE" >> "$GITHUB_ENV"
           echo "SOURCE_COMMIT=$(jq -r .source_commit candidate.json)" >> "$GITHUB_ENV"
 
       - name: Independently verify image signature
