@@ -202,6 +202,7 @@ jobs:
             *@${DIGEST}) ;;
             *) echo "Candidate immutable reference does not match the requested digest." >&2; exit 1 ;;
           esac
+          echo "immutable_reference=$IMMUTABLE_REFERENCE" >> "$GITHUB_OUTPUT"
 
       - name: Login GHCR read-only for fresh post-approval scan
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
