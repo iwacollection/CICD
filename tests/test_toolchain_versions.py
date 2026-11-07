@@ -17,7 +17,7 @@ class ToolchainVersionRegistryTests(unittest.TestCase):
         self.assertEqual([], validate_versions(self.registry, self.catalog))
     def test_matrix_contains_only_active_and_candidate(self):
         matrix = build_matrix(self.registry, self.catalog)
-        self.assertEqual({'java-temurin-17-maven-3.10', 'go-1.26.10', 'cpp-gcc-13'}, {x['combination_id'] for x in matrix['include']})
+        self.assertEqual({'java-temurin-17-maven-3.10', 'java-temurin-21-maven-3.10', 'go-1.26.10', 'cpp-gcc-13', 'cpp-gcc-12'}, {x['combination_id'] for x in matrix['include']})
         self.assertTrue(all(x['status'] in {'active', 'candidate'} for x in matrix['include']))
     def test_project_resolution_rejects_candidate(self):
         with self.assertRaisesRegex(ValueError, 'allowed statuses'):
@@ -28,8 +28,14 @@ class ToolchainVersionRegistryTests(unittest.TestCase):
         self.assertEqual('', result['immutable_reference'])
         self.assertTrue(result['verification_requires_image_build'])
     def test_planned_combination_is_not_runnable(self):
+        planned_registry = json.loads(json.dumps(self.registry))
+        planned_catalog = json.loads(json.dumps(self.catalog))
+        combination = next(x for x in planned_registry['combinations'] if x['id'] == 'java-temurin-21-maven-3.10')
+        combination['status'] = 'planned'
+        toolchain = next(x for x in planned_catalog['toolchains'] if x['id'] == 'java21-maven')
+        toolchain['status'] = 'planned'
         with self.assertRaisesRegex(ValueError, 'is planned'):
-            resolve_version(self.registry, self.catalog, 'java', '21.0.12.1+1', 'maven', '3.10.0', True)
+            resolve_version(planned_registry, planned_catalog, 'java', '21.0.12.1+1', 'maven', '3.10.0', True)
     def test_retired_combination_is_not_runnable(self):
         with self.assertRaisesRegex(ValueError, 'is retired'):
             resolve_version(self.registry, self.catalog, 'go', '1.25.14', 'go', '1.25.14', True)
