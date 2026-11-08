@@ -590,6 +590,42 @@ sys.exit(23 if fmt == 'json' else 0)
         self.assertEqual(result["job_summary"]["runtime"]["median_ms"], 10000)
         self.assertEqual(result["ci_stage_summary"], {})
 
+    def test_end_to_end_api_fetch_uses_current_attempt_and_paginates_jobs(self) -> None:
+        from end_to_end_metrics import fetch_workflow_run_data
+
+        first_job = {"id": 1, "name": "first"}
+        second_job = {"id": 2, "name": "second"}
+        third_job = {"id": 3, "name": "third"}
+        run = {"id": 42, "run_attempt": 3, "status": "completed"}
+        with patch(
+            "end_to_end_metrics._api_get_json",
+            side_effect=[
+                run,
+                {"jobs": [first_job, second_job]},
+                {"jobs": [third_job]},
+            ],
+        ) as api_get:
+            fetched_run, jobs = fetch_workflow_run_data(
+                "iwacollection/CICD",
+                42,
+                "test-token",
+                api_url="https://api.example.test",
+                per_page=2,
+            )
+
+        self.assertEqual(fetched_run, run)
+        self.assertEqual(jobs, [first_job, second_job, third_job])
+        requested_urls = [call.args[0] for call in api_get.call_args_list]
+        self.assertEqual(
+            requested_urls[1],
+            "https://api.example.test/repos/iwacollection/CICD/actions/runs/42/attempts/3/jobs?per_page=2&page=1",
+        )
+        self.assertEqual(
+            requested_urls[2],
+            "https://api.example.test/repos/iwacollection/CICD/actions/runs/42/attempts/3/jobs?per_page=2&page=2",
+        )
+
+
     def test_end_to_end_observability_runs_after_completed_main_build_matrix(self) -> None:
         workflow = (
             ROOT / ".github" / "workflows" / "ci-end-to-end.yml"
