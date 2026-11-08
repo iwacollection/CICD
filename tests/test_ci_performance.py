@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import subprocess
 import tempfile
 import time
 import unittest
@@ -20,6 +21,7 @@ from package_artifact import build_artifact_name  # noqa: E402
 from security_evidence import create_manifest, merge_security_evidence  # noqa: E402
 from toolchain_catalog import load_toolchain_catalog, toolchain_identity  # noqa: E402
 from validate_config import load_catalog  # noqa: E402
+from resource_telemetry import calculate_resource_delta  # noqa: E402
 
 
 class CiPerformanceTests(unittest.TestCase):
@@ -201,6 +203,7 @@ class CiPerformanceTests(unittest.TestCase):
                 self.assertTrue(os.environ["CCACHE_STATSLOG"].endswith(".ci-telemetry/ccache.stats.log"))
                 self.assertIn("CCACHE_DIR=/ccache", args)
                 self.assertIn("CCACHE_STATSLOG=/workspace/.ci-telemetry/ccache.stats.log", args)
+                self.assertIn("CCACHE_MAXSIZE=2G", args)
                 self.assertGreaterEqual(int(jobs), 1)
 
     def test_ccache_build_local_statistics_include_hits_misses_size_and_cleanups(self) -> None:
@@ -226,6 +229,7 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(result["misses"], 2)
         self.assertEqual(result["hit_rate_percent"], 80.0)
         self.assertEqual(result["cleanup_events"], 3)
+        self.assertEqual(result["cleanup_events_scope"], "global_snapshot")
         self.assertEqual(result["files_in_cache"], 120)
         self.assertEqual(result["cache_size_gib"], 0.3)
 
