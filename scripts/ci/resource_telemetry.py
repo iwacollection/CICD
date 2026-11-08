@@ -55,9 +55,11 @@ def _read_io(path: Path) -> dict[str, dict[str, int]]:
     return result
 
 
-def _read_pressure(proc_root: Path, name: str) -> dict[str, dict[str, float]]:
+def _read_pressure(cgroup_root: Path, proc_root: Path, name: str) -> dict[str, dict[str, float]]:
     result: dict[str, dict[str, float]] = {}
-    for line in _read_text(proc_root / "pressure" / name).splitlines():
+    cgroup_path = cgroup_root / (name + ".pressure")
+    pressure_text = _read_text(cgroup_path) or _read_text(proc_root / "pressure" / name)
+    for line in pressure_text.splitlines():
         fields = line.split()
         if not fields:
             continue
@@ -86,7 +88,7 @@ def read_resource_snapshot(
         "memory_peak_bytes": _read_integer(cgroup_root / "memory.peak"),
         "io_stat": _read_io(cgroup_root / "io.stat"),
         "pressure": {
-            name: _read_pressure(proc_root, name)
+            name: _read_pressure(cgroup_root, proc_root, name)
             for name in ("cpu", "memory", "io")
         },
     }
