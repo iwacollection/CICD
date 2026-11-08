@@ -451,7 +451,8 @@ def format_aggregate_summary(value: dict[str, Any]) -> str:
         rate_text = f"{rate:.1f}%" if isinstance(rate, (int, float)) else "n/a"
         lines.append(
             f"- ccache: {ccache.get('hits', 0)} hits / {ccache.get('misses', 0)} misses "
-            f"({rate_text}); cleanup events: {ccache.get('cleanup_events_total', 0)}; "
+            f"({rate_text}); per-build cleanup events: {ccache.get('cleanup_events_total', 0)}; "
+            f"global cleanup snapshot max: {ccache.get('global_cleanup_snapshot_max', 0)}; "
             f"largest observed cache: {ccache.get('max_cache_size_gib', 0):.2f} GiB / "
             f"{ccache.get('max_files_in_cache', 0)} files"
         )
