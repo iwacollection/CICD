@@ -121,9 +121,14 @@ def collect_build_telemetry(
 def write_build_telemetry(workdir: Path, **kwargs: Any) -> Path:
     telemetry_dir = workdir / ".ci-telemetry"
     telemetry_dir.mkdir(parents=True, exist_ok=True)
-    output = telemetry_dir / "build-telemetry.json"
+    phase = os.environ.get("CI_BUILD_PHASE", "build").strip().lower() or "build"
+    if any(character not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for character in phase):
+        raise ValueError(f"invalid CI_BUILD_PHASE: {phase}")
+    telemetry = collect_build_telemetry(workdir, **kwargs)
+    telemetry["phase"] = phase
+    output = telemetry_dir / f"build-telemetry-{phase}.json"
     output.write_text(
-        json.dumps(collect_build_telemetry(workdir, **kwargs), indent=2, sort_keys=True) + "\n",
+        json.dumps(telemetry, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     return output
