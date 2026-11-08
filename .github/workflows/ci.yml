@@ -198,6 +198,7 @@ jobs:
     if: needs.discover.outputs.level_0_count != '0'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_0_matrix) }}
     permissions:
       contents: read
@@ -222,6 +223,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -232,6 +234,7 @@ jobs:
     if: needs.discover.outputs.level_1_count != '0' && needs.level_0.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_1_matrix) }}
     permissions:
       contents: read
@@ -256,6 +259,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -266,6 +270,7 @@ jobs:
     if: needs.discover.outputs.level_2_count != '0' && needs.level_1.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_2_matrix) }}
     permissions:
       contents: read
@@ -290,6 +295,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -300,6 +306,7 @@ jobs:
     if: needs.discover.outputs.level_3_count != '0' && needs.level_2.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_3_matrix) }}
     permissions:
       contents: read
@@ -324,6 +331,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -334,6 +342,7 @@ jobs:
     if: needs.discover.outputs.level_4_count != '0' && needs.level_3.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_4_matrix) }}
     permissions:
       contents: read
@@ -358,6 +367,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -368,6 +378,7 @@ jobs:
     if: needs.discover.outputs.level_5_count != '0' && needs.level_4.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_5_matrix) }}
     permissions:
       contents: read
@@ -392,6 +403,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -402,6 +414,7 @@ jobs:
     if: needs.discover.outputs.level_6_count != '0' && needs.level_5.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_6_matrix) }}
     permissions:
       contents: read
@@ -426,6 +439,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -436,6 +450,7 @@ jobs:
     if: needs.discover.outputs.level_7_count != '0' && needs.level_6.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_7_matrix) }}
     permissions:
       contents: read
@@ -460,6 +475,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
