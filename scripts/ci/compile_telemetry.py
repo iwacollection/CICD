@@ -37,8 +37,8 @@ def _first_float(text: str, labels: tuple[str, ...]) -> float | None:
 
 
 def parse_ccache_stats(build_stats: str, global_stats: str) -> dict[str, Any]:
-    direct = _counter(build_stats, ("cache hit direct", "cache hits direct"))
-    preprocessed = _counter(build_stats, ("cache hit preprocessed", "cache hits preprocessed"))
+    direct = _counter(build_stats, ("cache hit direct", "cache hits direct", "direct"))
+    preprocessed = _counter(build_stats, ("cache hit preprocessed", "cache hits preprocessed", "preprocessed"))
     hits = _counter(build_stats, ("hits",))
     if direct is None and preprocessed is None and hits is None:
         direct = 0
