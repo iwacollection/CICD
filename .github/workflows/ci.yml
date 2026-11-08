@@ -905,7 +905,6 @@ jobs:
             --failure-rate-percent 10 \
             --output-json ci-performance-regression.json \
             --output-markdown ci-performance-regression.md
-          cat ci-performance-regression.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload performance regression decision
         if: always()
