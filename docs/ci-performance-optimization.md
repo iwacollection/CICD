@@ -146,3 +146,10 @@ Trivy Action 默认启用其数据库和检查规则缓存。本工作流在同�
 性能告警当前采用非阻断模式：它提示 P95、扫描时间或失败率回归，但不改变 Build gate 的 Artifact Contract、安全扫描、attestation 或签名结果。这样可以先积累真实主干基线，不会因为首批样本不足或性能噪声阻断制品交付。指标报告缺失或 GitHub 历史 API 不可读时，Monitor 会明确显示 monitor_unavailable 警告，不会伪造健康结果。
 
 Build-stage P95 代表目标 Job 内实际执行构建命令的阶段，不是 GitHub Run 的完整排队时间。instrumented_workflow_span_ms 仍用于观察 DAG 并行后的流程跨度；两者不要相加，也不要把多个并行 Job 的时长当成墙钟时间。
+
+
+## 7. Cache identity and mixed-lane monitoring
+
+Compiler/vendor cache keys are scoped to project, target, immutable toolchain identity and declared source/lock-file fingerprint. They intentionally do not include upstream artifact fingerprints: an upstream artifact can change without invalidating this project's compiler object cache. DAG artifact download and identity verification remain independent and mandatory. The cache namespace was versioned to v2 so old cache archives cannot be mistaken for the revised key contract.
+
+The mainline performance monitor evaluates every Lane present in the current run independently. A mixed Full/Fast/Smoke run no longer collapses into an unknown lane: each lane gets its own Build P95 and Trivy P95 comparison against same-lane historical reports. Functional failure rate remains workflow-wide.
