@@ -139,11 +139,12 @@ Trivy Action 默认启用其数据库和检查规则缓存。本工作流在同�
 |---|---|---:|
 | Build-stage P95 | 当前 Run 同一 Lane 所有 Build Job 的 build 阶段 P95；与最近最多 20 个主干 Run 的 per-run P95 中位数比较 | 高于基线 15% |
 | Trivy scan P95 | 当前 Run 同一 Lane 所有 Security Job 的 trivy_scan 阶段 P95；与历史 per-run P95 中位数比较 | 高于基线 20% |
-| 功能构建失败率 | 最近最多 20 次已完成的主干 Build Matrix，加上当前 Build Gate 结果；失败、取消、超时计为失败 | 高于 10% |
+| 工作流失败结论率 | 最近最多 20 次已完成的主干 Build Matrix，加上当前 Build Gate 结果；只按 GitHub 的 `failure / (success + failure)` 计算 | 高于 10% |
+| 取消 / 超时 / action_required | 单独统计，不计入失败结论率分母；`cancelled` 可能是 `cancel-in-progress: true` 导致新提交替代旧运行 | 观察项，不触发失败率告警 |
 
-编译和扫描指标至少需要 5 份同 Lane 历史报告才开始判定；失败率至少需要 10 次已完成构建才开始判定。每次执行都会生成 ci-performance-regression.json/.md，作为 Actions Job Summary 和 30 天工件保存。超过阈值时发出 GitHub Actions warning 注解。
+编译和扫描指标至少需要 5 份同 Lane 历史报告才开始判定；工作流失败结论率至少需要 10 个 `success` / `failure` 结论才开始判定。取消、超时和 `action_required` 会展示在报告中，但不参与该比率。每次执行都会生成 ci-performance-regression.json/.md，作为 Actions Job Summary 和 30 天工件保存。超过阈值时发出 GitHub Actions warning 注解。
 
-性能告警当前采用非阻断模式：它提示 P95、扫描时间或失败率回归，但不改变 Build gate 的 Artifact Contract、安全扫描、attestation 或签名结果。这样可以先积累真实主干基线，不会因为首批样本不足或性能噪声阻断制品交付。指标报告缺失或 GitHub 历史 API 不可读时，Monitor 会明确显示 monitor_unavailable 警告，不会伪造健康结果。
+性能告警当前采用非阻断模式：它提示 P95、扫描时间或工作流失败结论率回归，但不改变 Build gate 的 Artifact Contract、安全扫描、attestation 或签名结果。这样可以先积累真实主干基线，不会因为首批样本不足或性能噪声阻断制品交付。指标报告缺失或 GitHub 历史 API 不可读时，Monitor 会明确显示 monitor_unavailable 警告，不会伪造健康结果。
 
 Build-stage P95 代表目标 Job 内实际执行构建命令的阶段，不是 GitHub Run 的完整排队时间。instrumented_workflow_span_ms 仍用于观察 DAG 并行后的流程跨度；两者不要相加，也不要把多个并行 Job 的时长当成墙钟时间。
 
@@ -152,7 +153,7 @@ Build-stage P95 代表目标 Job 内实际执行构建命令的阶段，不是 G
 
 Compiler/vendor cache keys are scoped to project, target, immutable toolchain identity and declared source/lock-file fingerprint. They intentionally do not include upstream artifact fingerprints: an upstream artifact can change without invalidating this project's compiler object cache. DAG artifact download and identity verification remain independent and mandatory. The cache namespace is v3. It includes the cache scope, target, immutable toolchain identity, project-specific source/lock fingerprint and run attempt. A restore-prefix is shared only for the same cache scope, target and toolchain identity.
 
-The mainline performance monitor evaluates every Lane present in the current run independently. A mixed Full/Fast/Smoke run no longer collapses into an unknown lane: each lane gets its own Build P95 and Trivy P95 comparison against same-lane historical reports. Functional failure rate remains workflow-wide.
+The mainline performance monitor evaluates every Lane present in the current run independently. A mixed Full/Fast/Smoke run no longer collapses into an unknown lane: each lane gets its own Build P95 and Trivy P95 comparison against same-lane historical reports. The workflow failure-conclusion rate remains workflow-wide; it counts only GitHub `failure` against `success + failure`. Cancelled, timed_out and action_required conclusions are surfaced separately and excluded from that rate. A run-level `failure` is not enough evidence to label the root cause a functional/code defect; failed job/step evidence is required for root-cause attribution. A `cancelled` conclusion also does not reveal whether cancellation was caused by concurrency supersession or a manual action.
 
 
 ## 8. Compile performance diagnostics and resource controls

@@ -400,7 +400,7 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(result["checks"]["build_stage_p95"]["baseline_samples"], 5)
         self.assertTrue(result["checks"]["build_stage_p95"]["breached"])
         self.assertTrue(result["checks"]["trivy_scan_p95"]["breached"])
-        self.assertEqual(result["checks"]["functional_failure_rate"]["failure_rate_percent"], 0)
+        self.assertEqual(result["checks"]["run_failure_rate"]["failure_rate_percent"], 0)
 
 
     def test_performance_regression_monitor_handles_mixed_lanes_independently(self) -> None:
@@ -443,11 +443,58 @@ class CiPerformanceTests(unittest.TestCase):
             "success",
             minimum_baseline_samples=5, minimum_failure_samples=10, history_limit=20,
         )
-        failure = result["checks"]["functional_failure_rate"]
+        failure = result["checks"]["run_failure_rate"]
         self.assertEqual(failure["sample_count"], 10)
         self.assertEqual(failure["failure_count"], 2)
         self.assertEqual(failure["failure_rate_percent"], 20)
         self.assertTrue(failure["breached"])
+
+    def test_performance_regression_excludes_cancelled_and_non_failure_outcomes(self) -> None:
+        from performance_regression import evaluate_regressions, format_markdown
+
+        report = {
+            "jobs": [
+                {"metadata": {"kind": "build", "lane": "smoke"}, "stages": {"build": {"duration_ms": 100}}},
+                {"metadata": {"kind": "security", "lane": "smoke"}, "stages": {"trivy_scan": {"duration_ms": 100}}},
+            ]
+        }
+        history = ["success"] * 5 + ["failure"] + ["cancelled"] * 2 + ["timed_out"] + ["action_required"]
+        result = evaluate_regressions(
+            report, [report] * 5, history, "success",
+            minimum_baseline_samples=5, minimum_failure_samples=7,
+            failure_rate_percent=10,
+        )
+
+        metric = result["checks"]["run_failure_rate"]
+        self.assertEqual(metric["sample_count"], 7)
+        self.assertEqual(metric["success_count"], 6)
+        self.assertEqual(metric["failure_count"], 1)
+        self.assertEqual(metric["failure_rate_percent"], 14.29)
+        self.assertEqual(metric["cancelled_count"], 2)
+        self.assertEqual(metric["cancelled_rate_percent"], 18.18)
+        self.assertEqual(metric["timed_out_count"], 1)
+        self.assertEqual(metric["action_required_count"], 1)
+        self.assertEqual(metric["excluded_outcome_count"], 4)
+        self.assertEqual(metric["total_completed_runs"], 11)
+        self.assertTrue(metric["breached"])
+        markdown = format_markdown(result)
+        self.assertIn("Run failure-conclusion rate", markdown)
+        self.assertIn("cancelled=2", markdown)
+        self.assertIn("does not reveal whether cancellation was caused", markdown)
+
+    def test_performance_regression_cancellations_do_not_warm_up_failure_rate(self) -> None:
+        from performance_regression import evaluate_regressions
+
+        report = {"jobs": []}
+        result = evaluate_regressions(
+            report, [report] * 5, ["cancelled"] * 12, "cancelled",
+            minimum_baseline_samples=5, minimum_failure_samples=10,
+        )
+        metric = result["checks"]["run_failure_rate"]
+        self.assertEqual(metric["sample_count"], 0)
+        self.assertEqual(metric["cancelled_count"], 13)
+        self.assertFalse(metric["evaluated"])
+        self.assertEqual(metric["status"], "warming_up")
 
     def test_performance_regression_warms_up_without_enough_history(self) -> None:
         from performance_regression import evaluate_regressions
@@ -461,7 +508,7 @@ class CiPerformanceTests(unittest.TestCase):
         result = evaluate_regressions(report, [report, report], ["success", "success"], "success")
         self.assertEqual(result["status"], "warming_up")
         self.assertFalse(result["checks"]["build_stage_p95"]["evaluated"])
-        self.assertFalse(result["checks"]["functional_failure_rate"]["evaluated"])
+        self.assertFalse(result["checks"]["run_failure_rate"]["evaluated"])
 
     def test_build_metadata_probes_tools_with_one_process(self) -> None:
         from types import SimpleNamespace
