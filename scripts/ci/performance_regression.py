@@ -126,7 +126,7 @@ def evaluate_regressions(
     # Timeouts and action_required outcomes are not proof of a code/test defect.
     # Keep all three visible, but exclude them from the success/failure rate.
     success_count = valid.count("success")
-    failure_count = valid.count("failure")
+    failure_count = sum(value in RUN_FAILURE_CONCLUSIONS for value in valid)
     rate_sample_count = success_count + failure_count
     rate = round(failure_count / rate_sample_count * 100.0, 2) if rate_sample_count else None
     cancelled_count = valid.count("cancelled")
@@ -392,7 +392,7 @@ def main() -> int:
         report["historical_metric_reports_found"] = len(historical_reports)
     except (OSError, ValueError, RuntimeError, urllib.error.URLError, zipfile.BadZipFile) as exc:
         report = {
-            "schema_version": 1,
+            "schema_version": 2,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "status": "monitor_unavailable",
             "branch": args.branch,
