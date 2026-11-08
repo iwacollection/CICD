@@ -150,6 +150,69 @@ Build-stage P95 代表目标 Job 内实际执行构建命令的阶段，不是 G
 
 ## 7. Cache identity and mixed-lane monitoring
 
-Compiler/vendor cache keys are scoped to project, target, immutable toolchain identity and declared source/lock-file fingerprint. They intentionally do not include upstream artifact fingerprints: an upstream artifact can change without invalidating this project's compiler object cache. DAG artifact download and identity verification remain independent and mandatory. The cache namespace was versioned to v2 so old cache archives cannot be mistaken for the revised key contract.
+Compiler/vendor cache keys are scoped to project, target, immutable toolchain identity and declared source/lock-file fingerprint. They intentionally do not include upstream artifact fingerprints: an upstream artifact can change without invalidating this project's compiler object cache. DAG artifact download and identity verification remain independent and mandatory. The cache namespace is v3. It includes the cache scope, target, immutable toolchain identity, project-specific source/lock fingerprint and run attempt. A restore-prefix is shared only for the same cache scope, target and toolchain identity.
 
 The mainline performance monitor evaluates every Lane present in the current run independently. A mixed Full/Fast/Smoke run no longer collapses into an unknown lane: each lane gets its own Build P95 and Trivy P95 comparison against same-lane historical reports. Functional failure rate remains workflow-wide.
+
+
+## 8. Compile performance diagnostics and resource controls
+
+### ccache: per-build hit/miss and global retention
+
+Every compiler invocation receives a per-build `CCACHE_STATSLOG` file. The build wrapper collects `ccache --show-log-stats` after the command, even if the build fails, and separately captures `ccache --show-stats --verbose` for cache size, file count and cleanup counters. It does not reset the shared cache's lifetime statistics.
+
+The report records:
+- Direct hits, preprocessed hits, misses, uncacheable calls and the per-build hit rate.
+- Current cache size, cache file count, configured size limit and cumulative cleanup events.
+- A default `CCACHE_MAXSIZE=2G` for each shared toolchain cache. It can be overridden in the runner environment for a larger project.
+
+**Cleanup events are not an exact eviction count.** ccache reports how many cleanup operations ran; each cleanup can remove a variable number of entries to return below configured limits. The cache file count and size are snapshots, not a per-file deletion audit. For misses, direct/preprocessed ratio and uncacheable reasons should be inspected together. If misses remain unexpectedly high, run a diagnostic build with ccache debug enabled and compare its per-object input and debug logs before changing sloppiness or hash settings.
+
+The stats log is intentionally separate per build, so concurrent jobs sharing one `CCACHE_DIR` do not need to reset global counters and do not contaminate one another's per-build hit rate.
+
+### Shared compiler cache and isolation
+
+The C++ example projects use `cache_scope=toolchain` and a common `source/.ci-cache/ccache` directory. Cache restore keys can reuse snapshots across projects only when these dimensions match:
+
+1. Cache scope.
+2. SoC, target OS and architecture.
+3. Immutable toolchain digest/identity.
+
+Each project still has its own exact save key and declared source/lock fingerprint. The cache is a performance optimization, not a source of truth: the compiler's ccache hash validates the actual compiler arguments, source and headers. Upstream Artifact Contract identity and download verification remain independent of ccache and are not relaxed.
+
+The current example workload is too small to claim large cross-project hit-rate gains. It establishes a safe sharing boundary and records per-project/per-build evidence. Promote wider sharing only when measured hit rate improves without cache restore time or eviction/cleanup rising enough to erase the gain.
+
+### CMake and Ninja diagnostics
+
+C++ build commands use `scripts/ci/cmake_build.py` to record:
+- `configure_generate_ms`: CMake configure plus generation in one CMake invocation.
+- `compile_link_ms`: the Ninja-backed build phase.
+- CMake Google Trace event count and trace file for deeper profiling.
+- Ninja graph node/edge counts, target count, command count and repeated command lines.
+- Actual entries added to `.ninja_log`, object compile edges and duplicate object output paths.
+- A post-build `ninja -n` check. A zero-action dry run confirms that the just-built tree is incrementally clean.
+
+CMake exposes configure and generation as one `cmake -S/-B` operation; the report deliberately does not invent a separately measured generation duration. Use the Google Trace to inspect individual configure/generate events. Ninja's graph and command tools are diagnostic evidence: repeated command text is a signal to inspect, not proof of duplicate execution. Duplicate output paths in the incremental log are counted separately.
+
+### Resource-aware concurrency
+
+When `build_parallelism=auto`, `run_build.py` computes an effective job count from visible CPUs, process affinity/cpuset, cgroup CPU quota and memory limit. The default memory model reserves 1 GiB for the OS/tools and budgets 2 GiB per compile job; both can be changed with `CI_BUILD_MEMORY_RESERVE_MB` and `CI_BUILD_MEMORY_PER_JOB_MB`. `CI_BUILD_MAX_JOBS` optionally caps the CPU-derived value. An explicitly configured positive `build_parallelism` remains an intentional override.
+
+Ninja also receives a load-average guard. At the matrix level, each DAG layer is limited to four concurrent Build Jobs. This avoids multiplying full-runner CPU concurrency by an unbounded number of simultaneous projects. Increase these limits only after comparing throughput, memory high-water mark, I/O wait and OOM/failure rates on representative builds.
+
+### Toolchain image cold starts
+
+Only nodes that need an actual compiler/toolchain container should pull it. The artifact-only `hello-service` and `hello-release` nodes now use the hosted runner for artifact verification, copying and packaging rather than pulling the GCC image just to copy files. Compiler nodes retain immutable digest-pinned images.
+
+The immutable image is reused if the current Runner already has the exact digest. GitHub-hosted runners are usually ephemeral, so local Docker layers are not assumed to persist between separate jobs. We deliberately did not tar/export the image into Actions Cache: that can add another large compression, upload, download and unpack cycle. Persistent self-hosted runners can benefit from the digest-verified local-image reuse path; hosted runners should be optimized based on measured image pull time and layer sizes.
+
+### Acceptance evidence for this pass
+
+A successful PR check is necessary but not enough to claim build speed improvement. The Build Matrix artifact should show:
+- Per-project ccache hits/misses and cache size/cleanup events.
+- CMake configure/generate versus compile/link distributions.
+- Ninja graph and incremental no-op result.
+- Effective CPU/memory parallelism per build.
+- Build-node count and whether non-compiling nodes skipped Docker image pulls.
+
+Compare at least one cold run and several warm runs on the same Runner class and toolchain identity before publishing a percentage improvement.
