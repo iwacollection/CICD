@@ -37,7 +37,7 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(result["lane"], "fast")
         self.assertEqual(
             result["projects"],
-            ["hello-lib", "hello-cpp", "hello-service", "hello-release"],
+            ["hello-lib", "hello-cpp", "embedded-firmware-template", "hello-service", "hello-release"],
         )
 
     def test_build_semantic_global_change_still_uses_full_lane(self) -> None:
@@ -47,7 +47,7 @@ class CiPerformanceTests(unittest.TestCase):
                 self.assertEqual(result["lane"], "full")
                 self.assertEqual(
                     result["projects"],
-                    ["hello-lib", "hello-cpp", "hello-service", "hello-release"],
+                    ["hello-lib", "hello-cpp", "embedded-firmware-template", "hello-service", "hello-release"],
                 )
 
     def test_smoke_lane_uses_fast_test_commands(self) -> None:
