@@ -468,6 +468,7 @@ jobs:
           CI_UPSTREAM_ROOT: ${{ steps.upstream.outputs.root }}
           CI_UPSTREAM_INDEX: ${{ steps.upstream.outputs.index }}
           CI_WORKING_DIRECTORY: ${{ inputs.path }}
+          CI_BUILD_JOBS: ${{ inputs.build_parallelism }}
         run: >-
           python3 .ci-platform/scripts/ci/hardware_execute.py
           --profile "${{ steps.hardware.outputs.profile }}"
@@ -524,6 +525,7 @@ jobs:
           CI_UPSTREAM_ROOT: ${{ steps.upstream.outputs.root }}
           CI_UPSTREAM_INDEX: ${{ steps.upstream.outputs.index }}
           CI_WORKING_DIRECTORY: ${{ inputs.path }}
+          CI_BUILD_JOBS: ${{ inputs.build_parallelism }}
         run: >-
           python3 .ci-platform/scripts/ci/hardware_execute.py
           --profile "${{ steps.hardware.outputs.profile }}"
