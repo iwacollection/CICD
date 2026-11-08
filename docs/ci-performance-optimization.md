@@ -171,7 +171,13 @@ The report records:
 
 The stats log is intentionally separate per build, so concurrent jobs sharing one `CCACHE_DIR` do not need to reset global counters and do not contaminate one another's per-build hit rate.
 
-\n\n### Trivy/SBOM parallel experiment baseline\n\nThe pre-change PR #65 Build Matrix artifact contained four Security Job samples. Trivy scan duration was median 12.71s / P95 14.37s; CycloneDX SBOM generation was median 4.62s / P95 5.24s; total Security Job duration was median 21.73s / P95 24.17s. These four targets are a small CI fixture sample, not a production-wide performance claim. The parallel implementation is an experiment: compare the same target set and runner class after the change, confirm policy/evidence gates remain green, and retain it only if Security Job wall-clock duration decreases without increasing failure or resource contention. Per-stage timers overlap after the change, so their durations must not be added to estimate the job wall time.\n\n### Shared compiler cache and isolation
+
+
+### Trivy/SBOM parallel experiment baseline
+
+The pre-change PR #65 Build Matrix artifact contained four Security Job samples. Trivy scan duration was median 12.71s / P95 14.37s; CycloneDX SBOM generation was median 4.62s / P95 5.24s; total Security Job duration was median 21.73s / P95 24.17s. These four targets are a small CI fixture sample, not a production-wide performance claim. The parallel implementation is an experiment: compare the same target set and runner class after the change, confirm policy/evidence gates remain green, and retain it only if Security Job wall-clock duration decreases without increasing failure or resource contention. Per-stage timers overlap after the change, so their durations must not be added to estimate the job wall time.
+
+### Shared compiler cache and isolation
 
 The C++ example projects use `cache_scope=toolchain` and a common `source/.ci-cache/ccache` directory. Cache restore keys can reuse snapshots across projects only when these dimensions match:
 
