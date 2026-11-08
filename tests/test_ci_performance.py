@@ -94,7 +94,7 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(item["build_parallelism"], "auto")
         self.assertEqual(item["cache_paths"], ".ci-cache/ccache")
         self.assertEqual(item["cache_scope"], "toolchain")
-        self.assertTrue(item["build_command"].startswith("python3 \"$CI_CMAKE_BUILD_HELPER\""))
+        self.assertTrue(item["build_command"].startswith("bash \"$CI_CMAKE_BUILD_HELPER\""))
 
     def test_stage_metrics_finalize_and_aggregate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
