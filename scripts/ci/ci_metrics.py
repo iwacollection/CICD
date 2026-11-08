@@ -182,26 +182,43 @@ def _parse_timestamp(value: object) -> datetime | None:
 
 
 def attach_build_telemetry(path: Path, telemetry_path: Path) -> bool:
-    """Attach host-collected build telemetry to the per-job report."""
-    if not telemetry_path.is_file():
+    """Attach one or more phase-specific build telemetry records to a job."""
+    if telemetry_path.is_dir():
+        telemetry_files = sorted(telemetry_path.glob("build-telemetry-*.json"))
+    elif telemetry_path.is_file():
+        telemetry_files = [telemetry_path]
+    else:
         return False
-    telemetry = json.loads(telemetry_path.read_text(encoding="utf-8"))
-    if not isinstance(telemetry, dict) or telemetry.get("schema_version") != 1:
-        raise ValueError(f"unsupported build telemetry file: {telemetry_path}")
+
+    records: list[dict[str, Any]] = []
+    for telemetry_file in telemetry_files:
+        telemetry = json.loads(telemetry_file.read_text(encoding="utf-8"))
+        if not isinstance(telemetry, dict) or telemetry.get("schema_version") != 1:
+            raise ValueError(f"unsupported build telemetry file: {telemetry_file}")
+        records.append(telemetry)
+    if not records:
+        return False
+
     value = _load(path)
-    value["build_telemetry"] = telemetry
+    value["build_telemetry"] = records
     _save(path, value)
     return True
 
 
 def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
-    build_reports = [
-        report.get("build_telemetry", {})
-        for report in reports
-        if isinstance(report.get("build_telemetry"), dict)
-    ]
+    build_reports: list[dict[str, Any]] = []
+    for report in reports:
+        raw = report.get("build_telemetry", [])
+        if isinstance(raw, dict):
+            raw = [raw]
+        if isinstance(raw, list):
+            build_reports.extend(item for item in raw if isinstance(item, dict))
+
+    # Only the build phase performs C/C++ compilation. Test invocations are
+    # retained for resource diagnostics but do not dilute compiler hit rate.
+    compile_reports = [item for item in build_reports if item.get("phase", "build") == "build"]
     cache_reports = [
-        report.get("ccache", {}) for report in build_reports
+        report.get("ccache", {}) for report in compile_reports
         if isinstance(report.get("ccache"), dict) and report.get("ccache", {}).get("available")
     ]
     hits = sum(int(item.get("hits") or 0) for item in cache_reports)
@@ -263,7 +280,8 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
                 no_op_successes += 1
 
     return {
-        "build_telemetry_jobs": len(build_reports),
+        "build_telemetry_invocations": len(build_reports),
+        "compile_invocations": len(compile_reports),
         "ccache": {
             "samples": len(cache_reports),
             "hits": hits,
