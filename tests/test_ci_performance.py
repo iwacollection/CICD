@@ -338,6 +338,10 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertIn("security_evidence.py merge", archive)
         self.assertIn("name: Aggregate CI stage timings", central)
         self.assertIn("name: Mainline CI performance regression monitor", central)
+        security_calls = central.split("uses: ./.github/workflows/dag-security.yml")
+        self.assertEqual(len(security_calls) - 1, 8)
+        for block in security_calls[1:]:
+            self.assertIn("lane: ${{ matrix.lane }}", block.split("\n\n", 1)[0])
         self.assertIn("CI_LANE: ${{ inputs.lane }}", build)
         self.assertIn("CI_LANE: ${{ inputs.lane }}", security)
 
