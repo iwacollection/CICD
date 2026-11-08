@@ -483,6 +483,132 @@ sys.exit(23 if fmt == 'json' else 0)
             self.assertEqual(metrics["stages"]["trivy_scan"]["exit_code"], 23)
             self.assertEqual(metrics["stages"]["sbom_generation"]["status"], "success")
 
+    def test_run_end_to_end_metrics_separates_run_queue_and_job_queue(self) -> None:
+        from end_to_end_metrics import build_end_to_end_report, format_markdown
+
+        run = {
+            "id": 12,
+            "run_attempt": 1,
+            "name": "Build Matrix",
+            "status": "completed",
+            "conclusion": "success",
+            "created_at": "2026-11-08T12:00:00Z",
+            "run_started_at": "2026-11-08T12:00:05Z",
+            "updated_at": "2026-11-08T12:01:05Z",
+            "head_branch": "main",
+            "head_sha": "abc",
+            "event": "push",
+            "html_url": "https://github.com/iwacollection/CICD/actions/runs/12",
+            "repository": {"full_name": "iwacollection/CICD"},
+        }
+        jobs = [
+            {
+                "id": 1,
+                "name": "Discover impacted dependency DAG",
+                "created_at": "2026-11-08T12:00:05Z",
+                "started_at": "2026-11-08T12:00:07Z",
+                "completed_at": "2026-11-08T12:00:20Z",
+                "status": "completed",
+                "conclusion": "success",
+            },
+            {
+                "id": 2,
+                "name": "DAG L0 / hello-lib",
+                "created_at": "2026-11-08T12:00:20Z",
+                "started_at": "2026-11-08T12:00:22Z",
+                "completed_at": "2026-11-08T12:01:00Z",
+                "status": "completed",
+                "conclusion": "success",
+            },
+            {
+                "id": 3,
+                "name": "Build gate",
+                "created_at": "2026-11-08T12:01:00Z",
+                "started_at": None,
+                "completed_at": None,
+                "status": "completed",
+                "conclusion": "skipped",
+            },
+        ]
+        performance = {
+            "earliest_job_started_at": "2026-11-08T12:00:08Z",
+            "latest_job_completed_at": "2026-11-08T12:00:59Z",
+            "instrumented_workflow_span_ms": 51000,
+            "stage_summary": {
+                "toolchain_image_pull": {
+                    "count": 2,
+                    "median_ms": 1000,
+                    "p95_ms": 1500,
+                    "max_ms": 1500,
+                }
+            },
+        }
+
+        result = build_end_to_end_report(run, jobs, performance)
+        self.assertEqual(result["run"]["run_queue_ms"], 5000)
+        self.assertEqual(result["run"]["run_end_to_end_ms"], 65000)
+        self.assertEqual(result["run"]["run_active_ms"], 60000)
+        self.assertEqual(result["workflow_window"]["first_job_start_after_run_started_ms"], 2000)
+        self.assertEqual(result["workflow_window"]["last_job_completion_to_run_updated_ms"], 5000)
+        self.assertEqual(result["workflow_window"]["jobs_execution_window_ms"], 53000)
+        self.assertEqual(result["workflow_window"]["first_job_start_to_first_metric_marker_ms"], 1000)
+        self.assertEqual(result["workflow_window"]["last_metric_completion_to_last_job_completion_ms"], 1000)
+        self.assertEqual(result["job_summary"]["job_count"], 3)
+        self.assertEqual(result["job_summary"]["started_job_count"], 2)
+        self.assertEqual(result["job_summary"]["completed_job_count"], 2)
+        self.assertEqual(result["job_summary"]["queue_wait"]["median_ms"], 2000)
+        self.assertEqual(result["job_summary"]["runtime"]["median_ms"], 25500)
+        self.assertEqual(result["ci_stage_summary"]["toolchain_image_pull"]["count"], 2)
+        self.assertIn("Run end-to-end (created to completed update)", format_markdown(result))
+
+    def test_run_end_to_end_report_handles_missing_performance_report(self) -> None:
+        from end_to_end_metrics import build_end_to_end_report
+
+        run = {
+            "id": 13,
+            "status": "completed",
+            "conclusion": "success",
+            "created_at": "2026-11-08T12:00:00Z",
+            "run_started_at": "2026-11-08T12:00:03Z",
+            "updated_at": "2026-11-08T12:00:20Z",
+        }
+        jobs = [
+            {
+                "id": 1,
+                "name": "Discover impacted dependency DAG",
+                "created_at": "2026-11-08T12:00:03Z",
+                "started_at": "2026-11-08T12:00:05Z",
+                "completed_at": "2026-11-08T12:00:15Z",
+                "status": "completed",
+                "conclusion": "success",
+            }
+        ]
+
+        result = build_end_to_end_report(run, jobs)
+        self.assertFalse(result["source"]["performance_report_available"])
+        self.assertEqual(result["run"]["run_end_to_end_ms"], 20000)
+        self.assertEqual(result["job_summary"]["runtime"]["median_ms"], 10000)
+        self.assertEqual(result["ci_stage_summary"], {})
+
+    def test_end_to_end_observability_runs_after_completed_main_build_matrix(self) -> None:
+        workflow = (
+            ROOT / ".github" / "workflows" / "ci-end-to-end.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("workflow_run:", workflow)
+        self.assertIn('workflows: ["Build Matrix"]', workflow)
+        self.assertIn("types: [completed]", workflow)
+        self.assertIn("branches: [main]", workflow)
+        self.assertIn("github.event.repository.default_branch", workflow)
+        self.assertIn("actions/checkout@11d5960a326750d5838078e36cf38b85af677262", workflow)
+        self.assertIn("actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093", workflow)
+        self.assertIn("run-id: ${{ github.event.workflow_run.id }}", workflow)
+        self.assertIn("github-token: ${{ secrets.GITHUB_TOKEN }}", workflow)
+        self.assertIn("end_to_end_metrics.py", workflow)
+        self.assertIn("retention-days: 90", workflow)
+        self.assertNotIn("pull_request:", workflow)
+
+
     def test_performance_regression_monitor_is_lane_scoped_and_detects_p95_regressions(self) -> None:
         from performance_regression import evaluate_regressions
 
