@@ -127,6 +127,7 @@ jobs:
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage platform_checkout
 
       - name: Checkout immutable platform scripts and policy
+        id: platform_checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: iwacollection/CICD
@@ -141,8 +142,19 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Finish platform checkout timer
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage platform_checkout
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.platform_checkout.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage platform_checkout --exit-code "$rc"
 
+
+      - name: Start trust lane selection timer
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage trust_lane_selection
 
       - name: Select trust lane
         id: trust
@@ -164,6 +176,20 @@ jobs:
               handle.write(f"hardware_pr={str(hardware_pr).lower()}\n")
           PY
 
+      - name: Finish trust lane selection timer
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.trust.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage trust_lane_selection --exit-code "$rc"
+
+      - name: Start hardware binding timer
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hardware_binding
+
       - name: Resolve central hardware binding
         id: hardware
         shell: bash
@@ -171,7 +197,23 @@ jobs:
           python3 .ci-platform/scripts/ci/hardware_binding.py
           --toolchain "${{ inputs.toolchain }}"
 
+      - name: Finish hardware binding timer
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.hardware.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hardware_binding --exit-code "$rc"
+
+      - name: Start hosted hardware PR validation timer
+        if: steps.trust.outputs.hardware_pr == 'true'
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hosted_hardware_pr_validation
+
       - name: Hosted hardware PR validation
+        id: hosted_hardware_pr_validation
         if: steps.trust.outputs.hardware_pr == 'true'
         shell: bash
         env:
@@ -187,7 +229,23 @@ jobs:
             --working-directory "source/$CI_WORKING_DIRECTORY" \
             --command "$CI_PR_VALIDATION_COMMAND"
 
+      - name: Finish hosted hardware PR validation timer
+        if: always() && steps.trust.outputs.hardware_pr == 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.hosted_hardware_pr_validation.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hosted_hardware_pr_validation --exit-code "$rc"
+
+      - name: Start hardware runner preflight timer
+        if: steps.hardware.outputs.is_hardware == 'true' && steps.trust.outputs.hardware_pr != 'true'
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hardware_preflight
+
       - name: Hardware Runner and SDK preflight
+        id: hardware_preflight
         if: steps.hardware.outputs.is_hardware == 'true' && steps.trust.outputs.hardware_pr != 'true'
         shell: bash
         env:
@@ -200,11 +258,23 @@ jobs:
           --working-directory "source/$CI_WORKING_DIRECTORY"
           --check-only
 
+      - name: Finish hardware runner preflight timer
+        if: always() && steps.hardware.outputs.is_hardware == 'true' && steps.trust.outputs.hardware_pr != 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.hardware_preflight.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hardware_preflight --exit-code "$rc"
+
       - name: Start upstream artifact download timer
         if: inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage upstream_artifact_download
 
       - name: Download previous DAG level artifacts
+        id: upstream_download
         if: inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -213,8 +283,15 @@ jobs:
           merge-multiple: false
 
       - name: Finish upstream artifact download timer
-        if: inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage upstream_artifact_download
+        if: always() && inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.upstream_download.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage upstream_artifact_download --exit-code "$rc"
 
 
       - name: Start upstream artifact resolution timer
@@ -241,8 +318,15 @@ jobs:
             --expected-repository "$GITHUB_REPOSITORY"
 
       - name: Finish upstream artifact resolution timer
-        if: inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage upstream_artifact_resolution
+        if: always() && inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.upstream.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage upstream_artifact_resolution --exit-code "$rc"
 
 
       - name: Start cache fingerprint timer
@@ -250,7 +334,7 @@ jobs:
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage cache_fingerprint
 
       - name: Compute declared cache fingerprint
-        id: cache-key
+        id: cache_key
         if: inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
         shell: bash
         env:
@@ -262,8 +346,15 @@ jobs:
           --patterns-json "$CI_CACHE_KEY_FILES"
 
       - name: Finish cache fingerprint timer
-        if: inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage cache_fingerprint
+        if: always() && inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.cache_key.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage cache_fingerprint --exit-code "$rc"
 
 
       - name: Start cache restore timer
@@ -271,6 +362,7 @@ jobs:
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage cache_restore
 
       - name: Restore build cache
+        id: cache_restore
         if: inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -280,8 +372,15 @@ jobs:
             dag-ci-v1-${{ inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ steps.upstream.outputs.fingerprint || 'no-upstream' }}-
 
       - name: Finish cache restore timer
-        if: inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage cache_restore
+        if: always() && inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.cache_restore.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage cache_restore --exit-code "$rc"
 
 
       - name: Start toolchain image pull timer
@@ -310,8 +409,15 @@ jobs:
           echo "image=$CI_CONTAINER_IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: Finish toolchain image pull timer
-        if: inputs.execution_mode == 'container' && steps.trust.outputs.hardware_pr != 'true'
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage toolchain_image_pull
+        if: always() && inputs.execution_mode == 'container' && steps.trust.outputs.hardware_pr != 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.container.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage toolchain_image_pull --exit-code "$rc"
 
 
       - name: Build
@@ -339,7 +445,12 @@ jobs:
           python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage build --exit-code "$build_rc"
           exit "$build_rc"
 
+      - name: Start hardware build timer
+        if: steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware == 'true'
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hardware_build
+
       - name: Vendor build with license lease
+        id: hardware_build
         if: steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware == 'true'
         shell: bash
         env:
@@ -353,6 +464,17 @@ jobs:
           --runner-labels-json '${{ inputs.runner_labels_json }}'
           --working-directory "source/$CI_WORKING_DIRECTORY"
           --phase build
+
+      - name: Finish hardware build timer
+        if: always() && steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware == 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.hardware_build.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hardware_build --exit-code "$rc"
 
       - name: Test
         if: inputs.test_command != '' && steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware != 'true'
@@ -379,7 +501,12 @@ jobs:
           python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage test --exit-code "$test_rc"
           exit "$test_rc"
 
+      - name: Start hardware test timer
+        if: inputs.test_command != '' && steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware == 'true'
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hardware_test
+
       - name: HIL test with device lease
+        id: hardware_test
         if: inputs.test_command != '' && steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware == 'true'
         shell: bash
         env:
@@ -394,11 +521,23 @@ jobs:
           --working-directory "source/$CI_WORKING_DIRECTORY"
           --phase test
 
+      - name: Finish hardware test timer
+        if: always() && inputs.test_command != '' && steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware == 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.hardware_test.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hardware_test --exit-code "$rc"
+
       - name: Start build metadata timer
         if: steps.trust.outputs.hardware_pr != 'true'
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage build_metadata
 
       - name: Collect build environment metadata
+        id: build_metadata
         if: steps.trust.outputs.hardware_pr != 'true'
         shell: bash
         env:
@@ -413,8 +552,15 @@ jobs:
           python3 .ci-platform/scripts/ci/collect_build_metadata.py "${args[@]}"
 
       - name: Finish build metadata timer
-        if: steps.trust.outputs.hardware_pr != 'true'
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage build_metadata
+        if: always() && steps.trust.outputs.hardware_pr != 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.build_metadata.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage build_metadata --exit-code "$rc"
 
       - name: Start artifact package timer
         if: steps.trust.outputs.hardware_pr != 'true'
@@ -455,8 +601,15 @@ jobs:
           python3 .ci-platform/scripts/ci/package_artifact.py "${args[@]}"
 
       - name: Finish artifact package timer
-        if: steps.trust.outputs.hardware_pr != 'true'
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage artifact_package
+        if: always() && steps.trust.outputs.hardware_pr != 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.package.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage artifact_package --exit-code "$rc"
 
       - name: Start artifact verification timer
         if: steps.trust.outputs.hardware_pr != 'true'
@@ -464,15 +617,23 @@ jobs:
 
 
       - name: Verify packaged artifact
+        id: artifact_verify
         if: steps.trust.outputs.hardware_pr != 'true'
         run: >-
           python3 .ci-platform/scripts/ci/verify_artifact.py
           --directory dist
           --expected-sha256 "${{ steps.package.outputs.digest }}"
 
-      - name: Finish artifact verification timer
-        if: steps.trust.outputs.hardware_pr != 'true'
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage artifact_verify
+      - name: Finish artifact verify timer
+        if: always() && steps.trust.outputs.hardware_pr != 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.artifact_verify.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage artifact_verify --exit-code "$rc"
 
       - name: Start artifact upload timer
         if: steps.trust.outputs.hardware_pr != 'true'
@@ -480,6 +641,7 @@ jobs:
 
 
       - name: Upload DAG artifact
+        id: artifact_upload
         if: steps.trust.outputs.hardware_pr != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -493,8 +655,15 @@ jobs:
           compression-level: 0
 
       - name: Finish artifact upload timer
-        if: steps.trust.outputs.hardware_pr != 'true'
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage artifact_upload
+        if: always() && steps.trust.outputs.hardware_pr != 'true'
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.artifact_upload.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage artifact_upload --exit-code "$rc"
 
 
       - name: DAG node summary
