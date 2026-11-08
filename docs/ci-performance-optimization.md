@@ -98,15 +98,20 @@ cmake --build build --parallel "$CI_BUILD_JOBS"
 | Job 类型 | 阶段 |
 |---|---|
 | Discover | source checkout、catalog validation、change detection、impact analysis、DAG planning |
-| Build | source/platform checkout、upstream artifact download/resolve、cache fingerprint/restore、toolchain image pull、build、test、build metadata、artifact package/verify/upload |
-| Security | source/platform checkout、Trivy scan、SBOM generation、supply-chain policy、security evidence upload |
+| Build | source/platform checkout、trust lane、hardware binding/preflight、upstream artifact download/resolve、cache fingerprint/restore、toolchain image pull、software build/test、hardware build/HIL test、build metadata、artifact package/verify/upload |
+| Security | source/platform checkout、Trivy scan、SBOM generation、supply-chain policy、security manifest、security evidence upload |
+
+每个阶段的结束步骤使用 `if: always()` 记录退出结果。失败阶段会保留实际耗时并标记 `failure`；Job 在阶段中断时由 finalizer 标记为 `interrupted`，不会把失败伪装成成功。记录指标的步骤使用 `continue-on-error`，避免统计工具故障覆盖真正的构建/安全失败。
+
+Trivy Action 默认启用其数据库和检查规则缓存。本工作流在同一个 Security Job 的第二次 Trivy 调用（SBOM 生成）使用 `skip-setup-trivy: true`，复用前一步已经安装的同版本二进制。没有设置 `TRIVY_SKIP_DB_UPDATE`，因此不会为了节省下载时间而主动跳过漏洞数据库更新。参考 [Trivy Action 缓存和重复 Setup 说明](https://github.com/aquasecurity/trivy-action#cache)。
 
 每个构建或扫描 Job 上传一个短期保留的 `ci-metrics-*` 工件。Build Matrix 的 `Aggregate CI stage timings` 汇总为：
 
-- `ci-performance-report.json`：原始 Job 和阶段数据；
-- `ci-performance-report.md`：阶段样本数、Median、P95、Max 和逐 Job 耗时。
+- `ci-performance-report.json`：原始 Job、阶段结果、任务类型分布和时间戳；
+- `ci-performance-report.md`：Job 类型的 Median/P95/Max、阶段样本数及成功/失败/中断数量；
+- `instrumented_workflow_span_ms`：从最早 Job 计时标记到最晚 Job 计时完成的墙钟跨度，用来观察并行工作的整体时间范围。
 
-汇总器不会把并行 Job 的耗时相加冒充端到端耗时。排队时间和 Workflow 端到端时长仍应从 GitHub Actions run/job 时间戳单独计算；本报告中的阶段耗时是 Job 内显式埋点的时间。
+注意，`instrumented_workflow_span_ms` 不是 GitHub Actions 的完整 Run Duration：它不包含首个计时标记前的排队/Runner 初始化，也不包含最后一个计时 Job 之后的 post-job cleanup。它不会把并行 Job 的耗时相加。正式复盘时仍应同时记录 GitHub Run 的开始/结束时间，区分排队、Runner 启动、任务依赖等待和 Job 内阶段耗时。
 
 ## 5. 验收方式
 
