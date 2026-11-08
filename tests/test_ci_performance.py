@@ -326,6 +326,16 @@ class CiPerformanceTests(unittest.TestCase):
                     "hit_rate_percent": 80.0, "cleanup_events": 1,
                     "cache_size_gib": 0.3, "files_in_cache": 120,
                 },
+                "resources": {
+                    "effective_jobs": 2,
+                    "after": {"memory_peak_bytes": 4096},
+                    "delta": {
+                        "cpu": {"throttled_usec": 500},
+                        "memory_events": {"oom_kill": 1},
+                        "io": {"rbytes": 1000, "wbytes": 2000},
+                        "pressure_total_usec": {"io": {"some": 2500}},
+                    },
+                },
                 "cmake_ninja": {
                     "configure_generate_ms": 1200,
                     "compile_link_ms": 800,
@@ -345,6 +355,11 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(summary["cmake_phases"]["configure_generate_ms"]["median_ms"], 1200)
         self.assertEqual(summary["ninja"]["graph_nodes"]["median"], 12)
         self.assertEqual(summary["incremental_noop_successes"], 1)
+        self.assertEqual(summary["resources"]["effective_jobs_median"], 2)
+        self.assertEqual(summary["resources"]["cpu_throttled_usec_total"], 500)
+        self.assertEqual(summary["resources"]["memory_peak_bytes_max"], 4096)
+        self.assertEqual(summary["resources"]["io_read_bytes_total"], 1000)
+        self.assertEqual(summary["resources"]["io_pressure_some_usec_total"], 2500)
 
     def test_performance_regression_monitor_is_lane_scoped_and_detects_p95_regressions(self) -> None:
         from performance_regression import evaluate_regressions
