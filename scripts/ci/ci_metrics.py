@@ -210,8 +210,42 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
 
     phase_values: dict[str, list[float]] = {}
     ninja_values: dict[str, list[float]] = {}
+    effective_jobs_values: list[float] = []
+    cpu_throttled_usec_total = 0
+    oom_kill_events_total = 0
+    memory_peak_values: list[int] = []
+    io_read_bytes_total = 0
+    io_write_bytes_total = 0
+    io_pressure_some_usec_total = 0
     no_op_successes = 0
     for item in build_reports:
+        resources = item.get("resources", {})
+        if isinstance(resources, dict):
+            effective_jobs = resources.get("effective_jobs")
+            if isinstance(effective_jobs, (int, float)):
+                effective_jobs_values.append(float(effective_jobs))
+            delta = resources.get("delta", {})
+            if isinstance(delta, dict):
+                cpu_delta = delta.get("cpu", {})
+                mem_delta = delta.get("memory_events", {})
+                io_delta = delta.get("io", {})
+                if isinstance(cpu_delta, dict):
+                    cpu_throttled_usec_total += int(cpu_delta.get("throttled_usec") or 0)
+                if isinstance(mem_delta, dict):
+                    oom_kill_events_total += int(mem_delta.get("oom_kill") or 0)
+                if isinstance(io_delta, dict):
+                    io_read_bytes_total += int(io_delta.get("rbytes") or 0)
+                    io_write_bytes_total += int(io_delta.get("wbytes") or 0)
+                pressure = delta.get("pressure_total_usec", {})
+                if isinstance(pressure, dict):
+                    io_pressure = pressure.get("io", {})
+                    if isinstance(io_pressure, dict):
+                        io_pressure_some_usec_total += int(io_pressure.get("some") or 0)
+            after = resources.get("after", {})
+            memory_peak = after.get("memory_peak_bytes") if isinstance(after, dict) else None
+            if isinstance(memory_peak, (int, float)):
+                memory_peak_values.append(int(memory_peak))
+
         cmake_ninja = item.get("cmake_ninja", {})
         if not isinstance(cmake_ninja, dict):
             continue
@@ -235,7 +269,8 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
             "hits": hits,
             "misses": misses,
             "hit_rate_percent": round(hits / total * 100.0, 2) if total else None,
-            "cleanup_events_total": sum(int(item.get("cleanup_events") or 0) for item in cache_reports),
+            "cleanup_events_total": sum(int(item.get("cleanup_events") or 0) for item in cache_reports if item.get("cleanup_events_scope", "build") == "build"),
+            "global_cleanup_snapshot_max": max((int(item.get("cleanup_events") or 0) for item in cache_reports if item.get("cleanup_events_scope") == "global_snapshot"), default=0),
             "max_cache_size_gib": max((float(item.get("cache_size_gib") or 0) for item in cache_reports), default=0),
             "max_files_in_cache": max((int(item.get("files_in_cache") or 0) for item in cache_reports), default=0),
         },
@@ -255,6 +290,17 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
                 "max": round(max(values), 2),
             }
             for name, values in sorted(ninja_values.items())
+        },
+        "resources": {
+            "samples": len(effective_jobs_values),
+            "effective_jobs_median": round(statistics.median(effective_jobs_values), 2) if effective_jobs_values else None,
+            "effective_jobs_max": max(effective_jobs_values) if effective_jobs_values else None,
+            "cpu_throttled_usec_total": cpu_throttled_usec_total,
+            "memory_peak_bytes_max": max(memory_peak_values) if memory_peak_values else None,
+            "oom_kill_events_total": oom_kill_events_total,
+            "io_read_bytes_total": io_read_bytes_total,
+            "io_write_bytes_total": io_write_bytes_total,
+            "io_pressure_some_usec_total": io_pressure_some_usec_total,
         },
         "incremental_noop_successes": no_op_successes,
     }
@@ -415,6 +461,19 @@ def format_aggregate_summary(value: dict[str, Any]) -> str:
         lines.append(
             f"- CMake {phase}: {item['count']} samples; median {item['median_ms'] / 1000:.2f}s; "
             f"P95 {item['p95_ms'] / 1000:.2f}s; max {item['max_ms'] / 1000:.2f}s"
+        )
+    resources = build_telemetry.get("resources", {})
+    if resources.get("samples", 0):
+        lines.append(
+            f"- Resource-aware jobs: median {resources.get('effective_jobs_median')} / "
+            f"max {resources.get('effective_jobs_max')}; CPU throttled {resources.get('cpu_throttled_usec_total', 0)} us; "
+            f"memory peak {resources.get('memory_peak_bytes_max') or 'n/a'} bytes; "
+            f"OOM kills {resources.get('oom_kill_events_total', 0)}"
+        )
+        lines.append(
+            f"- Block I/O: read {resources.get('io_read_bytes_total', 0)} bytes / "
+            f"write {resources.get('io_write_bytes_total', 0)} bytes; "
+            f"I/O PSI some {resources.get('io_pressure_some_usec_total', 0)} us"
         )
     ninja = build_telemetry.get("ninja", {})
     if ninja:
