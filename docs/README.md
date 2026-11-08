@@ -31,6 +31,7 @@
 - [Fast Lane 与影响分析](fast-lane-and-impact-analysis.md)：识别本次变更影响的项目，避免无关构建。
 - [真实依赖 DAG](dependency-dag-execution.md)：按依赖关系安排构建，支持安全并行。
 - [构建、缓存与依赖](build-cache-and-dependencies.md)：理解依赖下载、缓存命中和缓存失效时的处理。
+- [CI 构建性能优化与阶段观测](ci-performance-optimization.md)：理解构建与安全扫描并行、变更 Lane、Ninja/并行度及阶段耗时指标。
 
 ### 3. 平台怎样准备环境并完成构建、测试
 

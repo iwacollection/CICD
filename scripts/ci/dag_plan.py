@@ -88,7 +88,7 @@ def main() -> int:
     parser.add_argument("--toolchains", default="ci/toolchains.json")
     parser.add_argument("--hardware-profiles", default="ci/hardware-profiles.json")
     parser.add_argument("--projects-json", required=True)
-    parser.add_argument("--lane", choices=("fast", "full", "none"), required=True)
+    parser.add_argument("--lane", choices=("fast", "full", "none", "smoke"), required=True)
     args = parser.parse_args()
 
     data = load_catalog(Path(args.catalog))

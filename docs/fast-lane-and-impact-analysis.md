@@ -15,9 +15,11 @@ impact_analysis.py
         │
         ├─ CI / 工具链 / catalog 变化 ──> Full Lane：全部启用项目
         │
+        ├─ GitHub Actions 工作流变化 ─> Smoke Lane：声明的 smoke 项目及前置依赖
+        │
         ├─ 项目目录变化 ───────────────> Fast Lane：直接项目
         │                                  │
-        │                                  └─ depends_on 反向展开下游项目
+        │                                  └─ 扩展下游消费者及必要前置依赖
         │
         ├─ impact_paths 命中 ───────────> Fast Lane：声明受影响项目
         │
@@ -38,24 +40,31 @@ Fast Lane 不是“跳过质量检查”，而是把反馈范围缩小到本次�
 
 当前 Fast Lane：
 
-1. 只构建受影响项目及其下游依赖项目。
+1. 构建直接受影响项目、它们的所有下游消费者，以及为这些消费者提供准确制品所需的前置依赖。
 2. Target 如果配置 `fast_test_command`，Fast Lane 使用快速测试命令；没有配置则继续使用原 `test_command`，不会默认少测。
 3. Pull Request 只做 Build + Test，不生成和上传不可变发布制品。
 4. main push 仍会生成、校验并上传不可变制品，为后续部署保留同一制品链路。
 5. 新提交到来时继续使用 `cancel-in-progress: true`，旧的过期流水线让位给最新提交。
 
-## 3. Full Lane 什么时候自动触发
+## 3. Full、Smoke 与 None Lane 什么时候触发
 
-以下变更不会冒险使用局部构建：
+以下构建语义、项目目录或工具链定义会改变全局输入，必须触发 Full Lane：
 
 ```text
 ci/**
 scripts/ci/**
-.github/workflows/**
 docker/toolchains/**
 ```
 
-这些目录会改变项目 catalog、CI 执行语义、构建脚本或工具链环境，因此直接回退到所有启用项目。
+GitHub Actions 编排文件单独变化时，使用 Smoke Lane：
+
+```text
+.github/workflows/**
+```
+
+Smoke Lane 只运行 `ci/projects.json` 中声明 `ci_smoke: true` 的项目和它们所需的前置依赖，不扩展到 smoke 根项目的全部下游消费者。这样可以验证工作流调用、构建、测试、制品和安全门禁，而不会仅因修改 YAML 就重编译所有业务模块。如果没有声明 smoke 项目，则安全回退到 Full Lane。
+
+项目目录变化使用 Fast Lane：反向展开所有下游消费者，再把它们所需的前置依赖纳入本次 DAG。文档等忽略路径使用 None Lane。无法取得可靠 diff 或遇到未归属的构建相关路径时，仍然 Full Lane。
 
 如果出现一个没有任何项目声明归属的新路径，例如：
 
@@ -156,7 +165,7 @@ Target 可以同时配置完整测试和快速测试：
 语义：
 
 ```text
-Fast Lane
+Fast Lane / Smoke Lane
 → fast_test_command
 
 Full Lane
@@ -209,3 +218,10 @@ Fast Lane
 ```
 
 因此它不是“为了速度赌不会出问题”，而是通过明确的项目所有权、依赖关系和安全回退，在保持正确性的前提下减少无效工作。
+
+
+## 9. 构建耗时、独立安全扫描与 Ninja
+
+当前 DAG Build Node 只做依赖制品解析、缓存恢复、编译、测试和 Artifact Contract v2 处理。Trivy、CycloneDX SBOM 和供应链策略由独立 Security Job 执行，并行于后续 DAG 层级；`security_complete` 最终门禁仍要求每个计划 target 的扫描成功。只有构建和安全证据都通过，可信分支才会进行 provenance attestation 和归档。
+
+启用的 C/C++ 示例使用 Ninja，target 的 `build_parallelism` 可以设为 `"auto"` 或正整数。阶段耗时通过 `ci-metrics-*` 工件采集，并在 Build Matrix 的 `ci-performance-report` 中汇总。详见[CI 构建性能优化与阶段观测](ci-performance-optimization.md)。

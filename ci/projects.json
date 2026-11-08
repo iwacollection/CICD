@@ -16,7 +16,7 @@
           "runner_labels": [
             "ubuntu-latest"
           ],
-          "build_command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && cmake --build build --parallel 2 && ccache --show-stats",
+          "build_command": "cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && cmake --build build --parallel \"$CI_BUILD_JOBS\" && ccache --show-stats",
           "test_command": "test -s build/libhello-lib.a && test -f include/hello_lib.h",
           "fast_test_command": "test -s build/libhello-lib.a && test -f include/hello_lib.h",
           "artifact_paths": [
@@ -31,9 +31,11 @@
             "CMakeLists.txt",
             "include/hello_lib.h",
             "src/hello_lib.cpp"
-          ]
+          ],
+          "build_parallelism": "auto"
         }
-      ]
+      ],
+      "ci_smoke": true
     },
     {
       "name": "hello-cpp",
@@ -52,7 +54,7 @@
           "runner_labels": [
             "ubuntu-latest"
           ],
-          "build_command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && cmake --build build --parallel 2 && ccache --show-stats",
+          "build_command": "cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && cmake --build build --parallel \"$CI_BUILD_JOBS\" && ccache --show-stats",
           "test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "fast_test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "artifact_paths": [
@@ -65,7 +67,8 @@
           "cache_key_files": [
             "CMakeLists.txt",
             "src/main.cpp"
-          ]
+          ],
+          "build_parallelism": "auto"
         }
       ]
     },

@@ -20,6 +20,16 @@ def host_command(command: str) -> list[str]:
     return ["bash", "-euo", "pipefail", "-c", command]
 
 
+def _resolve_build_jobs(value: str) -> str:
+    """Resolve target-configured parallelism; auto uses the Runner CPU count."""
+    requested = value.strip() or "auto"
+    if requested == "auto":
+        return str(max(1, os.cpu_count() or 1))
+    if not requested.isdigit() or int(requested) < 1:
+        raise ValueError("CI_BUILD_JOBS must be 'auto' or a positive integer")
+    return str(int(requested))
+
+
 def _ensure_source_date_epoch(workdir: Path) -> str:
     """Use the checked-out source commit timestamp as the deterministic build clock."""
     existing = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
@@ -99,6 +109,7 @@ def _container_env_args(workdir: Path) -> list[str]:
         "EXPECTED_JAVA_VERSION",
         "EXPECTED_MAVEN_VERSION",
         "MAVEN_ARGS",
+        "CI_BUILD_JOBS",
     ):
         value = os.environ.get(key, "")
         if value:
@@ -151,7 +162,10 @@ def main() -> int:
 
     try:
         source_date_epoch = _ensure_source_date_epoch(workdir)
-    except RuntimeError as exc:
+        os.environ["CI_BUILD_JOBS"] = _resolve_build_jobs(
+            os.environ.get("CI_BUILD_JOBS", "auto")
+        )
+    except (RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
@@ -164,6 +178,7 @@ def main() -> int:
     if os.environ.get("CI_UPSTREAM_ROOT"):
         print(f"CI upstream root   : {os.environ['CI_UPSTREAM_ROOT']}")
     print(f"SOURCE_DATE_EPOCH  : {source_date_epoch}")
+    print(f"CI_BUILD_JOBS      : {os.environ['CI_BUILD_JOBS']}")
     print(f"CI build command   : {args.command}")
     print("=" * 72)
 

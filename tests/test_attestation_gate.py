@@ -10,13 +10,17 @@ class TrustedAttestationGateTests(unittest.TestCase):
     def test_attestation_uses_always_to_survive_empty_skipped_levels(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("name: Attest trusted DAG artifacts", workflow)
+        self.assertIn("name: Detached security evidence barrier", workflow)
+        self.assertIn("needs: [discover, build_complete, security_complete]", workflow)
         self.assertIn(
-            "if: always() && github.event_name != 'pull_request' && needs.discover.result == 'success' && needs.build_complete.result == 'success' && needs.discover.outputs.total_targets != '0'",
+            "if: always() && github.event_name != 'pull_request' && needs.discover.result == 'success' && needs.build_complete.result == 'success' && needs.security_complete.result == 'success' && needs.discover.outputs.total_targets != '0'",
             workflow,
         )
 
     def test_build_gate_fails_closed_when_trusted_attestation_does_not_succeed(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn('SECURITY_RESULT: ${{ needs.security_complete.result }}', workflow)
+        self.assertIn('if [[ "$SECURITY_RESULT" != "success" ]]; then', workflow)
         self.assertIn('ATTEST_RESULT: ${{ needs.attest.result }}', workflow)
         self.assertIn(
             'if [[ "$EVENT_NAME" != "pull_request" && "$TOTAL_TARGETS" != "0" && "$ATTEST_RESULT" != "success" ]]; then',

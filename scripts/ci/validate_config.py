@@ -187,6 +187,13 @@ def validate_catalog(
             fast_test_command = target.get("fast_test_command", test_command)
             if not isinstance(fast_test_command, str):
                 errors.append(f"{tprefix}.fast_test_command must be a string")
+            build_parallelism = target.get("build_parallelism", "auto")
+            if build_parallelism != "auto" and (
+                not isinstance(build_parallelism, int)
+                or isinstance(build_parallelism, bool)
+                or build_parallelism < 1
+            ):
+                errors.append(f"{tprefix}.build_parallelism must be 'auto' or a positive integer")
             artifacts = target.get("artifact_paths")
             if not _string_list(artifacts) or not artifacts:
                 errors.append(f"{tprefix}.artifact_paths must be a non-empty string list")

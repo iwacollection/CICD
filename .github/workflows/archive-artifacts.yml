@@ -71,6 +71,16 @@ jobs:
               exit 1
             fi
             mapfile -t bundles < <(find "$directory" -type f -name '*.tar.gz' -print)
+
+            # Security runs independently from the build DAG. Re-bind its
+            # signed evidence to this exact Artifact Contract before archiving.
+            python3 scripts/ci/security_evidence.py merge \
+              --build-artifact-dir "$directory" \
+              --evidence-root incoming \
+              --expected-source-sha "$SOURCE_SHA" \
+              --expected-repository "$GITHUB_REPOSITORY" \
+              --expected-run-id "$SOURCE_RUN_ID"
+
             mapfile -t scans < <(find "$directory" -type f -name 'security-scan.json' -print)
             mapfile -t sboms < <(find "$directory" -type f -name 'security-sbom.cdx.json' -print)
             if [[ "${#bundles[@]}" -ne 1 || "${#scans[@]}" -ne 1 || "${#sboms[@]}" -ne 1 ]]; then

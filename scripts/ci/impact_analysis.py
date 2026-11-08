@@ -16,8 +16,13 @@ from validate_config import load_catalog, validate_catalog
 FULL_REBUILD_PATHS = (
     "ci/",
     "scripts/ci/",
-    ".github/workflows/",
     "docker/toolchains/",
+)
+
+# Workflow orchestration changes still need an executable smoke path, but do
+# not inherently change every project's compiled output.
+WORKFLOW_SMOKE_PATHS = (
+    ".github/workflows/",
 )
 
 # These files do not affect runtime/build output. They are normally excluded by
@@ -142,8 +147,17 @@ def analyze_impact(data: dict, changed_files: list[str], force_full: bool = Fals
                 direct.add(project["name"])
                 matched_files.add(path)
 
+    workflow_changes = [
+        path
+        for path in changed
+        if any(_matches(path, prefix) for prefix in WORKFLOW_SMOKE_PATHS)
+    ]
     actionable_unmatched = [
-        path for path in changed if path not in matched_files and not _is_ignored(path)
+        path
+        for path in changed
+        if path not in matched_files
+        and not _is_ignored(path)
+        and path not in workflow_changes
     ]
     if actionable_unmatched:
         return {
@@ -154,7 +168,23 @@ def analyze_impact(data: dict, changed_files: list[str], force_full: bool = Fals
             "reason": f"unowned build-impacting path: {actionable_unmatched[0]}",
         }
 
-    if not direct:
+    smoke_roots: set[str] = set()
+    if workflow_changes:
+        smoke_roots = {
+            project["name"]
+            for project in enabled_projects
+            if project.get("ci_smoke", False)
+        }
+        if not smoke_roots:
+            return {
+                "lane": "full",
+                "projects": all_names,
+                "direct_projects": sorted(direct),
+                "changed_files": changed,
+                "reason": "workflow changed but no ci_smoke project is declared; safe full build",
+            }
+
+    if not direct and not smoke_roots:
         return {
             "lane": "none",
             "projects": [],
@@ -166,15 +196,27 @@ def analyze_impact(data: dict, changed_files: list[str], force_full: bool = Fals
     # A changed library must rebuild all downstream consumers. A changed
     # downstream project still needs its unchanged prerequisites built in the
     # same run so the DAG can hand off exact upstream artifacts instead of
-    # silently using stale workspace/cache contents.
-    impacted = _expand_dependents(data, direct)
+    # silently using stale workspace/cache contents. Workflow-only changes add
+    # explicitly declared smoke roots to validate orchestration cheaply.
+    # Code changes expand to every dependent because consumers need rebuilt
+    # upstream artifacts. Workflow-only smoke roots deliberately do not expand
+    # to dependents: their own prerequisites are sufficient to exercise the
+    # orchestrator without rebuilding the entire product graph.
+    impacted = _expand_dependents(data, direct) if direct else set()
+    impacted.update(smoke_roots)
     impacted = _expand_dependencies(data, impacted)
+    lane = "smoke" if workflow_changes else "fast"
+    reason = (
+        "workflow orchestration change; declared smoke projects and dependency closure"
+        if workflow_changes
+        else "project-scoped change with dependency and dependent closure"
+    )
     return {
-        "lane": "fast",
+        "lane": lane,
         "projects": [name for name in all_names if name in impacted],
         "direct_projects": sorted(direct),
         "changed_files": changed,
-        "reason": "project-scoped change with dependency and dependent closure",
+        "reason": reason,
     }
 
 
