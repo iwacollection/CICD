@@ -60,6 +60,10 @@ on:
         required: false
         default: ""
         type: string
+      cache_scope:
+        required: false
+        default: "project"
+        type: string
       cache_key_files_json:
         required: false
         default: "[]"
@@ -93,6 +97,7 @@ jobs:
       CI_TARGET: ${{ inputs.soc }}/${{ inputs.target_os }}/${{ inputs.arch }}
       CI_METRICS_KIND: build
       CI_LANE: ${{ inputs.lane }}
+      CI_CCACHE_SCOPE: ${{ inputs.cache_scope }}
     steps:
       - name: Mark source checkout start
         shell: bash
@@ -368,9 +373,9 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ inputs.cache_paths }}
-          key: dag-ci-v2-${{ inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ steps.cache_key.outputs.fingerprint }}
+          key: dag-ci-v3-${{ inputs.cache_scope }}-${{ inputs.cache_scope == 'toolchain' && 'shared' || inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ inputs.project }}-${{ steps.cache_key.outputs.fingerprint }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            dag-ci-v2-${{ inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-
+            dag-ci-v3-${{ inputs.cache_scope }}-${{ inputs.cache_scope == 'toolchain' && 'shared' || inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-
 
       - name: Finish cache restore timer
         if: always() && inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
@@ -697,6 +702,16 @@ jobs:
               echo "- Security evidence: detached per-target Trivy/SBOM job; final gate required"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach compiler cache and CMake/Ninja telemetry
+        if: always() && steps.source_checkout.outcome == 'success' && steps.trust.outputs.hardware_pr != 'true'
+        continue-on-error: true
+        env:
+          CI_WORKING_DIRECTORY: ${{ inputs.path }}
+        run: |
+          python3 source/scripts/ci/ci_metrics.py attach-build-telemetry \
+            --file "$RUNNER_TEMP/ci-stage-metrics.json" \
+            --telemetry-file "source/$CI_WORKING_DIRECTORY/.ci-telemetry/build-telemetry.json"
 
       - name: Finalize CI stage metrics
         if: always() && steps.source_checkout.outcome == 'success'
