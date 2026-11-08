@@ -16,7 +16,7 @@
           "runner_labels": [
             "ubuntu-latest"
           ],
-          "build_command": "python3 \"$CI_CMAKE_BUILD_HELPER\" --source-dir . --build-dir build --generator Ninja --build-jobs \"$CI_BUILD_JOBS\" --define CMAKE_BUILD_TYPE=Release --define CMAKE_C_COMPILER_LAUNCHER=ccache --define CMAKE_CXX_COMPILER_LAUNCHER=ccache",
+          "build_command": "bash \"$CI_CMAKE_BUILD_HELPER\" --source-dir . --build-dir build --generator Ninja --build-jobs \"$CI_BUILD_JOBS\" --define CMAKE_BUILD_TYPE=Release --define CMAKE_C_COMPILER_LAUNCHER=ccache --define CMAKE_CXX_COMPILER_LAUNCHER=ccache",
           "test_command": "test -s build/libhello-lib.a && test -f include/hello_lib.h",
           "fast_test_command": "test -s build/libhello-lib.a && test -f include/hello_lib.h",
           "artifact_paths": [
@@ -55,7 +55,7 @@
           "runner_labels": [
             "ubuntu-latest"
           ],
-          "build_command": "python3 \"$CI_CMAKE_BUILD_HELPER\" --source-dir . --build-dir build --generator Ninja --build-jobs \"$CI_BUILD_JOBS\" --define CMAKE_BUILD_TYPE=Release --define CMAKE_C_COMPILER_LAUNCHER=ccache --define CMAKE_CXX_COMPILER_LAUNCHER=ccache",
+          "build_command": "bash \"$CI_CMAKE_BUILD_HELPER\" --source-dir . --build-dir build --generator Ninja --build-jobs \"$CI_BUILD_JOBS\" --define CMAKE_BUILD_TYPE=Release --define CMAKE_C_COMPILER_LAUNCHER=ccache --define CMAKE_CXX_COMPILER_LAUNCHER=ccache",
           "test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "fast_test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "artifact_paths": [
