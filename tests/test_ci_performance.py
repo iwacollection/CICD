@@ -381,18 +381,19 @@ class CiPerformanceTests(unittest.TestCase):
             bin_dir.mkdir()
             fake_trivy = bin_dir / "trivy"
             fake_trivy.write_text(
-                "#!/usr/bin/env python3\\n"
-                "import json, os, sys, time\\n"
-                "from pathlib import Path\\n"
-                "args = sys.argv[1:]\\n"
-                "fmt = args[args.index('--format') + 1]\\n"
-                "out = Path(args[args.index('--output') + 1])\\n"
-                "events = Path(os.environ['FAKE_TRIVY_EVENTS'])\\n"
-                "with events.open('a', encoding='utf-8') as handle: handle.write(f'start {fmt} {time.monotonic_ns()}\\\\n')\\n"
-                "time.sleep(0.2)\\n"
-                "out.parent.mkdir(parents=True, exist_ok=True)\\n"
-                "out.write_text(json.dumps({'format': fmt}), encoding='utf-8')\\n"
-                "with events.open('a', encoding='utf-8') as handle: handle.write(f'end {fmt} {time.monotonic_ns()}\\\\n')\\n",
+                """#!/usr/bin/env python3
+import json, os, sys, time
+from pathlib import Path
+args = sys.argv[1:]
+fmt = args[args.index('--format') + 1]
+out = Path(args[args.index('--output') + 1])
+events = Path(os.environ['FAKE_TRIVY_EVENTS'])
+with events.open('a', encoding='utf-8') as handle: handle.write(f"start {fmt} {time.monotonic_ns()}\\n")
+time.sleep(0.2)
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_text(json.dumps({'format': fmt}), encoding='utf-8')
+with events.open('a', encoding='utf-8') as handle: handle.write(f"end {fmt} {time.monotonic_ns()}\\n")
+""",
                 encoding="utf-8",
             )
             fake_trivy.chmod(0o755)
@@ -443,15 +444,16 @@ class CiPerformanceTests(unittest.TestCase):
             bin_dir.mkdir()
             fake_trivy = bin_dir / "trivy"
             fake_trivy.write_text(
-                "#!/usr/bin/env python3\\n"
-                "import json, os, sys\\n"
-                "from pathlib import Path\\n"
-                "args = sys.argv[1:]\\n"
-                "fmt = args[args.index('--format') + 1]\\n"
-                "out = Path(args[args.index('--output') + 1])\\n"
-                "out.parent.mkdir(parents=True, exist_ok=True)\\n"
-                "out.write_text(json.dumps({'format': fmt}), encoding='utf-8')\\n"
-                "sys.exit(23 if fmt == 'json' else 0)\\n",
+                """#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+args = sys.argv[1:]
+fmt = args[args.index('--format') + 1]
+out = Path(args[args.index('--output') + 1])
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_text(json.dumps({'format': fmt}), encoding='utf-8')
+sys.exit(23 if fmt == 'json' else 0)
+""",
                 encoding="utf-8",
             )
             fake_trivy.chmod(0o755)
