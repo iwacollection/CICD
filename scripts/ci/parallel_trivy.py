@@ -68,8 +68,10 @@ def run_parallel(
     trivy_bin: str = "trivy",
 ) -> dict[str, Any]:
     """Run scan and SBOM processes together, recording independent stage timings."""
-    for path in (scan_output, sbom_output, scan_cache_dir, sbom_cache_dir):
-        path.parent.mkdir(parents=True, exist_ok=True) if path.suffix else path.mkdir(parents=True, exist_ok=True)
+    for output in (scan_output, sbom_output):
+        output.parent.mkdir(parents=True, exist_ok=True)
+    for cache_dir in (scan_cache_dir, sbom_cache_dir):
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
     commands = _command_sets(
         trivy_bin=trivy_bin,
