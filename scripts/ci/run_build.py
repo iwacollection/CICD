@@ -86,6 +86,7 @@ def _container_env_args(workdir: Path) -> list[str]:
             "HOME=/workspace/.ci-home",
             "-e",
             "MAVEN_OPTS=-Dmaven.repo.local=/workspace/.cache/maven/repository",
+            "-e",
             "CCACHE_DIR=/workspace/.cache/ccache",
         ]
     )
