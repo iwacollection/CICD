@@ -133,11 +133,21 @@ class SupplyChainPolicyTests(unittest.TestCase):
         toolchain_promote = (ROOT / ".github" / "workflows" / "promote-toolchain.yml").read_text(encoding="utf-8")
         rollback = (ROOT / ".github" / "workflows" / "rollback.yml").read_text(encoding="utf-8")
 
-        for workflow in (dag_security, reusable, reusable_container, toolchain):
+        for workflow in (reusable, reusable_container, toolchain):
             self.assertIn("aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25", workflow)
             self.assertIn("v0.70.0", workflow)
             self.assertIn("supply_chain_policy.py", workflow)
             self.assertIn("ignore-unfixed: false", workflow)
+
+        self.assertIn("aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514", dag_security)
+        self.assertIn("actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae", dag_security)
+        self.assertIn("v0.70.0", dag_security)
+        self.assertIn("parallel_trivy.py", dag_security)
+        self.assertIn("--scanners", (ROOT / "scripts" / "ci" / "parallel_trivy.py").read_text(encoding="utf-8"))
+        self.assertIn("--severity", (ROOT / "scripts" / "ci" / "parallel_trivy.py").read_text(encoding="utf-8"))
+        self.assertIn("supply_chain_policy.py", dag_security)
+        self.assertIn("security-scan.json", dag_security)
+        self.assertIn("security-sbom.cdx.json", dag_security)
 
         self.assertIn("dag-node.yml", central)
         self.assertIn("dag-security.yml", central)
