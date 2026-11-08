@@ -445,6 +445,7 @@ jobs:
           CI_UPSTREAM_INDEX: ${{ steps.upstream.outputs.index }}
           CI_WORKING_DIRECTORY: ${{ inputs.path }}
           CI_BUILD_JOBS: ${{ inputs.build_parallelism }}
+          CI_BUILD_PHASE: build
         run: |
           set -euo pipefail
           python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage build
@@ -502,6 +503,7 @@ jobs:
           CI_UPSTREAM_INDEX: ${{ steps.upstream.outputs.index }}
           CI_WORKING_DIRECTORY: ${{ inputs.path }}
           CI_BUILD_JOBS: ${{ inputs.build_parallelism }}
+          CI_BUILD_PHASE: test
         run: |
           set -euo pipefail
           python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage test
@@ -711,7 +713,7 @@ jobs:
         run: |
           python3 source/scripts/ci/ci_metrics.py attach-build-telemetry \
             --file "$RUNNER_TEMP/ci-stage-metrics.json" \
-            --telemetry-file "source/$CI_WORKING_DIRECTORY/.ci-telemetry/build-telemetry.json"
+            --telemetry-file "source/$CI_WORKING_DIRECTORY/.ci-telemetry"
 
       - name: Finalize CI stage metrics
         if: always() && steps.source_checkout.outcome == 'success'
