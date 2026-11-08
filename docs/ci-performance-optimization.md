@@ -184,7 +184,7 @@ The current example workload is too small to claim large cross-project hit-rate 
 
 ### CMake and Ninja diagnostics
 
-C++ build commands use `scripts/ci/cmake_build.py` to record:
+C++ build commands use `scripts/ci/cmake_build.sh` to record:
 - `configure_generate_ms`: CMake configure plus generation in one CMake invocation.
 - `compile_link_ms`: the Ninja-backed build phase.
 - CMake Google Trace event count and trace file for deeper profiling.
@@ -216,3 +216,6 @@ A successful PR check is necessary but not enough to claim build speed improveme
 - Build-node count and whether non-compiling nodes skipped Docker image pulls.
 
 Compare at least one cold run and several warm runs on the same Runner class and toolchain identity before publishing a percentage improvement.
+
+
+Resource diagnostics additionally capture before/after cgroup v2 counters around each build: CPU usage and throttling, memory peak/current and OOM events, per-device block I/O bytes/ops, and Linux CPU/memory/I/O pressure-stall information (PSI). The report aggregates throttled time, OOM kill events, peak memory and I/O deltas. On runners without cgroup v2 or PSI, unavailable counters remain absent rather than being guessed.
