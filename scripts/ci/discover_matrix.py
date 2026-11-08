@@ -77,7 +77,7 @@ def build_matrix(
                     "dependency_lock_files": json.dumps(
                         target.get("dependency_lock_files", []), separators=(",", ":")
                     ),
-                    "cache_paths": "\n".join(f"source/{path}" for path in target.get("cache_paths", [])),
+                    "cache_paths": "\n".join(target.get("cache_paths", [])),
                     "cache_key_files": json.dumps(
                         target.get("cache_key_files", []), separators=(",", ":")
                     ),
