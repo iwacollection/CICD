@@ -29,14 +29,14 @@ def percentile(values: list[float], fraction: float = 0.95) -> float | None:
     return round(ordered[index], 2)
 
 
-def _report_lane(report: dict[str, Any]) -> str:
+def _report_lanes(report: dict[str, Any]) -> list[str]:
+    """Return every build lane present in a report, not only a single lane."""
     lanes = {
         str(job.get("metadata", {}).get("lane", "")).strip()
         for job in report.get("jobs", [])
         if isinstance(job, dict) and job.get("metadata", {}).get("kind") == "build"
     }
-    lanes.discard("")
-    return next(iter(lanes)) if len(lanes) == 1 else ""
+    return sorted(lane for lane in lanes if lane)
 
 
 def _stage_p95(report: dict[str, Any], kind: str, lane: str, stage_name: str) -> float | None:
@@ -67,16 +67,14 @@ def evaluate_regressions(
     scan_regression_percent: float = 20.0,
     failure_rate_percent: float = 10.0,
 ) -> dict[str, Any]:
-    lane = _report_lane(current_report)
-    current_build = _stage_p95(current_report, "build", lane, "build") if lane else None
-    current_scan = _stage_p95(current_report, "security", lane, "trivy_scan") if lane else None
+    lanes = _report_lanes(current_report)
 
-    def compare(current: float | None, stage: str, threshold: float) -> dict[str, Any]:
-        kind = "build" if stage == "build" else "security"
+    def compare(lane: str, kind: str, stage: str, threshold: float) -> dict[str, Any]:
+        current = _stage_p95(current_report, kind, lane, stage)
         baseline_values = [
             value
             for report in historical_reports
-            if _report_lane(report) == lane
+            if lane in _report_lanes(report)
             for value in [_stage_p95(report, kind, lane, stage)]
             if value is not None
         ]
@@ -99,8 +97,27 @@ def evaluate_regressions(
             "status": "regression" if breached else ("healthy" if evaluated else "warming_up"),
         }
 
-    build = compare(current_build, "build", build_regression_percent)
-    scan = compare(current_scan, "trivy_scan", scan_regression_percent)
+    lane_checks: dict[str, dict[str, Any]] = {}
+    alerts: list[str] = []
+    for lane in lanes:
+        build = compare(lane, "build", "build", build_regression_percent)
+        scan = compare(lane, "security", "trivy_scan", scan_regression_percent)
+        lane_checks[lane] = {"build_stage_p95": build, "trivy_scan_p95": scan}
+        if build["breached"]:
+            alerts.append(
+                f"[{lane}] Build-stage P95 increased {build['regression_percent']:.1f}% "
+                f"(current {build['current_p95_ms'] / 1000:.2f}s; "
+                f"baseline {build['baseline_median_of_run_p95_ms'] / 1000:.2f}s; "
+                f"threshold {build_regression_percent:.1f}%)."
+            )
+        if scan["breached"]:
+            alerts.append(
+                f"[{lane}] Trivy scan P95 increased {scan['regression_percent']:.1f}% "
+                f"(current {scan['current_p95_ms'] / 1000:.2f}s; "
+                f"baseline {scan['baseline_median_of_run_p95_ms'] / 1000:.2f}s; "
+                f"threshold {scan_regression_percent:.1f}%)."
+            )
+
     conclusions = [current_conclusion.strip().lower(), *historical_conclusions[: max(0, history_limit - 1)]]
     valid = [value for value in conclusions if value in VALID_CONCLUSIONS]
     failures = sum(value in FAILURE_CONCLUSIONS for value in valid)
@@ -116,50 +133,50 @@ def evaluate_regressions(
         "breached": bool(failure_breached),
         "status": "regression" if failure_breached else ("healthy" if failure_evaluated else "warming_up"),
     }
-
-    alerts: list[str] = []
-    if build["breached"]:
-        alerts.append(
-            f"Build-stage P95 increased {build['regression_percent']:.1f}% "
-            f"(current {build['current_p95_ms'] / 1000:.2f}s; "
-            f"baseline {build['baseline_median_of_run_p95_ms'] / 1000:.2f}s; "
-            f"threshold {build_regression_percent:.1f}%)."
-        )
-    if scan["breached"]:
-        alerts.append(
-            f"Trivy scan P95 increased {scan['regression_percent']:.1f}% "
-            f"(current {scan['current_p95_ms'] / 1000:.2f}s; "
-            f"baseline {scan['baseline_median_of_run_p95_ms'] / 1000:.2f}s; "
-            f"threshold {scan_regression_percent:.1f}%)."
-        )
     if failure_breached:
         alerts.append(
             f"Mainline functional build failure rate is {rate:.1f}% "
             f"({failures}/{len(valid)}; threshold {failure_rate_percent:.1f}%)."
         )
 
-    warming = not build["evaluated"] or not scan["evaluated"] or not failure_evaluated
-    return {
+    warming = (
+        not lanes
+        or any(
+            not item[metric]["evaluated"]
+            for item in lane_checks.values()
+            for metric in ("build_stage_p95", "trivy_scan_p95")
+        )
+        or not failure_evaluated
+    )
+    result = {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": "regression" if alerts else ("warming_up" if warming else "healthy"),
         "branch": "main",
-        "lane": lane or "unknown",
+        "lanes": lanes,
+        "lane_checks": lane_checks,
         "history_limit": history_limit,
-        "checks": {
-            "build_stage_p95": build,
-            "trivy_scan_p95": scan,
-            "functional_failure_rate": failure_check,
-        },
+        "checks": {"functional_failure_rate": failure_check},
         "alerts": alerts,
     }
+    # Preserve the simple checks shape for single-lane consumers and existing reports.
+    if len(lanes) == 1:
+        result["lane"] = lanes[0]
+        result["checks"].update(lane_checks[lanes[0]])
+    else:
+        result["lane"] = "mixed" if lanes else "unknown"
+    return result
 
 
 def format_markdown(report: dict[str, Any]) -> str:
     checks = report.get("checks", {})
-    build = checks.get("build_stage_p95", {})
-    scan = checks.get("trivy_scan_p95", {})
     failure = checks.get("functional_failure_rate", {})
+    lines = [
+        "# Mainline CI performance regression monitor",
+        "",
+        f"- Status: **{report.get('status', 'unknown')}**",
+        f"- Branch / lanes: {report.get('branch', 'main')} / {', '.join(report.get('lanes', [])) or 'unknown'}",
+    ]
 
     def seconds(value: Any) -> str:
         return f"{value / 1000:.2f}s" if isinstance(value, (int, float)) else "n/a"
@@ -175,15 +192,17 @@ def format_markdown(report: dict[str, Any]) -> str:
             f"threshold {item.get('threshold_percent', 0):.1f}%; {item.get('status', 'unknown')})"
         )
 
+    for lane, lane_metrics in report.get("lane_checks", {}).items():
+        lines.extend([
+            "",
+            f"## Lane: {lane}",
+            f"- Build-stage P95: {comparison(lane_metrics.get('build_stage_p95', {}))}",
+            f"- Trivy scan P95: {comparison(lane_metrics.get('trivy_scan_p95', {}))}",
+        ])
     rate = failure.get("failure_rate_percent")
     rate_text = f"{rate:.1f}%" if isinstance(rate, (int, float)) else "n/a"
-    lines = [
-        "# Mainline CI performance regression monitor",
+    lines.extend([
         "",
-        f"- Status: **{report.get('status', 'unknown')}**",
-        f"- Branch / lane: {report.get('branch', 'main')} / {report.get('lane', 'unknown')}",
-        f"- Build-stage P95: {comparison(build)}",
-        f"- Trivy scan P95: {comparison(scan)}",
         f"- Functional failure rate: {rate_text} "
         f"({failure.get('failure_count', 0)}/{failure.get('sample_count', 0)}; "
         f"threshold {failure.get('threshold_percent', 0):.1f}%; "
@@ -192,7 +211,7 @@ def format_markdown(report: dict[str, Any]) -> str:
         "P95 baselines are the median of per-run P95 values from recent main-branch builds in the same Lane. "
         "Build/scan comparisons warm up after 5 baseline reports; failure rate warms up after 10 completed runs.",
         "",
-    ]
+    ])
     alerts = report.get("alerts", [])
     if alerts:
         lines.extend(["## Regression warnings", ""])
@@ -202,7 +221,7 @@ def format_markdown(report: dict[str, Any]) -> str:
     elif report.get("status") == "monitor_unavailable":
         lines.extend(["## Monitoring unavailable", "", report.get("error", "Metrics or GitHub history could not be read.")])
     else:
-        lines.extend(["All evaluated metrics are within their configured thresholds."])
+        lines.append("All evaluated metrics are within their configured thresholds.")
     return "\n".join(lines) + "\n"
 
 
