@@ -367,7 +367,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ inputs.cache_paths }}
-          key: dag-ci-v1-${{ inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ steps.upstream.outputs.fingerprint || 'no-upstream' }}-${{ steps.cache-key.outputs.fingerprint }}
+          key: dag-ci-v1-${{ inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ steps.upstream.outputs.fingerprint || 'no-upstream' }}-${{ steps.cache_key.outputs.fingerprint }}
           restore-keys: |
             dag-ci-v1-${{ inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ steps.upstream.outputs.fingerprint || 'no-upstream' }}-
 
