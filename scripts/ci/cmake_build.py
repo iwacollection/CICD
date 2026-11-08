@@ -65,7 +65,7 @@ def _ninja_introspection(build_dir: Path, source_dir: Path, baseline_entries: in
     )
     if graph.returncode == 0:
         graph_text = graph.stdout
-        result["graph_nodes"] = len(re.findall(r"^\s*\"?\d+\"?\s+\[", graph_text, re.M))
+        result["graph_nodes"] = len(re.findall(r"^\s*\"?(?:0x)?[0-9a-fA-F]+\"?\s+\[", graph_text, re.M))
         result["graph_edges"] = graph_text.count(" -> ")
         result["graph_bytes"] = len(graph_text.encode("utf-8"))
     else:
@@ -92,7 +92,11 @@ def _ninja_introspection(build_dir: Path, source_dir: Path, baseline_entries: in
 
     log_entries = _ninja_log_entries(build_dir / ".ninja_log")
     recent = log_entries[baseline_entries:] if len(log_entries) >= baseline_entries else log_entries
-    outputs = [line.split("\t")[-1] for line in recent if "\t" in line]
+    outputs = [
+        fields[3]
+        for line in recent
+        if len(fields := line.split("\t")) >= 5
+    ]
     object_outputs = [item for item in outputs if item.endswith((".o", ".obj"))]
     result["executed_edges"] = len(recent)
     result["object_compile_edges"] = len(object_outputs)
