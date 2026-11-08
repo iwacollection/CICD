@@ -16,8 +16,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-FAILURE_CONCLUSIONS = {"failure", "cancelled", "timed_out", "action_required"}
-VALID_CONCLUSIONS = FAILURE_CONCLUSIONS | {"success"}
+RUN_FAILURE_CONCLUSIONS = {"failure"}
+EXCLUDED_OUTCOME_CONCLUSIONS = {"cancelled", "timed_out", "action_required"}
+VALID_CONCLUSIONS = RUN_FAILURE_CONCLUSIONS | EXCLUDED_OUTCOME_CONCLUSIONS | {"success"}
 DEFAULT_API_URL = "https://api.github.com"
 
 
@@ -120,23 +121,43 @@ def evaluate_regressions(
 
     conclusions = [current_conclusion.strip().lower(), *historical_conclusions[: max(0, history_limit - 1)]]
     valid = [value for value in conclusions if value in VALID_CONCLUSIONS]
-    failures = sum(value in FAILURE_CONCLUSIONS for value in valid)
-    rate = round(failures / len(valid) * 100.0, 2) if valid else None
-    failure_evaluated = len(valid) >= minimum_failure_samples
+
+    # A cancelled run may have been superseded by concurrency.cancel-in-progress.
+    # Timeouts and action_required outcomes are not proof of a code/test defect.
+    # Keep all three visible, but exclude them from the success/failure rate.
+    success_count = valid.count("success")
+    failure_count = valid.count("failure")
+    rate_sample_count = success_count + failure_count
+    rate = round(failure_count / rate_sample_count * 100.0, 2) if rate_sample_count else None
+    cancelled_count = valid.count("cancelled")
+    timed_out_count = valid.count("timed_out")
+    action_required_count = valid.count("action_required")
+    cancelled_rate = round(cancelled_count / len(valid) * 100.0, 2) if valid else None
+    failure_evaluated = rate_sample_count >= minimum_failure_samples
     failure_breached = failure_evaluated and rate is not None and rate > failure_rate_percent
-    failure_check = {
-        "sample_count": len(valid),
-        "failure_count": failures,
+    run_failure_check = {
+        "sample_count": rate_sample_count,
+        "success_count": success_count,
+        "failure_count": failure_count,
         "failure_rate_percent": rate,
         "threshold_percent": failure_rate_percent,
+        "cancelled_count": cancelled_count,
+        "cancelled_rate_percent": cancelled_rate,
+        "timed_out_count": timed_out_count,
+        "action_required_count": action_required_count,
+        "excluded_outcome_count": cancelled_count + timed_out_count + action_required_count,
+        "total_completed_runs": len(valid),
         "evaluated": failure_evaluated,
         "breached": bool(failure_breached),
         "status": "regression" if failure_breached else ("healthy" if failure_evaluated else "warming_up"),
     }
     if failure_breached:
         alerts.append(
-            f"Mainline functional build failure rate is {rate:.1f}% "
-            f"({failures}/{len(valid)}; threshold {failure_rate_percent:.1f}%)."
+            f"Mainline GitHub run failure-conclusion rate is {rate:.1f}% "
+            f"({failure_count}/{rate_sample_count} success/failure conclusions; "
+            f"cancelled={cancelled_count}, timed_out={timed_out_count}, "
+            f"action_required={action_required_count} excluded; "
+            f"threshold {failure_rate_percent:.1f}%)."
         )
 
     warming = (
@@ -149,14 +170,14 @@ def evaluate_regressions(
         or not failure_evaluated
     )
     result = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": "regression" if alerts else ("warming_up" if warming else "healthy"),
         "branch": "main",
         "lanes": lanes,
         "lane_checks": lane_checks,
         "history_limit": history_limit,
-        "checks": {"functional_failure_rate": failure_check},
+        "checks": {"run_failure_rate": run_failure_check},
         "alerts": alerts,
     }
     # Preserve the simple checks shape for single-lane consumers and existing reports.
@@ -170,7 +191,7 @@ def evaluate_regressions(
 
 def format_markdown(report: dict[str, Any]) -> str:
     checks = report.get("checks", {})
-    failure = checks.get("functional_failure_rate", {})
+    failure = checks.get("run_failure_rate", {})
     lines = [
         "# Mainline CI performance regression monitor",
         "",
@@ -203,13 +224,24 @@ def format_markdown(report: dict[str, Any]) -> str:
     rate_text = f"{rate:.1f}%" if isinstance(rate, (int, float)) else "n/a"
     lines.extend([
         "",
-        f"- Functional failure rate: {rate_text} "
-        f"({failure.get('failure_count', 0)}/{failure.get('sample_count', 0)}; "
+        f"- Run failure-conclusion rate: {rate_text} "
+        f"({failure.get('failure_count', 0)}/{failure.get('sample_count', 0)} success/failure conclusions; "
         f"threshold {failure.get('threshold_percent', 0):.1f}%; "
         f"{failure.get('status', 'unknown')})",
+        f"- Excluded outcomes: cancelled={failure.get('cancelled_count', 0)} "
+        f"({failure.get('cancelled_rate_percent') if failure.get('cancelled_rate_percent') is not None else 'n/a'}%), "
+        f"timed_out={failure.get('timed_out_count', 0)}, "
+        f"action_required={failure.get('action_required_count', 0)} "
+        f"(total completed outcomes: {failure.get('total_completed_runs', 0)})",
+        "",
+        "Only GitHub success/failure conclusions enter this rate. Cancelled, timed_out and action_required "
+        "outcomes are reported separately. A run-level failure does not prove a code/test defect, and a "
+        "cancelled conclusion does not reveal whether cancellation was caused by concurrency supersession "
+        "or a manual action.",
         "",
         "P95 baselines are the median of per-run P95 values from recent main-branch builds in the same Lane. "
-        "Build/scan comparisons warm up after 5 baseline reports; failure rate warms up after 10 completed runs.",
+        "Build/scan comparisons warm up after 5 baseline reports; the run failure-conclusion rate warms up "
+        "after 10 success/failure outcomes.",
         "",
     ])
     alerts = report.get("alerts", [])
