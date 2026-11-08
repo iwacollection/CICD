@@ -59,6 +59,7 @@ def build_matrix(
                         os.getenv("GITHUB_SHA", "local"),
                     ),
                     "build_parallelism": str(target.get("build_parallelism", "auto")),
+                    "cache_scope": str(target.get("cache_scope", "project")),
                     "depends_on": json.dumps(depends_on, separators=(",", ":")),
                     "soc": target["soc"],
                     "target_os": target["target_os"],
