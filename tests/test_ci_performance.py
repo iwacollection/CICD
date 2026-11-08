@@ -233,6 +233,40 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(result["files_in_cache"], 120)
         self.assertEqual(result["cache_size_gib"], 0.3)
 
+    def test_resource_telemetry_calculates_cpu_memory_io_and_psi_deltas(self) -> None:
+        before = {
+            "cpu_stat": {"usage_usec": 1000, "throttled_usec": 200, "nr_throttled": 2},
+            "memory_events": {"oom": 0, "oom_kill": 0},
+            "io_stat": {"8:0": {"rbytes": 100, "wbytes": 200, "rios": 1, "wios": 2}},
+            "pressure": {"io": {"some": {"total": 10000, "avg10": 0.1}}},
+        }
+        after = {
+            "cpu_stat": {"usage_usec": 9000, "throttled_usec": 700, "nr_throttled": 5},
+            "memory_events": {"oom": 0, "oom_kill": 1},
+            "io_stat": {"8:0": {"rbytes": 1100, "wbytes": 2200, "rios": 11, "wios": 22}},
+            "pressure": {"io": {"some": {"total": 15000, "avg10": 0.2}}},
+            "memory_peak_bytes": 4096,
+            "memory_current_bytes": 2048,
+        }
+        delta = calculate_resource_delta(before, after)
+        self.assertEqual(delta["cpu"]["throttled_usec"], 500)
+        self.assertEqual(delta["memory_events"]["oom_kill"], 1)
+        self.assertEqual(delta["io"]["rbytes"], 1000)
+        self.assertEqual(delta["io"]["wbytes"], 2000)
+        self.assertEqual(delta["pressure_total_usec"]["io"]["some"], 5000)
+        self.assertEqual(delta["memory_peak_bytes"], 4096)
+
+    def test_cmake_bash_helper_has_valid_shell_syntax(self) -> None:
+        helper = ROOT / "scripts" / "ci" / "cmake_build.sh"
+        result = subprocess.run(
+            ["bash", "-n", str(helper)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
     def test_ninja_introspection_reports_graph_commands_and_noop_incremental_state(self) -> None:
         from cmake_build import _ninja_introspection
 
