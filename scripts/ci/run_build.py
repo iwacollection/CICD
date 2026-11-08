@@ -164,7 +164,7 @@ def _configure_build_environment(workdir: Path, requested_jobs: str) -> str:
     telemetry_dir = workdir / ".ci-telemetry"
     ccache_dir.mkdir(parents=True, exist_ok=True)
     telemetry_dir.mkdir(parents=True, exist_ok=True)
-    for filename in ("ccache.stats.log", "ccache-log-stats.txt", "ccache-global-stats.txt"):
+    for filename in ("ccache.stats.log", "ccache-log-stats.txt", "ccache-global-stats.txt", "cmake-build.json"):
         try:
             (telemetry_dir / filename).unlink()
         except FileNotFoundError:
