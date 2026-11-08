@@ -167,6 +167,18 @@ def _percentile(values: list[float], percentile: float) -> float:
     return round(ordered[index], 2)
 
 
+def _parse_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def aggregate_metrics(input_dir: Path) -> dict[str, Any]:
     reports: list[dict[str, Any]] = []
     for path in sorted(input_dir.glob("**/ci-stage-metrics.json")):
@@ -178,51 +190,132 @@ def aggregate_metrics(input_dir: Path) -> dict[str, Any]:
             reports.append(report)
 
     stage_values: dict[str, list[float]] = {}
+    stage_statuses: dict[str, dict[str, int]] = {}
+    kind_durations: dict[str, list[float]] = {}
+    job_starts: list[datetime] = []
+    job_completions: list[datetime] = []
     for report in reports:
-        for name, stage in report.get("stages", {}).items():
-            duration = stage.get("duration_ms") if isinstance(stage, dict) else None
+        metadata = report.get("metadata", {})
+        kind = str(metadata.get("kind") or metadata.get("job") or "unknown")
+        job_duration = report.get("instrumented_duration_ms")
+        if isinstance(job_duration, (int, float)):
+            kind_durations.setdefault(kind, []).append(float(job_duration))
+
+        started_at = _parse_timestamp(report.get("started_at"))
+        completed_at = _parse_timestamp(report.get("completed_at"))
+        if started_at:
+            job_starts.append(started_at)
+        if completed_at:
+            job_completions.append(completed_at)
+
+        stages = report.get("stages", {})
+        if not isinstance(stages, dict):
+            continue
+        for name, stage in stages.items():
+            if not isinstance(stage, dict):
+                continue
+            duration = stage.get("duration_ms")
             if isinstance(duration, (int, float)):
                 stage_values.setdefault(name, []).append(float(duration))
+            status = str(stage.get("status") or "unknown")
+            counts = stage_statuses.setdefault(
+                name,
+                {"success": 0, "failure": 0, "interrupted": 0, "unknown": 0},
+            )
+            counts[status if status in counts else "unknown"] += 1
 
     stage_summary = {
         name: {
             "count": len(values),
+            "success_count": stage_statuses.get(name, {}).get("success", 0),
+            "failure_count": stage_statuses.get(name, {}).get("failure", 0),
+            "interrupted_count": stage_statuses.get(name, {}).get("interrupted", 0),
             "median_ms": round(statistics.median(values), 2),
             "p95_ms": _percentile(values, 0.95),
             "max_ms": round(max(values), 2),
         }
         for name, values in sorted(stage_values.items())
     }
+    job_kind_summary = {
+        kind: {
+            "count": len(values),
+            "median_ms": round(statistics.median(values), 2),
+            "p95_ms": _percentile(values, 0.95),
+            "max_ms": round(max(values), 2),
+        }
+        for kind, values in sorted(kind_durations.items())
+    }
+
+    instrumented_span_ms = None
+    earliest_started_at = None
+    latest_completed_at = None
+    if job_starts and job_completions:
+        earliest = min(job_starts)
+        latest = max(job_completions)
+        earliest_started_at = earliest.isoformat()
+        latest_completed_at = latest.isoformat()
+        instrumented_span_ms = max(0, round((latest - earliest).total_seconds() * 1000, 2))
+
     return {
         "schema_version": 1,
         "generated_at": _utc_now(),
         "job_count": len(reports),
+        "instrumented_workflow_span_ms": instrumented_span_ms,
+        "earliest_job_started_at": earliest_started_at,
+        "latest_job_completed_at": latest_completed_at,
+        "job_kind_summary": job_kind_summary,
         "jobs": reports,
         "stage_summary": stage_summary,
     }
 
 
 def format_aggregate_summary(value: dict[str, Any]) -> str:
+    span = value.get("instrumented_workflow_span_ms")
+    span_text = f"{span / 1000:.2f}s" if isinstance(span, (int, float)) else "n/a"
     lines = [
         "# CI performance report",
         "",
         f"- Metric reports collected: {value.get('job_count', 0)}",
-        "- Durations are measured inside individual jobs; this report does not add parallel job durations together.",
+        f"- Instrumented workflow span: {span_text}",
+        "- Workflow span starts at the first recorded job marker and ends at the last recorded job completion. It excludes queue time before the first marker and post-job cleanup.",
+        "- Job and stage percentiles are distributions, not sums of parallel work.",
         "",
-        "## Stage distribution",
+        "## Job duration by type",
         "",
-        "| Stage | Samples | Median | P95 | Max |",
+        "| Job type | Samples | Median | P95 | Max |",
         "|---|---:|---:|---:|---:|",
     ]
-    summary = value.get("stage_summary", {})
-    if not summary:
-        lines.append("| No stage data | 0 | n/a | n/a | n/a |")
+    kinds = value.get("job_kind_summary", {})
+    if not kinds:
+        lines.append("| No job data | 0 | n/a | n/a | n/a |")
     else:
-        for name, item in summary.items():
+        for name, item in kinds.items():
             lines.append(
                 f"| {name} | {item['count']} | {item['median_ms'] / 1000:.2f}s | "
                 f"{item['p95_ms'] / 1000:.2f}s | {item['max_ms'] / 1000:.2f}s |"
             )
+
+    lines.extend(
+        [
+            "",
+            "## Stage distribution",
+            "",
+            "| Stage | Samples | Success | Failure | Interrupted | Median | P95 | Max |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    summary = value.get("stage_summary", {})
+    if not summary:
+        lines.append("| No stage data | 0 | 0 | 0 | 0 | n/a | n/a | n/a |")
+    else:
+        for name, item in summary.items():
+            lines.append(
+                f"| {name} | {item['count']} | {item['success_count']} | "
+                f"{item['failure_count']} | {item['interrupted_count']} | "
+                f"{item['median_ms'] / 1000:.2f}s | {item['p95_ms'] / 1000:.2f}s | "
+                f"{item['max_ms'] / 1000:.2f}s |"
+            )
+
     lines.extend(["", "## Per-job breakdown", ""])
     lines.append("| Kind | Project | Target | Instrumented duration | Run/job |")
     lines.append("|---|---|---|---:|---|")
