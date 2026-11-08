@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
 from ci_metrics import aggregate_metrics, finalize_metrics, finish_stage, start_stage  # noqa: E402
 from discover_matrix import build_matrix  # noqa: E402
+from dag_plan import _dag_cache_paths  # noqa: E402
 from impact_analysis import analyze_impact  # noqa: E402
 from package_artifact import build_artifact_name  # noqa: E402
 from security_evidence import create_manifest, merge_security_evidence  # noqa: E402
@@ -91,7 +92,7 @@ class CiPerformanceTests(unittest.TestCase):
         )
         self.assertEqual(item["artifact_name"], expected)
         self.assertEqual(item["build_parallelism"], "auto")
-        self.assertEqual(item["cache_paths"], "source/examples/cpp-lib/.cache/ccache")
+        self.assertEqual(item["cache_paths"], "examples/cpp-lib/.cache/ccache")
 
     def test_stage_metrics_finalize_and_aggregate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -111,6 +112,13 @@ class CiPerformanceTests(unittest.TestCase):
             self.assertEqual(aggregate["stage_summary"]["compile"]["count"], 1)
             self.assertGreater(aggregate["stage_summary"]["compile"]["median_ms"], 0)
 
+
+
+    def test_dag_plan_prefixes_cache_path_exactly_once(self) -> None:
+        self.assertEqual(
+            _dag_cache_paths("examples/cpp-lib/.cache/ccache"),
+            "source/examples/cpp-lib/.cache/ccache",
+        )
 
     def test_build_runner_aligns_ccache_and_cmake_parallelism(self) -> None:
         from run_build import _configure_build_environment, _container_env_args
