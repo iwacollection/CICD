@@ -16,7 +16,7 @@
           "runner_labels": [
             "ubuntu-latest"
           ],
-          "build_command": "cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && cmake --build build --parallel \"$CI_BUILD_JOBS\" && ccache --show-stats",
+          "build_command": "python3 \"$CI_CMAKE_BUILD_HELPER\" --source-dir . --build-dir build --generator Ninja --build-jobs \"$CI_BUILD_JOBS\" --define CMAKE_BUILD_TYPE=Release --define CMAKE_C_COMPILER_LAUNCHER=ccache --define CMAKE_CXX_COMPILER_LAUNCHER=ccache",
           "test_command": "test -s build/libhello-lib.a && test -f include/hello_lib.h",
           "fast_test_command": "test -s build/libhello-lib.a && test -f include/hello_lib.h",
           "artifact_paths": [
@@ -25,14 +25,15 @@
           ],
           "dependency_lock_files": [],
           "cache_paths": [
-            "examples/cpp-lib/.cache/ccache"
+            ".ci-cache/ccache"
           ],
           "cache_key_files": [
             "CMakeLists.txt",
             "include/hello_lib.h",
             "src/hello_lib.cpp"
           ],
-          "build_parallelism": "auto"
+          "build_parallelism": "auto",
+          "cache_scope": "toolchain"
         }
       ],
       "ci_smoke": true
@@ -54,7 +55,7 @@
           "runner_labels": [
             "ubuntu-latest"
           ],
-          "build_command": "cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && cmake --build build --parallel \"$CI_BUILD_JOBS\" && ccache --show-stats",
+          "build_command": "python3 \"$CI_CMAKE_BUILD_HELPER\" --source-dir . --build-dir build --generator Ninja --build-jobs \"$CI_BUILD_JOBS\" --define CMAKE_BUILD_TYPE=Release --define CMAKE_C_COMPILER_LAUNCHER=ccache --define CMAKE_CXX_COMPILER_LAUNCHER=ccache",
           "test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "fast_test_command": "./build/hello-ci | grep -F enterprise-ci-platform-ok",
           "artifact_paths": [
@@ -62,13 +63,14 @@
           ],
           "dependency_lock_files": [],
           "cache_paths": [
-            "examples/cpp-app/.cache/ccache"
+            ".ci-cache/ccache"
           ],
           "cache_key_files": [
             "CMakeLists.txt",
             "src/main.cpp"
           ],
-          "build_parallelism": "auto"
+          "build_parallelism": "auto",
+          "cache_scope": "toolchain"
         }
       ]
     },
@@ -189,7 +191,7 @@
           "soc": "generic",
           "target_os": "linux",
           "arch": "x86_64",
-          "toolchain": "gcc-host-container-v1",
+          "toolchain": "gcc-host-v1",
           "runner_labels": [
             "ubuntu-latest"
           ],
@@ -201,7 +203,8 @@
           ],
           "dependency_lock_files": [],
           "cache_paths": [],
-          "cache_key_files": []
+          "cache_key_files": [],
+          "cache_scope": "none"
         }
       ]
     },
@@ -218,7 +221,7 @@
           "soc": "generic",
           "target_os": "linux",
           "arch": "x86_64",
-          "toolchain": "gcc-host-container-v1",
+          "toolchain": "gcc-host-v1",
           "runner_labels": [
             "ubuntu-latest"
           ],
@@ -230,7 +233,8 @@
           ],
           "dependency_lock_files": [],
           "cache_paths": [],
-          "cache_key_files": []
+          "cache_key_files": [],
+          "cache_scope": "none"
         }
       ]
     }
