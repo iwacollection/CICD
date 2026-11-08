@@ -168,6 +168,31 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertTrue(result["checks"]["trivy_scan_p95"]["breached"])
         self.assertEqual(result["checks"]["functional_failure_rate"]["failure_rate_percent"], 0)
 
+
+    def test_performance_regression_monitor_handles_mixed_lanes_independently(self) -> None:
+        from performance_regression import evaluate_regressions, format_markdown
+
+        def report(lanes: dict[str, tuple[float, float]]) -> dict:
+            jobs = []
+            for lane, (build, scan) in lanes.items():
+                jobs.extend([
+                    {"metadata": {"kind": "build", "lane": lane}, "stages": {"build": {"duration_ms": build}}},
+                    {"metadata": {"kind": "security", "lane": lane}, "stages": {"trivy_scan": {"duration_ms": scan}}},
+                ])
+            return {"jobs": jobs}
+
+        history = [report({"full": (100, 100), "smoke": (1000, 1000)}) for _ in range(5)]
+        current = report({"full": (160, 160), "smoke": (1000, 1000)})
+        result = evaluate_regressions(
+            current, history, ["success"] * 9, "success",
+            minimum_baseline_samples=5, minimum_failure_samples=10,
+        )
+        self.assertEqual(result["lanes"], ["full", "smoke"])
+        self.assertTrue(result["lane_checks"]["full"]["build_stage_p95"]["breached"])
+        self.assertFalse(result["lane_checks"]["smoke"]["build_stage_p95"]["breached"])
+        self.assertIn("Lane: full", format_markdown(result))
+        self.assertIn("Lane: smoke", format_markdown(result))
+
     def test_performance_regression_failure_rate_includes_current_main_build(self) -> None:
         from performance_regression import evaluate_regressions
 
