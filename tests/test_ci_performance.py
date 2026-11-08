@@ -110,6 +110,23 @@ class CiPerformanceTests(unittest.TestCase):
             self.assertEqual(aggregate["stage_summary"]["compile"]["count"], 1)
             self.assertGreater(aggregate["stage_summary"]["compile"]["median_ms"], 0)
 
+    def test_build_metadata_probes_tools_with_one_process(self) -> None:
+        from types import SimpleNamespace
+
+        from collect_build_metadata import collect_metadata
+
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout="cc\\tGCC 14.2.0\\ncmake\\tcmake version 3.31.0\\n",
+        )
+        with patch("collect_build_metadata.subprocess.run", return_value=completed) as run:
+            metadata = collect_metadata(ROOT)
+
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(metadata["probe_invocations"], 1)
+        self.assertEqual(metadata["tools"]["cc"], "GCC 14.2.0")
+        self.assertEqual(metadata["tools"]["cmake"], "cmake version 3.31.0")
+
     def test_failed_and_interrupted_stages_are_reported_with_workflow_span(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
