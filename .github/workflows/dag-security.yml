@@ -80,6 +80,7 @@ jobs:
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage platform_checkout
 
       - name: Checkout immutable platform scripts and policy
+        id: platform_checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: iwacollection/CICD
@@ -92,8 +93,16 @@ jobs:
             ci
           sparse-checkout-cone-mode: true
 
-      - name: Finish platform checkout timer
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage platform_checkout
+      - name: Finish platform checkout
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.platform_checkout.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage platform_checkout --exit-code "$rc"
 
       - name: Prepare security evidence directory
         run: rm -rf security-evidence && mkdir -p security-evidence
@@ -115,8 +124,16 @@ jobs:
           exit-code: "0"
           version: v0.70.0
 
-      - name: Finish Trivy scan timer
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage trivy_scan
+      - name: Finish Trivy scan
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.trivy_scan.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage trivy_scan --exit-code "$rc"
 
       - name: Start SBOM generation timer
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage sbom_generation
@@ -130,14 +147,24 @@ jobs:
           format: cyclonedx
           output: security-evidence/security-sbom.cdx.json
           version: v0.70.0
+          skip-setup-trivy: true
 
       - name: Finish SBOM generation timer
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage sbom_generation
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.sbom.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage sbom_generation --exit-code "$rc"
 
       - name: Start supply-chain policy timer
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage supply_chain_policy
 
       - name: Enforce supply-chain policy
+        id: supply_chain_policy
         run: >-
           python3 .ci-platform/scripts/ci/supply_chain_policy.py
           --policy .ci-platform/ci/supply-chain-policy.json
@@ -146,9 +173,21 @@ jobs:
           --sbom security-evidence/security-sbom.cdx.json
 
       - name: Finish supply-chain policy timer
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage supply_chain_policy
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.supply_chain_policy.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage supply_chain_policy --exit-code "$rc"
+
+      - name: Start security manifest timer
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage security_manifest
 
       - name: Create security evidence identity manifest
+        id: security_manifest
         env:
           SEC_ARTIFACT_NAME: ${{ inputs.artifact_name }}
           SEC_PROJECT: ${{ inputs.project }}
@@ -173,10 +212,22 @@ jobs:
             --workflow-run-id "$GITHUB_RUN_ID" \
             --workflow-run-attempt "$GITHUB_RUN_ATTEMPT"
 
+      - name: Finish security manifest timer
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.security_manifest.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage security_manifest --exit-code "$rc"
+
       - name: Start security evidence upload timer
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage security_evidence_upload
 
       - name: Upload detached security evidence
+        id: security_upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: security-${{ inputs.artifact_name }}
@@ -188,8 +239,16 @@ jobs:
           retention-days: 14
           compression-level: 0
 
-      - name: Finish security evidence upload timer
-        run: python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage security_evidence_upload
+      - name: Finish security evidence upload
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.security_upload.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage security_evidence_upload --exit-code "$rc"
 
       - name: Finalize CI stage metrics
         if: always() && steps.source_checkout.outcome == 'success'
