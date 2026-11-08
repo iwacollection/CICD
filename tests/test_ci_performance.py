@@ -399,6 +399,8 @@ with events.open('a', encoding='utf-8') as handle: handle.write(f"end {fmt} {tim
             fake_trivy.chmod(0o755)
             metrics_file = root / "metrics.json"
             metrics_file.write_text(json.dumps({"schema_version": 1, "stages": {}}), encoding="utf-8")
+            from ci_metrics import start_stage
+            start_stage(metrics_file, "trivy_scan")
             events = root / "events.log"
 
             with patch.dict(
@@ -416,6 +418,7 @@ with events.open('a', encoding='utf-8') as handle: handle.write(f"end {fmt} {tim
                     metrics_file=metrics_file,
                     scan_cache_dir=root / "cache" / "scan",
                     sbom_cache_dir=root / "cache" / "sbom",
+                    trivy_stage_prestarted=True,
                 )
 
             self.assertTrue(result["success"])
@@ -753,6 +756,8 @@ sys.exit(23 if fmt == 'json' else 0)
         self.assertIn("actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae", security)
         self.assertIn("Generate Trivy scan report and SBOM concurrently", security)
         self.assertIn("parallel_trivy.py", security)
+        self.assertIn("Start Trivy scan timer", security)
+        self.assertIn("--trivy-stage-prestarted", security)
         self.assertIn("--report security-evidence/security-scan.json", security)
         self.assertIn("--sbom security-evidence/security-sbom.cdx.json", security)
         self.assertIn("if: always()", security)
