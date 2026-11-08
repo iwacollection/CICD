@@ -229,3 +229,29 @@ Resource diagnostics additionally capture before/after cgroup v2 counters around
 
 
 Build and test commands can both run through `run_build.py`. To avoid one overwriting the other's counters, the wrapper writes `build-telemetry-build.json` and `build-telemetry-test.json` as separate phase records. The per-job metrics finalizer attaches every phase record; ccache/CMake/Ninja statistics are calculated only from `phase=build`, while CPU, memory and I/O resource deltas may include both build and test phases.
+
+## 9. End-to-end workflow and job queue telemetry
+
+The separate `CI End-to-End Observability` workflow runs after a `Build Matrix` run on `main` has completed. It reads the parent run and its exact run-attempt jobs through the GitHub Actions API, then joins those timestamps with the parent's `ci-performance-report` artifact when available. The collector checks out the trusted default branch; it does not execute code from an untrusted pull-request head. The resulting JSON and Markdown reports are uploaded for 90 days.
+
+| Metric | Calculation | What it tells us |
+|---|---|---|
+| Workflow queue | `run_started_at - created_at` | Delay before the workflow run starts |
+| Workflow end-to-end | `updated_at - created_at`, only after run status is `completed` | Overall GitHub run elapsed time |
+| Workflow active time | `updated_at - run_started_at`, only after run completion | Time from run start to its final update |
+| Job queue wait | `job.started_at - job.created_at` | Per-job delay before Runner execution |
+| Job runtime | `job.completed_at - job.started_at` | Actual elapsed time for an individual Job |
+| Job execution window | Earliest Job start to latest Job completion | Wall-clock window occupied by parallel DAG jobs |
+| Instrumented workflow span | Earliest in-job timing marker to latest instrumented Job completion | Internal execution span already collected by `ci_metrics.py` |
+
+**Important interpretation boundaries:**
+
+- GitHub's workflow-run REST object does not expose a dedicated `completed_at` timestamp. The collector fetches the run only after `status=completed` and uses its `updated_at` as the end-time proxy. Job objects have their own `completed_at` timestamps.
+- Job queue wait is `started_at - created_at`. It is the job-level scheduling/Runner wait, not the time spent waiting for upstream DAG dependencies before the Job is created.
+- The Job execution window is a wall-clock interval. It is not the sum of parallel Job runtimes and is not, by itself, the DAG critical-path duration.
+- The instrumented span excludes queue time before the first marker and post-job cleanup. Compare it with the GitHub run and Job timestamps; do not add the two windows together.
+- If the parent performance artifact is unavailable, the observer still reports run and Job timing. Stage-level details are omitted rather than fabricated.
+- The observer is triggered only for completed `Build Matrix` runs on `main`; its token is read-only for Actions and Contents.
+
+The first report should be read as an attribution tool: use run queue and Job queue to identify scheduling delays, Job runtime to identify slow DAG nodes, and stage timings to identify the work inside the slow Job. This separates GitHub scheduling, dependency topology, Runner execution, and the actual build/security stages instead of collapsing them into one undifferentiated duration.
+
