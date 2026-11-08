@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from compile_telemetry import write_build_telemetry
+from resource_telemetry import calculate_resource_delta, read_resource_snapshot
 
 
 def host_command(command: str) -> list[str]:
@@ -171,6 +172,7 @@ def _configure_build_environment(workdir: Path, requested_jobs: str) -> str:
 
     stats_log = telemetry_dir / "ccache.stats.log"
     resource_limits["effective_jobs"] = int(jobs)
+    resource_limits["before"] = read_resource_snapshot()
     os.environ["CI_BUILD_JOBS"] = jobs
     os.environ["CMAKE_BUILD_PARALLEL_LEVEL"] = jobs
     os.environ["CCACHE_DIR"] = str(ccache_dir)
@@ -369,6 +371,11 @@ def main() -> int:
 
     try:
         profile = json.loads(os.environ.get("CI_BUILD_RESOURCE_PROFILE_JSON", "{}"))
+        profile["after"] = read_resource_snapshot()
+        profile["delta"] = calculate_resource_delta(
+            profile.get("before", {}),
+            profile["after"],
+        )
         output = write_build_telemetry(
             workdir,
             build_exit_code=proc.returncode,
@@ -385,7 +392,7 @@ def main() -> int:
                 f"hit_rate={cache.get('hit_rate_percent')}% "
                 f"cleanup_events={cache.get('cleanup_events')}"
             )
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
         print(f"WARNING: could not collect build telemetry: {exc}", file=sys.stderr)
     return proc.returncode
 
