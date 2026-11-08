@@ -52,7 +52,8 @@ def parse_ccache_stats(build_stats: str, global_stats: str) -> dict[str, Any]:
     misses = _counter(build_stats, ("cache miss", "cache misses", "misses"))
     uncacheable = _counter(build_stats, ("uncacheable calls", "uncacheable"))
     cacheable_calls = _counter(build_stats, ("cacheable calls",))
-    cleanups = _counter(global_stats, ("cleanups", "cleanup"))
+    build_cleanups = _counter(build_stats, ("cleanups", "cleanup"))
+    global_cleanups = _counter(global_stats, ("cleanups", "cleanup"))
     files = _counter(global_stats, ("files in cache", "files"))
     size_gb = _first_float(global_stats, ("cache size gb", "cache size gib"))
     limit_gb = None
@@ -82,7 +83,8 @@ def parse_ccache_stats(build_stats: str, global_stats: str) -> dict[str, Any]:
         "cache_limit_gib": limit_gb,
         "files_in_cache": files,
         # ccache exposes cleanup runs, not an exact per-object eviction count.
-        "cleanup_events": cleanups or 0,
+        "cleanup_events": (build_cleanups if build_cleanups is not None else (global_cleanups or 0)),
+        "cleanup_events_scope": "build" if build_cleanups is not None else "global_snapshot",
     }
 
 
