@@ -340,6 +340,7 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertIn("if: always()", security)
         self.assertIn("hardware_build", build)
         self.assertIn("hardware_test", build)
+        self.assertEqual(build.count("CI_BUILD_JOBS: ${{ inputs.build_parallelism }}"), 4)
         self.assertIn("Finish artifact verify timer", build)
         self.assertIn("name: Detached security evidence barrier", central)
         self.assertIn('SECURITY_RESULT: ${{ needs.security_complete.result }}', central)
