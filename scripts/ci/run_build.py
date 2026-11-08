@@ -175,6 +175,7 @@ def _configure_build_environment(workdir: Path, requested_jobs: str) -> str:
     os.environ["CMAKE_BUILD_PARALLEL_LEVEL"] = jobs
     os.environ["CCACHE_DIR"] = str(ccache_dir)
     os.environ["CCACHE_STATSLOG"] = str(stats_log)
+    os.environ.setdefault("CCACHE_MAXSIZE", "2G")
     os.environ["CI_BUILD_RESOURCE_PROFILE_JSON"] = json.dumps(resource_limits, sort_keys=True)
     helper = Path(__file__).resolve().with_name("cmake_build.py")
     if helper.is_file():
@@ -255,6 +256,7 @@ def _container_env_args(workdir: Path) -> list[str]:
     for key in (
         "SOURCE_DATE_EPOCH",
         "CCACHE_DISABLE",
+        "CCACHE_MAXSIZE",
         "EXPECTED_JAVA_VERSION",
         "EXPECTED_MAVEN_VERSION",
         "MAVEN_ARGS",
