@@ -131,12 +131,20 @@ def build_end_to_end_report(
     completed_jobs = [job for job in normalized_jobs if job.get("completed_at")]
     first_job_start = min(
         (job["started_at"] for job in started_jobs),
-        key=lambda value: _parse_timestamp(value) or datetime.max,
+        key=lambda value: (
+            _parse_timestamp(value).timestamp()
+            if _parse_timestamp(value) is not None
+            else float("inf")
+        ),
         default=None,
     )
     last_job_completion = max(
         (job["completed_at"] for job in completed_jobs),
-        key=lambda value: _parse_timestamp(value) or datetime.min,
+        key=lambda value: (
+            _parse_timestamp(value).timestamp()
+            if _parse_timestamp(value) is not None
+            else float("-inf")
+        ),
         default=None,
     )
 
