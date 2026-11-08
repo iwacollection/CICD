@@ -506,6 +506,7 @@ jobs:
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
       platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
 
   security_level_2:
     name: Security L2
@@ -527,6 +528,7 @@ jobs:
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
       platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
 
   security_level_3:
     name: Security L3
@@ -548,6 +550,7 @@ jobs:
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
       platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
 
   security_level_4:
     name: Security L4
@@ -569,6 +572,7 @@ jobs:
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
       platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
 
   security_level_5:
     name: Security L5
@@ -590,6 +594,7 @@ jobs:
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
       platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
 
   security_level_6:
     name: Security L6
@@ -611,6 +616,7 @@ jobs:
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
       platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
 
   security_level_7:
     name: Security L7
@@ -632,6 +638,7 @@ jobs:
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
       platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
 
   build_complete:
     name: Dependency DAG barrier
