@@ -41,6 +41,8 @@ def render_dag(data: dict, toolchain_data: dict, selected: set[str], lane: str) 
         ) if project_names else {"include": []}
         for target in matrix["include"]:
             target["cache_paths"] = _dag_cache_paths(target.get("cache_paths", ""))
+            if target.get("cache_scope") == "toolchain" and target["cache_paths"] != "source/.ci-cache/ccache":
+                raise ValueError("toolchain-shared cache scope must use source/.ci-cache/ccache")
         count = len(matrix["include"])
         total_targets += count
         levels.append(
