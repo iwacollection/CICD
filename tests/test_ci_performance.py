@@ -262,7 +262,7 @@ class CiPerformanceTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_ninja.chmod(0o755)
-            with patch.dict(os.environ, {"PATH": str(bin_dir)}):
+            with patch.dict(os.environ, {"PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", "")}):
                 result = _ninja_introspection(build_dir, root, baseline_entries=0)
 
         self.assertTrue(result["available"])
@@ -543,7 +543,7 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertIn("name: Aggregate CI stage timings", central)
         self.assertIn("name: Mainline CI performance regression monitor", central)
         self.assertIn("name: Attach compiler cache and CMake/Ninja telemetry", build)
-        self.assertIn("cache_scope: ${{ inputs.cache_scope }}", build)
+        self.assertIn("CI_CCACHE_SCOPE: ${{ inputs.cache_scope }}", build)
         self.assertEqual(central.split("max-parallel: 4").__len__(), 9)
         security_calls = central.split("uses: ./.github/workflows/dag-security.yml")
         self.assertEqual(len(security_calls) - 1, 8)
