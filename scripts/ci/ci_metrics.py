@@ -180,6 +180,85 @@ def _parse_timestamp(value: object) -> datetime | None:
     return parsed
 
 
+
+def attach_build_telemetry(path: Path, telemetry_path: Path) -> bool:
+    """Attach host-collected build telemetry to the per-job report."""
+    if not telemetry_path.is_file():
+        return False
+    telemetry = json.loads(telemetry_path.read_text(encoding="utf-8"))
+    if not isinstance(telemetry, dict) or telemetry.get("schema_version") != 1:
+        raise ValueError(f"unsupported build telemetry file: {telemetry_path}")
+    value = _load(path)
+    value["build_telemetry"] = telemetry
+    _save(path, value)
+    return True
+
+
+def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    build_reports = [
+        report.get("build_telemetry", {})
+        for report in reports
+        if isinstance(report.get("build_telemetry"), dict)
+    ]
+    cache_reports = [
+        report.get("ccache", {}) for report in build_reports
+        if isinstance(report.get("ccache"), dict) and report.get("ccache", {}).get("available")
+    ]
+    hits = sum(int(item.get("hits") or 0) for item in cache_reports)
+    misses = sum(int(item.get("misses") or 0) for item in cache_reports)
+    total = hits + misses
+
+    phase_values: dict[str, list[float]] = {}
+    ninja_values: dict[str, list[float]] = {}
+    no_op_successes = 0
+    for item in build_reports:
+        cmake_ninja = item.get("cmake_ninja", {})
+        if not isinstance(cmake_ninja, dict):
+            continue
+        for field in ("configure_generate_ms", "compile_link_ms", "total_ms"):
+            duration = cmake_ninja.get(field)
+            if isinstance(duration, (int, float)):
+                phase_values.setdefault(field, []).append(float(duration))
+        ninja = cmake_ninja.get("ninja", {})
+        if isinstance(ninja, dict) and ninja.get("available"):
+            for field in ("graph_nodes", "graph_edges", "target_count", "executed_edges", "object_compile_edges", "pending_actions_after_build"):
+                number = ninja.get(field)
+                if isinstance(number, (int, float)):
+                    ninja_values.setdefault(field, []).append(float(number))
+            if ninja.get("incremental_noop") is True:
+                no_op_successes += 1
+
+    return {
+        "build_telemetry_jobs": len(build_reports),
+        "ccache": {
+            "samples": len(cache_reports),
+            "hits": hits,
+            "misses": misses,
+            "hit_rate_percent": round(hits / total * 100.0, 2) if total else None,
+            "cleanup_events_total": sum(int(item.get("cleanup_events") or 0) for item in cache_reports),
+            "max_cache_size_gib": max((float(item.get("cache_size_gib") or 0) for item in cache_reports), default=0),
+            "max_files_in_cache": max((int(item.get("files_in_cache") or 0) for item in cache_reports), default=0),
+        },
+        "cmake_phases": {
+            name: {
+                "count": len(values),
+                "median_ms": round(statistics.median(values), 2),
+                "p95_ms": _percentile(values, 0.95),
+                "max_ms": round(max(values), 2),
+            }
+            for name, values in sorted(phase_values.items())
+        },
+        "ninja": {
+            name: {
+                "count": len(values),
+                "median": round(statistics.median(values), 2),
+                "max": round(max(values), 2),
+            }
+            for name, values in sorted(ninja_values.items())
+        },
+        "incremental_noop_successes": no_op_successes,
+    }
+
 def aggregate_metrics(input_dir: Path) -> dict[str, Any]:
     reports: list[dict[str, Any]] = []
     for path in sorted(input_dir.glob("**/ci-stage-metrics.json")):
@@ -267,6 +346,7 @@ def aggregate_metrics(input_dir: Path) -> dict[str, Any]:
         "job_kind_summary": job_kind_summary,
         "jobs": reports,
         "stage_summary": stage_summary,
+        "build_telemetry_summary": _build_telemetry_summary(reports),
     }
 
 
@@ -317,6 +397,35 @@ def format_aggregate_summary(value: dict[str, Any]) -> str:
                 f"{item['max_ms'] / 1000:.2f}s |"
             )
 
+    build_telemetry = value.get("build_telemetry_summary", {})
+    ccache = build_telemetry.get("ccache", {})
+    lines.extend(["", "## Compiler cache / CMake / Ninja telemetry", ""])
+    if ccache.get("samples", 0):
+        rate = ccache.get("hit_rate_percent")
+        rate_text = f"{rate:.1f}%" if isinstance(rate, (int, float)) else "n/a"
+        lines.append(
+            f"- ccache: {ccache.get('hits', 0)} hits / {ccache.get('misses', 0)} misses "
+            f"({rate_text}); cleanup events: {ccache.get('cleanup_events_total', 0)}; "
+            f"largest observed cache: {ccache.get('max_cache_size_gib', 0):.2f} GiB / "
+            f"{ccache.get('max_files_in_cache', 0)} files"
+        )
+    else:
+        lines.append("- ccache: no build-local stats available")
+    for phase, item in build_telemetry.get("cmake_phases", {}).items():
+        lines.append(
+            f"- CMake {phase}: {item['count']} samples; median {item['median_ms'] / 1000:.2f}s; "
+            f"P95 {item['p95_ms'] / 1000:.2f}s; max {item['max_ms'] / 1000:.2f}s"
+        )
+    ninja = build_telemetry.get("ninja", {})
+    if ninja:
+        for field in ("graph_nodes", "graph_edges", "target_count", "executed_edges", "object_compile_edges", "pending_actions_after_build"):
+            item = ninja.get(field)
+            if item:
+                lines.append(f"- Ninja {field}: median {item['median']:.0f}, max {item['max']:.0f}")
+        lines.append(
+            f"- Incremental dry-run confirmed no pending work: "
+            f"{build_telemetry.get('incremental_noop_successes', 0)} build(s)"
+        )
     lines.extend(["", "## Per-job breakdown", ""])
     lines.append("| Kind | Project | Target | Instrumented duration | Run/job |")
     lines.append("|---|---|---|---:|---|")
@@ -361,6 +470,10 @@ def main() -> int:
     finalize.add_argument("--output-json", required=True)
     finalize.add_argument("--summary-file", default="")
 
+    attach = sub.add_parser("attach-build-telemetry")
+    attach.add_argument("--file", required=True)
+    attach.add_argument("--telemetry-file", required=True)
+
     aggregate = sub.add_parser("aggregate")
     aggregate.add_argument("--input-dir", required=True)
     aggregate.add_argument("--output-json", required=True)
@@ -377,6 +490,8 @@ def main() -> int:
         elif args.command == "finalize":
             summary_path = Path(args.summary_file) if args.summary_file else None
             finalize_metrics(Path(args.file), Path(args.output_json), summary_path)
+        elif args.command == "attach-build-telemetry":
+            attach_build_telemetry(Path(args.file), Path(args.telemetry_file))
         elif args.command == "aggregate":
             report = aggregate_metrics(Path(args.input_dir))
             output_json = Path(args.output_json)
