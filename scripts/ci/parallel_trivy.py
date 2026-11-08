@@ -66,6 +66,7 @@ def run_parallel(
     scan_cache_dir: Path,
     sbom_cache_dir: Path,
     trivy_bin: str = "trivy",
+    trivy_stage_prestarted: bool = False,
 ) -> dict[str, Any]:
     """Run scan and SBOM processes together, recording independent stage timings."""
     for output in (scan_output, sbom_output):
@@ -89,7 +90,8 @@ def run_parallel(
     # Keeping the timer file writes in this parent process avoids concurrent JSON
     # updates while still measuring the actual lifetime of each child process.
     for stage, command in commands.items():
-        start_stage(metrics_file, stage)
+        if not (stage == "trivy_scan" and trivy_stage_prestarted):
+            start_stage(metrics_file, stage)
         try:
             pending[stage] = subprocess.Popen(command)
         except OSError as exc:
@@ -126,6 +128,11 @@ def main() -> int:
     parser.add_argument("--scan-cache-dir", required=True)
     parser.add_argument("--sbom-cache-dir", required=True)
     parser.add_argument("--trivy-bin", default="trivy")
+    parser.add_argument(
+        "--trivy-stage-prestarted",
+        action="store_true",
+        help="The trivy_scan timer was started before Trivy setup/cache restore.",
+    )
     args = parser.parse_args()
 
     result = run_parallel(
@@ -136,6 +143,7 @@ def main() -> int:
         scan_cache_dir=Path(args.scan_cache_dir),
         sbom_cache_dir=Path(args.sbom_cache_dir),
         trivy_bin=args.trivy_bin,
+        trivy_stage_prestarted=args.trivy_stage_prestarted,
     )
     return 0 if result["success"] else 1
 
