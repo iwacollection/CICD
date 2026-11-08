@@ -91,6 +91,7 @@ class CiPerformanceTests(unittest.TestCase):
         )
         self.assertEqual(item["artifact_name"], expected)
         self.assertEqual(item["build_parallelism"], "auto")
+        self.assertEqual(item["cache_paths"], "source/examples/cpp-lib/.cache/ccache")
 
     def test_stage_metrics_finalize_and_aggregate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -109,6 +110,89 @@ class CiPerformanceTests(unittest.TestCase):
             self.assertEqual(aggregate["job_count"], 1)
             self.assertEqual(aggregate["stage_summary"]["compile"]["count"], 1)
             self.assertGreater(aggregate["stage_summary"]["compile"]["median_ms"], 0)
+
+
+    def test_build_runner_aligns_ccache_and_cmake_parallelism(self) -> None:
+        from run_build import _configure_build_environment, _container_env_args
+
+        with tempfile.TemporaryDirectory() as directory:
+            workdir = Path(directory)
+            with patch.dict(os.environ, {"CI_BUILD_JOBS": "4"}, clear=False):
+                jobs = _configure_build_environment(workdir, "4")
+                args = _container_env_args(workdir)
+                self.assertEqual(jobs, "4")
+                self.assertEqual(os.environ["CI_BUILD_JOBS"], "4")
+                self.assertEqual(os.environ["CMAKE_BUILD_PARALLEL_LEVEL"], "4")
+                self.assertEqual(os.environ["CCACHE_DIR"], str(workdir / ".cache" / "ccache"))
+                self.assertTrue((workdir / ".cache" / "ccache").is_dir())
+                self.assertIn("CCACHE_DIR=/workspace/.cache/ccache", args)
+                self.assertIn("CMAKE_BUILD_PARALLEL_LEVEL=4", args)
+
+    def test_performance_regression_monitor_is_lane_scoped_and_detects_p95_regressions(self) -> None:
+        from performance_regression import evaluate_regressions
+
+        def report(lane: str, build: list[float], scan: list[float]) -> dict:
+            jobs = []
+            for index, duration in enumerate(build):
+                jobs.append({
+                    "metadata": {"kind": "build", "lane": lane, "project": f"build-{index}"},
+                    "stages": {"build": {"duration_ms": duration, "status": "success"}},
+                })
+            for index, duration in enumerate(scan):
+                jobs.append({
+                    "metadata": {"kind": "security", "lane": lane, "project": f"security-{index}"},
+                    "stages": {"trivy_scan": {"duration_ms": duration, "status": "success"}},
+                })
+            return {"schema_version": 1, "jobs": jobs}
+
+        history = [report("full", [100, 110], [100, 110]) for _ in range(5)]
+        history.extend(report("smoke", [900, 950], [800, 850]) for _ in range(5))
+        current = report("full", [160, 170], [150, 160])
+        result = evaluate_regressions(
+            current, history, ["success"] * 9, "success",
+            minimum_baseline_samples=5, minimum_failure_samples=10,
+        )
+        self.assertEqual(result["lane"], "full")
+        self.assertEqual(result["checks"]["build_stage_p95"]["baseline_samples"], 5)
+        self.assertTrue(result["checks"]["build_stage_p95"]["breached"])
+        self.assertTrue(result["checks"]["trivy_scan_p95"]["breached"])
+        self.assertEqual(result["checks"]["functional_failure_rate"]["failure_rate_percent"], 0)
+
+    def test_performance_regression_failure_rate_includes_current_main_build(self) -> None:
+        from performance_regression import evaluate_regressions
+
+        report = {
+            "jobs": [
+                {"metadata": {"kind": "build", "lane": "fast"}, "stages": {"build": {"duration_ms": 100}}},
+                {"metadata": {"kind": "security", "lane": "fast"}, "stages": {"trivy_scan": {"duration_ms": 100}}},
+            ]
+        }
+        history = [report for _ in range(5)]
+        result = evaluate_regressions(
+            report, history,
+            ["failure", "failure", "success", "success", "success", "success", "success", "success", "success"],
+            "success",
+            minimum_baseline_samples=5, minimum_failure_samples=10, history_limit=20,
+        )
+        failure = result["checks"]["functional_failure_rate"]
+        self.assertEqual(failure["sample_count"], 10)
+        self.assertEqual(failure["failure_count"], 2)
+        self.assertEqual(failure["failure_rate_percent"], 20)
+        self.assertTrue(failure["breached"])
+
+    def test_performance_regression_warms_up_without_enough_history(self) -> None:
+        from performance_regression import evaluate_regressions
+
+        report = {
+            "jobs": [
+                {"metadata": {"kind": "build", "lane": "smoke"}, "stages": {"build": {"duration_ms": 100}}},
+                {"metadata": {"kind": "security", "lane": "smoke"}, "stages": {"trivy_scan": {"duration_ms": 100}}},
+            ]
+        }
+        result = evaluate_regressions(report, [report, report], ["success", "success"], "success")
+        self.assertEqual(result["status"], "warming_up")
+        self.assertFalse(result["checks"]["build_stage_p95"]["evaluated"])
+        self.assertFalse(result["checks"]["functional_failure_rate"]["evaluated"])
 
     def test_build_metadata_probes_tools_with_one_process(self) -> None:
         from types import SimpleNamespace
@@ -251,6 +335,9 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertIn('SECURITY_RESULT: ${{ needs.security_complete.result }}', central)
         self.assertIn("security_evidence.py merge", archive)
         self.assertIn("name: Aggregate CI stage timings", central)
+        self.assertIn("name: Mainline CI performance regression monitor", central)
+        self.assertIn("CI_LANE: ${{ inputs.lane }}", build)
+        self.assertIn("CI_LANE: ${{ inputs.lane }}", security)
 
     def test_external_github_actions_remain_pinned(self) -> None:
         for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):

@@ -27,6 +27,9 @@ on:
       toolchain_identity:
         required: true
         type: string
+      lane:
+        required: true
+        type: string
       platform_ref:
         description: "Exact 40-character CICD platform commit SHA"
         required: true
@@ -45,6 +48,7 @@ jobs:
       CI_ARTIFACT_NAME: ${{ inputs.artifact_name }}
       CI_TARGET: ${{ inputs.soc }}/${{ inputs.target_os }}/${{ inputs.arch }}
       CI_METRICS_KIND: security
+      CI_LANE: ${{ inputs.lane }}
     steps:
       - name: Mark source checkout start
         shell: bash

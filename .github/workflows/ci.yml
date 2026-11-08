@@ -484,6 +484,7 @@ jobs:
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
       platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
 
   security_level_1:
     name: Security L1
@@ -853,3 +854,67 @@ jobs:
             exit 1
           fi
           echo "Build gate passed: total_targets=$TOTAL_TARGETS dag_result=$DAG_RESULT"
+
+
+  performance_regression:
+    name: Mainline CI performance regression monitor
+    needs: [discover, performance_report, gate]
+    if: always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.discover.result == 'success'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout performance monitor
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: .ci-monitor
+          persist-credentials: false
+
+      - name: Download current Build Matrix performance report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-performance-report
+          path: current-metrics
+          if-no-files-found: warn
+
+      - name: Compare mainline P95, scan time and failure rate
+        env:
+          CI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_REPOSITORY: ${{ github.repository }}
+          CI_CURRENT_RUN_ID: ${{ github.run_id }}
+          CI_CURRENT_CONCLUSION: ${{ needs.gate.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .ci-monitor/scripts/ci/performance_regression.py \
+            --repo "$CI_REPOSITORY" \
+            --workflow ci.yml \
+            --branch main \
+            --current-run-id "$CI_CURRENT_RUN_ID" \
+            --current-conclusion "$CI_CURRENT_CONCLUSION" \
+            --current-report current-metrics/ci-performance-report.json \
+            --history-limit 20 \
+            --minimum-baseline-samples 5 \
+            --minimum-failure-samples 10 \
+            --build-regression-percent 15 \
+            --scan-regression-percent 20 \
+            --failure-rate-percent 10 \
+            --output-json ci-performance-regression.json \
+            --output-markdown ci-performance-regression.md
+          cat ci-performance-regression.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload performance regression decision
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-performance-regression
+          path: |
+            ci-performance-regression.json
+            ci-performance-regression.md
+          if-no-files-found: ignore
+          retention-days: 30

@@ -85,7 +85,7 @@ cmake --build build --parallel "$CI_BUILD_JOBS"
 - `"auto"`：使用当前 Runner 可见的 CPU 数量，最少为 1。
 - 正整数：为大型工程、内存敏感工程显式限制并行任务数。
 
-并行度会通过 `run_build.py` 的受控环境变量传入容器。它不会改变工具链 digest、缓存身份或 Artifact Contract 的可信边界。ccache 仍只作为可丢弃缓存；缓存丢失时应冷编译，而不是改变测试和制品校验标准。
+并行度会通过 run_build.py 的受控环境变量传入容器，并同时设置 CMAKE_BUILD_PARALLEL_LEVEL，使没有显式 --parallel 的 cmake --build 也遵循同一并行度。CCACHE_DIR 统一指向当前项目的 .cache/ccache；矩阵缓存路径相应以 source/ 为前缀，确保 actions/cache 恢复的位置与容器挂载的 /workspace/.cache/ccache 完全一致。硬件 SDK 构建也经过同一个 run_build.py，因此可复用同一缓存目录约定。它不会改变工具链 digest、缓存身份或 Artifact Contract 的可信边界。ccache 仍只作为可丢弃缓存；缓存丢失时应冷编译，而不是改变测试和制品校验标准。
 
 自动 CPU 数量只是默认值。大型 C++ 工程需要结合每个编译进程内存、链接峰值、Runner CPU/内存限制和实际编译时间调优，不能假定 CPU 数越大越快。
 
@@ -127,3 +127,22 @@ Trivy Action 默认启用其数据库和检查规则缓存。本工作流在同�
 6. ccache 命中率、缓存恢复时间和冷构建 fallback 是否正常。
 
 不要仅凭 Job 变多、构建日志里出现 cache hit 或局部编译时间下降就宣称性能提升。应观察至少数次正常 PR/Push 的端到端耗时分布，区分排队、Runner 准备、编译、扫描和制品处理各自的变化。
+
+
+## 6. 主干构建性能回归监控
+
+主干 push 和主干 workflow_dispatch 会额外运行 Mainline CI performance regression monitor。它不对 PR 建立基线，避免把 PR 的临时环境和主干数据混在一起；并按 Full/Fast/Smoke Lane 分别比较。
+
+每次主干构建会检查：
+
+| 指标 | 计算口径 | 回归阈值 |
+|---|---|---:|
+| Build-stage P95 | 当前 Run 同一 Lane 所有 Build Job 的 build 阶段 P95；与最近最多 20 个主干 Run 的 per-run P95 中位数比较 | 高于基线 15% |
+| Trivy scan P95 | 当前 Run 同一 Lane 所有 Security Job 的 trivy_scan 阶段 P95；与历史 per-run P95 中位数比较 | 高于基线 20% |
+| 功能构建失败率 | 最近最多 20 次已完成的主干 Build Matrix，加上当前 Build Gate 结果；失败、取消、超时计为失败 | 高于 10% |
+
+编译和扫描指标至少需要 5 份同 Lane 历史报告才开始判定；失败率至少需要 10 次已完成构建才开始判定。每次执行都会生成 ci-performance-regression.json/.md，作为 Actions Job Summary 和 30 天工件保存。超过阈值时发出 GitHub Actions warning 注解。
+
+性能告警当前采用非阻断模式：它提示 P95、扫描时间或失败率回归，但不改变 Build gate 的 Artifact Contract、安全扫描、attestation 或签名结果。这样可以先积累真实主干基线，不会因为首批样本不足或性能噪声阻断制品交付。指标报告缺失或 GitHub 历史 API 不可读时，Monitor 会明确显示 monitor_unavailable 警告，不会伪造健康结果。
+
+Build-stage P95 代表目标 Job 内实际执行构建命令的阶段，不是 GitHub Run 的完整排队时间。instrumented_workflow_span_ms 仍用于观察 DAG 并行后的流程跨度；两者不要相加，也不要把多个并行 Job 的时长当成墙钟时间。
