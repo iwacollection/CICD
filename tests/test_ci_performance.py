@@ -360,12 +360,14 @@ class CiPerformanceTests(unittest.TestCase):
             summary = aggregate["build_telemetry_summary"]
 
         self.assertEqual(summary["ccache"]["hit_rate_percent"], 80.0)
+        self.assertEqual(summary["compile_invocations"], 1)
+        self.assertEqual(summary["build_telemetry_invocations"], 2)
         self.assertEqual(summary["ccache"]["cleanup_events_total"], 1)
         self.assertEqual(summary["cmake_phases"]["configure_generate_ms"]["median_ms"], 1200)
         self.assertEqual(summary["ninja"]["graph_nodes"]["median"], 12)
         self.assertEqual(summary["incremental_noop_successes"], 1)
         self.assertEqual(summary["resources"]["effective_jobs_median"], 2)
-        self.assertEqual(summary["resources"]["cpu_throttled_usec_total"], 500)
+        self.assertEqual(summary["resources"]["cpu_throttled_usec_total"], 510)
         self.assertEqual(summary["resources"]["memory_peak_bytes_max"], 4096)
         self.assertEqual(summary["resources"]["io_read_bytes_total"], 1000)
         self.assertEqual(summary["resources"]["io_pressure_some_usec_total"], 2500)
