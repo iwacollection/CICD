@@ -145,6 +145,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertIn("parallel_trivy.py", dag_security)
         self.assertIn("--scanners", (ROOT / "scripts" / "ci" / "parallel_trivy.py").read_text(encoding="utf-8"))
         self.assertIn("--severity", (ROOT / "scripts" / "ci" / "parallel_trivy.py").read_text(encoding="utf-8"))
+        self.assertIn("--trivy-stage-prestarted", (ROOT / "scripts" / "ci" / "parallel_trivy.py").read_text(encoding="utf-8"))
         self.assertIn("supply_chain_policy.py", dag_security)
         self.assertIn("security-scan.json", dag_security)
         self.assertIn("security-sbom.cdx.json", dag_security)
