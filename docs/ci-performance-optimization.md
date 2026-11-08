@@ -219,3 +219,6 @@ Compare at least one cold run and several warm runs on the same Runner class and
 
 
 Resource diagnostics additionally capture before/after cgroup v2 counters around each build: CPU usage and throttling, memory peak/current and OOM events, per-device block I/O bytes/ops, and Linux CPU/memory/I/O pressure-stall information (PSI). The report aggregates throttled time, OOM kill events, peak memory and I/O deltas. On runners without cgroup v2 or PSI, unavailable counters remain absent rather than being guessed.
+
+
+Build and test commands can both run through `run_build.py`. To avoid one overwriting the other's counters, the wrapper writes `build-telemetry-build.json` and `build-telemetry-test.json` as separate phase records. The per-job metrics finalizer attaches every phase record; ccache/CMake/Ninja statistics are calculated only from `phase=build`, while CPU, memory and I/O resource deltas may include both build and test phases.
