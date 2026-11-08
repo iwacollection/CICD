@@ -110,6 +110,45 @@ class CiPerformanceTests(unittest.TestCase):
             self.assertEqual(aggregate["stage_summary"]["compile"]["count"], 1)
             self.assertGreater(aggregate["stage_summary"]["compile"]["median_ms"], 0)
 
+    def test_failed_and_interrupted_stages_are_reported_with_workflow_span(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            working = root / "working.json"
+            output = root / "job" / "ci-stage-metrics.json"
+            with patch.dict(os.environ, {"CI_METRICS_KIND": "build", "CI_PROJECT": "fixture"}):
+                start_stage(working, "compile_failure")
+                finish_stage(working, "compile_failure", exit_code=17)
+                start_stage(working, "cancelled_test")
+                time.sleep(0.01)
+                report = finalize_metrics(working, output)
+
+            self.assertEqual(report["stages"]["compile_failure"]["status"], "failure")
+            self.assertEqual(report["stages"]["compile_failure"]["exit_code"], 17)
+            self.assertEqual(report["stages"]["cancelled_test"]["status"], "interrupted")
+
+            aggregate = aggregate_metrics(root)
+            self.assertGreater(aggregate["instrumented_workflow_span_ms"], 0)
+            self.assertEqual(aggregate["job_kind_summary"]["build"]["count"], 1)
+            self.assertEqual(aggregate["stage_summary"]["compile_failure"]["failure_count"], 1)
+            self.assertEqual(aggregate["stage_summary"]["cancelled_test"]["interrupted_count"], 1)
+
+    def test_metrics_report_labels_parallel_wall_span_and_failure_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            working = root / "working.json"
+            output = root / "job" / "ci-stage-metrics.json"
+            start_stage(working, "cache_restore")
+            finish_stage(working, "cache_restore")
+            report = finalize_metrics(working, output)
+            aggregate = aggregate_metrics(root)
+
+            from ci_metrics import format_aggregate_summary
+
+            summary = format_aggregate_summary(aggregate)
+            self.assertIn("Instrumented workflow span", summary)
+            self.assertIn("Failure", summary)
+            self.assertIn("Interrupted", summary)
+
     def test_security_evidence_merges_only_for_matching_artifact_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -186,6 +225,11 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertNotIn("aquasecurity/trivy-action", build)
         self.assertIn("aquasecurity/trivy-action", security)
         self.assertIn("Generate CycloneDX SBOM", security)
+        self.assertIn("skip-setup-trivy: true", security)
+        self.assertIn("if: always()", security)
+        self.assertIn("hardware_build", build)
+        self.assertIn("hardware_test", build)
+        self.assertIn("Finish artifact verification timer", build)
         self.assertIn("name: Detached security evidence barrier", central)
         self.assertIn('SECURITY_RESULT: ${{ needs.security_complete.result }}', central)
         self.assertIn("security_evidence.py merge", archive)
