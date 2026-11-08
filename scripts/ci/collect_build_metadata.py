@@ -5,41 +5,57 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
 
-PROBES = {
-    "cc": "cc --version",
-    "cxx": "c++ --version",
-    "gcc": "gcc --version",
-    "g++": "g++ --version",
-    "clang": "clang --version",
-    "clang++": "clang++ --version",
-    "cmake": "cmake --version",
-    "ninja": "ninja --version",
-    "make": "make --version",
-    "java": "java -version 2>&1",
-    "javac": "javac -version 2>&1",
-    "maven": "mvn --version 2>&1",
-    "gradle": "gradle --version",
+# Argument vectors, not shell fragments: all probes run in one shell/container
+# invocation to avoid starting a separate Docker container for every tool.
+PROBES: dict[str, tuple[str, ...]] = {
+    "cc": ("cc", "--version"),
+    "cxx": ("c++", "--version"),
+    "gcc": ("gcc", "--version"),
+    "g++": ("g++", "--version"),
+    "clang": ("clang", "--version"),
+    "clang++": ("clang++", "--version"),
+    "cmake": ("cmake", "--version"),
+    "ninja": ("ninja", "--version"),
+    "make": ("make", "--version"),
+    "java": ("java", "-version"),
+    "javac": ("javac", "-version"),
+    "maven": ("mvn", "--version"),
+    "gradle": ("gradle", "--version"),
 }
 
 
-def _first_line(text: str) -> str:
-    for line in text.splitlines():
-        value = line.strip()
-        if value:
-            return value
-    return ""
+def _probe_script() -> str:
+    lines = [
+        "set -uo pipefail",
+        "probe() {",
+        '  local name="$1"; shift',
+        '  local binary="$1"',
+        '  if ! command -v "$binary" >/dev/null 2>&1; then return 0; fi',
+        "  local output",
+        '  if output="$("$@" 2>&1)"; then',
+        '    local first_line',
+        '    first_line="$(printf "%s\\n" "$output" | awk \'NF { print; exit }\')"',
+        '    if [[ -n "$first_line" ]]; then printf "%s\\t%s\\n" "$name" "$first_line"; fi',
+        "  fi",
+        "}",
+    ]
+    for name, argv in PROBES.items():
+        rendered = " ".join(shlex.quote(value) for value in (name, *argv))
+        lines.append(f"probe {rendered}")
+    return "\n".join(lines) + "\n"
 
 
-def _run_probe(command: str, *, workdir: Path, container_image: str) -> str:
-    probe = f"command -v {command.split()[0]} >/dev/null 2>&1 || exit 127; {command}"
+def _run_probes(workdir: Path, container_image: str) -> dict[str, str]:
+    script = _probe_script()
     if container_image:
         docker = shutil.which("docker")
         if not docker:
-            return ""
+            return {}
         args = [
             docker,
             "run",
@@ -54,10 +70,11 @@ def _run_probe(command: str, *, workdir: Path, container_image: str) -> str:
             "-euo",
             "pipefail",
             "-c",
-            probe,
+            script,
         ]
     else:
-        args = ["bash", "-euo", "pipefail", "-c", probe]
+        args = ["bash", "-euo", "pipefail", "-c", script]
+
     proc = subprocess.run(
         args,
         cwd=workdir,
@@ -67,16 +84,18 @@ def _run_probe(command: str, *, workdir: Path, container_image: str) -> str:
         check=False,
     )
     if proc.returncode != 0:
-        return ""
-    return _first_line(proc.stdout)
+        return {}
+
+    tools: dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        name, separator, version = line.partition("\t")
+        if separator and name in PROBES and version.strip():
+            tools[name] = version.strip()
+    return tools
 
 
 def collect_metadata(workdir: Path, container_image: str = "") -> dict:
-    tools = {
-        name: version
-        for name, command in PROBES.items()
-        if (version := _run_probe(command, workdir=workdir, container_image=container_image))
-    }
+    tools = _run_probes(workdir, container_image)
     return {
         "runner": {
             "name": os.getenv("RUNNER_NAME", "local"),
@@ -89,6 +108,7 @@ def collect_metadata(workdir: Path, container_image: str = "") -> dict:
         "tools": tools,
         "execution_mode": "container" if container_image else "host",
         "container_image": container_image,
+        "probe_invocations": 1,
     }
 
 
