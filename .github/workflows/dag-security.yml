@@ -1,0 +1,277 @@
+name: DAG Security Evidence
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        required: true
+        type: string
+      project:
+        required: true
+        type: string
+      path:
+        required: true
+        type: string
+      soc:
+        required: true
+        type: string
+      target_os:
+        required: true
+        type: string
+      arch:
+        required: true
+        type: string
+      toolchain:
+        required: true
+        type: string
+      toolchain_identity:
+        required: true
+        type: string
+      lane:
+        required: true
+        type: string
+      platform_ref:
+        description: "Exact 40-character CICD platform commit SHA"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    name: Security / ${{ inputs.project }} / ${{ inputs.soc }} / ${{ inputs.target_os }} / ${{ inputs.arch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI_PROJECT: ${{ inputs.project }}
+      CI_ARTIFACT_NAME: ${{ inputs.artifact_name }}
+      CI_TARGET: ${{ inputs.soc }}/${{ inputs.target_os }}/${{ inputs.arch }}
+      CI_METRICS_KIND: security
+      CI_LANE: ${{ inputs.lane }}
+    steps:
+      - name: Mark source checkout start
+        shell: bash
+        run: python3 -c 'import time; print(time.monotonic_ns())' > "$RUNNER_TEMP/ci-source-checkout-start-ns"
+
+      - name: Checkout source
+        id: source_checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Record source checkout duration
+        shell: bash
+        run: >-
+          python3 source/scripts/ci/ci_metrics.py record
+          --file "$RUNNER_TEMP/ci-stage-metrics.json"
+          --stage source_checkout
+          --start-ns "$(cat "$RUNNER_TEMP/ci-source-checkout-start-ns")"
+
+      - name: Require immutable platform revision
+        shell: bash
+        env:
+          CI_PLATFORM_REF: ${{ inputs.platform_ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CI_PLATFORM_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "platform_ref must be an exact 40-character commit SHA" >&2
+            exit 1
+          fi
+
+      - name: Start platform checkout timer
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage platform_checkout
+
+      - name: Checkout immutable platform scripts and policy
+        id: platform_checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: iwacollection/CICD
+          ref: ${{ inputs.platform_ref }}
+          path: .ci-platform
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci
+            ci
+          sparse-checkout-cone-mode: true
+
+      - name: Finish platform checkout
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.platform_checkout.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage platform_checkout --exit-code "$rc"
+
+      - name: Prepare security evidence directory
+        run: rm -rf security-evidence && mkdir -p security-evidence
+
+      - name: Start Trivy scan timer
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage trivy_scan
+
+      - name: Scan project vulnerabilities, licenses, secrets and misconfigurations
+        id: trivy_scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: fs
+          scan-ref: source/${{ inputs.path }}
+          scanners: vuln,license,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          format: json
+          output: security-evidence/security-scan.json
+          exit-code: "0"
+          version: v0.70.0
+
+      - name: Finish Trivy scan
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.trivy_scan.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage trivy_scan --exit-code "$rc"
+
+      - name: Start SBOM generation timer
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage sbom_generation
+
+      - name: Generate CycloneDX SBOM
+        id: sbom
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: fs
+          scan-ref: source/${{ inputs.path }}
+          format: cyclonedx
+          output: security-evidence/security-sbom.cdx.json
+          version: v0.70.0
+          skip-setup-trivy: true
+
+      - name: Finish SBOM generation timer
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.sbom.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage sbom_generation --exit-code "$rc"
+
+      - name: Start supply-chain policy timer
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage supply_chain_policy
+
+      - name: Enforce supply-chain policy
+        id: supply_chain_policy
+        run: >-
+          python3 .ci-platform/scripts/ci/supply_chain_policy.py
+          --policy .ci-platform/ci/supply-chain-policy.json
+          --skip-dockerfiles
+          --report security-evidence/security-scan.json
+          --sbom security-evidence/security-sbom.cdx.json
+
+      - name: Finish supply-chain policy timer
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.supply_chain_policy.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage supply_chain_policy --exit-code "$rc"
+
+      - name: Start security manifest timer
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage security_manifest
+
+      - name: Create security evidence identity manifest
+        id: security_manifest
+        env:
+          SEC_ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          SEC_PROJECT: ${{ inputs.project }}
+          SEC_SOC: ${{ inputs.soc }}
+          SEC_TARGET_OS: ${{ inputs.target_os }}
+          SEC_ARCH: ${{ inputs.arch }}
+          SEC_TOOLCHAIN: ${{ inputs.toolchain }}
+          SEC_TOOLCHAIN_IDENTITY: ${{ inputs.toolchain_identity }}
+        run: |
+          set -euo pipefail
+          python3 .ci-platform/scripts/ci/security_evidence.py create \
+            --output security-evidence/security-evidence.json \
+            --artifact-name "$SEC_ARTIFACT_NAME" \
+            --project "$SEC_PROJECT" \
+            --soc "$SEC_SOC" \
+            --target-os "$SEC_TARGET_OS" \
+            --arch "$SEC_ARCH" \
+            --toolchain "$SEC_TOOLCHAIN" \
+            --toolchain-identity "$SEC_TOOLCHAIN_IDENTITY" \
+            --source-sha "$GITHUB_SHA" \
+            --source-repository "$GITHUB_REPOSITORY" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT"
+
+      - name: Finish security manifest timer
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.security_manifest.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage security_manifest --exit-code "$rc"
+
+      - name: Start security evidence upload timer
+        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage security_evidence_upload
+
+      - name: Upload detached security evidence
+        id: security_upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: security-${{ inputs.artifact_name }}
+          path: |
+            security-evidence/security-scan.json
+            security-evidence/security-sbom.cdx.json
+            security-evidence/security-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Finish security evidence upload
+        if: always()
+        continue-on-error: true
+        env:
+          STAGE_OUTCOME: ${{ steps.security_upload.outcome }}
+        shell: bash
+        run: |
+          rc=0
+          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
+          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage security_evidence_upload --exit-code "$rc"
+
+      - name: Finalize CI stage metrics
+        if: always() && steps.source_checkout.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 source/scripts/ci/ci_metrics.py finalize \
+            --file "$RUNNER_TEMP/ci-stage-metrics.json" \
+            --output-json ci-stage-metrics.json \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload CI stage metrics
+        if: always() && steps.source_checkout.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-metrics-security-${{ inputs.artifact_name }}
+          path: ci-stage-metrics.json
+          if-no-files-found: ignore
+          retention-days: 14
+          compression-level: 0

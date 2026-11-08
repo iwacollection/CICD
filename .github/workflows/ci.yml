@@ -18,6 +18,10 @@ jobs:
     name: Discover impacted dependency DAG
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      CI_PROJECT: orchestration
+      CI_TARGET: workflow
+      CI_METRICS_KIND: discover
     outputs:
       lane: ${{ steps.impact.outputs.lane }}
       reason: ${{ steps.impact.outputs.reason }}
@@ -43,6 +47,10 @@ jobs:
       level_7_matrix: ${{ steps.dag.outputs.level_7_matrix }}
       level_7_count: ${{ steps.dag.outputs.level_7_count }}
     steps:
+      - name: Mark discovery checkout start
+        shell: bash
+        run: python3 -c 'import time; print(time.monotonic_ns())' > "$RUNNER_TEMP/ci-source-checkout-start-ns"
+
       - name: Reject non-main manual dispatch
         if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
         shell: bash
@@ -51,10 +59,22 @@ jobs:
           exit 1
 
       - name: Checkout
+        id: source_checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Record discovery checkout duration
+        shell: bash
+        run: >-
+          python3 scripts/ci/ci_metrics.py record
+          --file "$RUNNER_TEMP/ci-stage-metrics.json"
+          --stage source_checkout
+          --start-ns "$(cat "$RUNNER_TEMP/ci-source-checkout-start-ns")"
+
+      - name: Start catalog validation timer
+        run: python3 scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage catalog_validation
 
       - name: Validate catalogs, DAG and supply-chain policy
         run: |
@@ -62,6 +82,10 @@ jobs:
           python3 scripts/ci/validate_config.py
           python3 scripts/ci/dependency_plan.py
           python3 scripts/ci/supply_chain_policy.py
+          python3 scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage catalog_validation
+
+      - name: Start change detection timer
+        run: python3 scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage change_detection
 
       - name: Detect changed files
         id: changes
@@ -97,6 +121,10 @@ jobs:
           echo "changed_file=$changed_file" >> "$GITHUB_OUTPUT"
           echo "force_full=$force_full" >> "$GITHUB_OUTPUT"
           cat "$changed_file" || true
+          python3 scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage change_detection
+
+      - name: Start impact analysis timer
+        run: python3 scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage impact_analysis
 
       - name: Analyze change impact and dependency closure
         id: impact
@@ -111,6 +139,10 @@ jobs:
             args+=(--force-full)
           fi
           python3 scripts/ci/impact_analysis.py "${args[@]}"
+          python3 scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage impact_analysis
+
+      - name: Start DAG planning timer
+        run: python3 scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage dag_planning
 
       - name: Render executable DAG matrices
         id: dag
@@ -123,6 +155,7 @@ jobs:
           python3 scripts/ci/dag_plan.py \
             --projects-json "$IMPACTED_PROJECTS" \
             --lane "$CI_LANE"
+          python3 scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage dag_planning
 
       - name: DAG summary
         run: |
@@ -137,12 +170,35 @@ jobs:
             echo "- Decision: ${{ steps.impact.outputs.reason }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Finalize discovery stage metrics
+        if: always() && steps.source_checkout.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/ci_metrics.py finalize \
+            --file "$RUNNER_TEMP/ci-stage-metrics.json" \
+            --output-json ci-stage-metrics.json \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload discovery stage metrics
+        if: always() && steps.source_checkout.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-metrics-discover
+          path: ci-stage-metrics.json
+          if-no-files-found: ignore
+          retention-days: 14
+          compression-level: 0
+
   level_0:
     name: DAG L0 / ${{ matrix.project }} / ${{ matrix.soc }} / ${{ matrix.target_os }} / ${{ matrix.arch }}
     needs: discover
     if: needs.discover.outputs.level_0_count != '0'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_0_matrix) }}
     permissions:
       contents: read
@@ -156,6 +212,8 @@ jobs:
       arch: ${{ matrix.arch }}
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
+      artifact_name: ${{ matrix.artifact_name }}
+      build_parallelism: ${{ matrix.build_parallelism }}
       runner_labels_json: ${{ matrix.runner_labels }}
       execution_mode: ${{ matrix.execution_mode }}
       container_image: ${{ matrix.container_image }}
@@ -165,6 +223,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -175,6 +234,7 @@ jobs:
     if: needs.discover.outputs.level_1_count != '0' && needs.level_0.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_1_matrix) }}
     permissions:
       contents: read
@@ -188,6 +248,8 @@ jobs:
       arch: ${{ matrix.arch }}
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
+      artifact_name: ${{ matrix.artifact_name }}
+      build_parallelism: ${{ matrix.build_parallelism }}
       runner_labels_json: ${{ matrix.runner_labels }}
       execution_mode: ${{ matrix.execution_mode }}
       container_image: ${{ matrix.container_image }}
@@ -197,6 +259,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -207,6 +270,7 @@ jobs:
     if: needs.discover.outputs.level_2_count != '0' && needs.level_1.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_2_matrix) }}
     permissions:
       contents: read
@@ -220,6 +284,8 @@ jobs:
       arch: ${{ matrix.arch }}
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
+      artifact_name: ${{ matrix.artifact_name }}
+      build_parallelism: ${{ matrix.build_parallelism }}
       runner_labels_json: ${{ matrix.runner_labels }}
       execution_mode: ${{ matrix.execution_mode }}
       container_image: ${{ matrix.container_image }}
@@ -229,6 +295,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -239,6 +306,7 @@ jobs:
     if: needs.discover.outputs.level_3_count != '0' && needs.level_2.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_3_matrix) }}
     permissions:
       contents: read
@@ -252,6 +320,8 @@ jobs:
       arch: ${{ matrix.arch }}
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
+      artifact_name: ${{ matrix.artifact_name }}
+      build_parallelism: ${{ matrix.build_parallelism }}
       runner_labels_json: ${{ matrix.runner_labels }}
       execution_mode: ${{ matrix.execution_mode }}
       container_image: ${{ matrix.container_image }}
@@ -261,6 +331,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -271,6 +342,7 @@ jobs:
     if: needs.discover.outputs.level_4_count != '0' && needs.level_3.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_4_matrix) }}
     permissions:
       contents: read
@@ -284,6 +356,8 @@ jobs:
       arch: ${{ matrix.arch }}
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
+      artifact_name: ${{ matrix.artifact_name }}
+      build_parallelism: ${{ matrix.build_parallelism }}
       runner_labels_json: ${{ matrix.runner_labels }}
       execution_mode: ${{ matrix.execution_mode }}
       container_image: ${{ matrix.container_image }}
@@ -293,6 +367,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -303,6 +378,7 @@ jobs:
     if: needs.discover.outputs.level_5_count != '0' && needs.level_4.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_5_matrix) }}
     permissions:
       contents: read
@@ -316,6 +392,8 @@ jobs:
       arch: ${{ matrix.arch }}
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
+      artifact_name: ${{ matrix.artifact_name }}
+      build_parallelism: ${{ matrix.build_parallelism }}
       runner_labels_json: ${{ matrix.runner_labels }}
       execution_mode: ${{ matrix.execution_mode }}
       container_image: ${{ matrix.container_image }}
@@ -325,6 +403,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -335,6 +414,7 @@ jobs:
     if: needs.discover.outputs.level_6_count != '0' && needs.level_5.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_6_matrix) }}
     permissions:
       contents: read
@@ -348,6 +428,8 @@ jobs:
       arch: ${{ matrix.arch }}
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
+      artifact_name: ${{ matrix.artifact_name }}
+      build_parallelism: ${{ matrix.build_parallelism }}
       runner_labels_json: ${{ matrix.runner_labels }}
       execution_mode: ${{ matrix.execution_mode }}
       container_image: ${{ matrix.container_image }}
@@ -357,6 +439,7 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
@@ -367,6 +450,7 @@ jobs:
     if: needs.discover.outputs.level_7_count != '0' && needs.level_6.result == 'success'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.level_7_matrix) }}
     permissions:
       contents: read
@@ -380,6 +464,8 @@ jobs:
       arch: ${{ matrix.arch }}
       toolchain: ${{ matrix.toolchain }}
       toolchain_identity: ${{ matrix.toolchain_identity }}
+      artifact_name: ${{ matrix.artifact_name }}
+      build_parallelism: ${{ matrix.build_parallelism }}
       runner_labels_json: ${{ matrix.runner_labels }}
       execution_mode: ${{ matrix.execution_mode }}
       container_image: ${{ matrix.container_image }}
@@ -389,9 +475,186 @@ jobs:
       artifact_paths_json: ${{ matrix.artifact_paths }}
       dependency_lock_files_json: ${{ matrix.dependency_lock_files }}
       cache_paths: ${{ matrix.cache_paths }}
+      cache_scope: ${{ matrix.cache_scope }}
       cache_key_files_json: ${{ matrix.cache_key_files }}
       lane: ${{ matrix.lane }}
       platform_ref: ${{ github.sha }}
+
+  security_level_0:
+    name: Security L0
+    needs: [discover, level_0]
+    if: needs.discover.outputs.level_0_count != '0' && needs.level_0.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_0_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-security.yml
+    with:
+      artifact_name: ${{ matrix.artifact_name }}
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
+
+  security_level_1:
+    name: Security L1
+    needs: [discover, level_1]
+    if: needs.discover.outputs.level_1_count != '0' && needs.level_1.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_1_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-security.yml
+    with:
+      artifact_name: ${{ matrix.artifact_name }}
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
+
+  security_level_2:
+    name: Security L2
+    needs: [discover, level_2]
+    if: needs.discover.outputs.level_2_count != '0' && needs.level_2.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_2_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-security.yml
+    with:
+      artifact_name: ${{ matrix.artifact_name }}
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
+
+  security_level_3:
+    name: Security L3
+    needs: [discover, level_3]
+    if: needs.discover.outputs.level_3_count != '0' && needs.level_3.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_3_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-security.yml
+    with:
+      artifact_name: ${{ matrix.artifact_name }}
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
+
+  security_level_4:
+    name: Security L4
+    needs: [discover, level_4]
+    if: needs.discover.outputs.level_4_count != '0' && needs.level_4.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_4_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-security.yml
+    with:
+      artifact_name: ${{ matrix.artifact_name }}
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
+
+  security_level_5:
+    name: Security L5
+    needs: [discover, level_5]
+    if: needs.discover.outputs.level_5_count != '0' && needs.level_5.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_5_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-security.yml
+    with:
+      artifact_name: ${{ matrix.artifact_name }}
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
+
+  security_level_6:
+    name: Security L6
+    needs: [discover, level_6]
+    if: needs.discover.outputs.level_6_count != '0' && needs.level_6.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_6_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-security.yml
+    with:
+      artifact_name: ${{ matrix.artifact_name }}
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
+
+  security_level_7:
+    name: Security L7
+    needs: [discover, level_7]
+    if: needs.discover.outputs.level_7_count != '0' && needs.level_7.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.level_7_matrix) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dag-security.yml
+    with:
+      artifact_name: ${{ matrix.artifact_name }}
+      project: ${{ matrix.project }}
+      path: ${{ matrix.path }}
+      soc: ${{ matrix.soc }}
+      target_os: ${{ matrix.target_os }}
+      arch: ${{ matrix.arch }}
+      toolchain: ${{ matrix.toolchain }}
+      toolchain_identity: ${{ matrix.toolchain_identity }}
+      platform_ref: ${{ github.sha }}
+      lane: ${{ matrix.lane }}
 
   build_complete:
     name: Dependency DAG barrier
@@ -441,10 +704,57 @@ jobs:
           done
           echo "Dependency DAG completed successfully: total_targets=$TOTAL_TARGETS"
 
+  security_complete:
+    name: Detached security evidence barrier
+    needs: [discover, security_level_0, security_level_1, security_level_2, security_level_3, security_level_4, security_level_5, security_level_6, security_level_7]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Enforce security evidence for every planned target
+        shell: bash
+        env:
+          S0_COUNT: ${{ needs.discover.outputs.level_0_count }}
+          S1_COUNT: ${{ needs.discover.outputs.level_1_count }}
+          S2_COUNT: ${{ needs.discover.outputs.level_2_count }}
+          S3_COUNT: ${{ needs.discover.outputs.level_3_count }}
+          S4_COUNT: ${{ needs.discover.outputs.level_4_count }}
+          S5_COUNT: ${{ needs.discover.outputs.level_5_count }}
+          S6_COUNT: ${{ needs.discover.outputs.level_6_count }}
+          S7_COUNT: ${{ needs.discover.outputs.level_7_count }}
+          S0_RESULT: ${{ needs.security_level_0.result }}
+          S1_RESULT: ${{ needs.security_level_1.result }}
+          S2_RESULT: ${{ needs.security_level_2.result }}
+          S3_RESULT: ${{ needs.security_level_3.result }}
+          S4_RESULT: ${{ needs.security_level_4.result }}
+          S5_RESULT: ${{ needs.security_level_5.result }}
+          S6_RESULT: ${{ needs.security_level_6.result }}
+          S7_RESULT: ${{ needs.security_level_7.result }}
+        run: |
+          set -euo pipefail
+          for index in 0 1 2 3 4 5 6 7; do
+            count_var="S${index}_COUNT"
+            result_var="S${index}_RESULT"
+            count="${!count_var}"
+            result="${!result_var}"
+            if [[ "$count" == "0" ]]; then
+              if [[ "$result" != "skipped" && "$result" != "success" ]]; then
+                echo "Security level $index had no targets but result=$result" >&2
+                exit 1
+              fi
+            elif [[ "$result" != "success" ]]; then
+              echo "Security level $index planned $count target(s) but result=$result" >&2
+              exit 1
+            fi
+          done
+          echo "Detached security evidence completed for all planned targets."
+
   attest:
     name: Attest trusted DAG artifacts
-    needs: [discover, build_complete]
-    if: always() && github.event_name != 'pull_request' && needs.discover.result == 'success' && needs.build_complete.result == 'success' && needs.discover.outputs.total_targets != '0'
+    needs: [discover, build_complete, security_complete]
+    if: always() && github.event_name != 'pull_request' && needs.discover.result == 'success' && needs.build_complete.result == 'success' && needs.security_complete.result == 'success' && needs.discover.outputs.total_targets != '0'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -458,6 +768,13 @@ jobs:
         with:
           pattern: dag-*
           path: provenance-input
+          merge-multiple: false
+
+      - name: Download detached security evidence from this run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: security-*
+          path: provenance-security
           merge-multiple: false
 
       - name: Attest exact uploaded bundles
@@ -474,12 +791,58 @@ jobs:
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: |
-            provenance-input/**/security-scan.json
-            provenance-input/**/security-sbom.cdx.json
+            provenance-security/**/security-scan.json
+            provenance-security/**/security-sbom.cdx.json
+            provenance-security/**/security-evidence.json
+
+  performance_report:
+    name: Aggregate CI stage timings
+    needs: [discover, build_complete, security_complete]
+    if: always() && needs.discover.result == 'success'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout report generator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download per-job timing artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ci-metrics-*
+          path: metrics-input
+          merge-multiple: false
+
+      - name: Aggregate stage timing report
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/ci_metrics.py aggregate \
+            --input-dir metrics-input \
+            --output-json ci-performance-report.json \
+            --output-markdown ci-performance-report.md
+          cat ci-performance-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload workflow performance report
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-performance-report
+          path: |
+            ci-performance-report.json
+            ci-performance-report.md
+          if-no-files-found: error
+          retention-days: 30
 
   gate:
     name: Build gate
-    needs: [discover, build_complete, attest]
+    needs: [discover, build_complete, security_complete, attest]
     if: always()
     permissions:
       contents: read
@@ -491,6 +854,7 @@ jobs:
         env:
           DISCOVER_RESULT: ${{ needs.discover.result }}
           DAG_RESULT: ${{ needs.build_complete.result }}
+          SECURITY_RESULT: ${{ needs.security_complete.result }}
           ATTEST_RESULT: ${{ needs.attest.result }}
           TOTAL_TARGETS: ${{ needs.discover.outputs.total_targets }}
           EVENT_NAME: ${{ github.event_name }}
@@ -504,8 +868,75 @@ jobs:
             echo "Dependency DAG failed: $DAG_RESULT" >&2
             exit 1
           fi
+          if [[ "$SECURITY_RESULT" != "success" ]]; then
+            echo "Detached security evidence failed: $SECURITY_RESULT" >&2
+            exit 1
+          fi
           if [[ "$EVENT_NAME" != "pull_request" && "$TOTAL_TARGETS" != "0" && "$ATTEST_RESULT" != "success" ]]; then
             echo "Trusted DAG artifact attestation failed: $ATTEST_RESULT" >&2
             exit 1
           fi
           echo "Build gate passed: total_targets=$TOTAL_TARGETS dag_result=$DAG_RESULT"
+
+
+  performance_regression:
+    name: Mainline CI performance regression monitor
+    needs: [discover, performance_report, gate]
+    if: always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.discover.result == 'success'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout performance monitor
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: .ci-monitor
+          persist-credentials: false
+
+      - name: Download current Build Matrix performance report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-performance-report
+          path: current-metrics
+          if-no-files-found: warn
+
+      - name: Compare mainline P95, scan time and failure rate
+        env:
+          CI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_REPOSITORY: ${{ github.repository }}
+          CI_CURRENT_RUN_ID: ${{ github.run_id }}
+          CI_CURRENT_CONCLUSION: ${{ needs.gate.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .ci-monitor/scripts/ci/performance_regression.py \
+            --repo "$CI_REPOSITORY" \
+            --workflow ci.yml \
+            --branch main \
+            --current-run-id "$CI_CURRENT_RUN_ID" \
+            --current-conclusion "$CI_CURRENT_CONCLUSION" \
+            --current-report current-metrics/ci-performance-report.json \
+            --history-limit 20 \
+            --minimum-baseline-samples 5 \
+            --minimum-failure-samples 10 \
+            --build-regression-percent 15 \
+            --scan-regression-percent 20 \
+            --failure-rate-percent 10 \
+            --output-json ci-performance-regression.json \
+            --output-markdown ci-performance-regression.md
+
+      - name: Upload performance regression decision
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-performance-regression
+          path: |
+            ci-performance-regression.json
+            ci-performance-regression.md
+          if-no-files-found: ignore
+          retention-days: 30

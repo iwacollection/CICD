@@ -124,6 +124,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
     def test_required_workflows_enforce_supply_chain(self) -> None:
         central = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         dag_node = (ROOT / ".github" / "workflows" / "dag-node.yml").read_text(encoding="utf-8")
+        dag_security = (ROOT / ".github" / "workflows" / "dag-security.yml").read_text(encoding="utf-8")
         reusable = (ROOT / ".github" / "workflows" / "reusable-build.yml").read_text(encoding="utf-8")
         reusable_container = (ROOT / ".github" / "workflows" / "reusable-container.yml").read_text(encoding="utf-8")
         toolchain = (ROOT / ".github" / "workflows" / "toolchain-images.yml").read_text(encoding="utf-8")
@@ -132,16 +133,20 @@ class SupplyChainPolicyTests(unittest.TestCase):
         toolchain_promote = (ROOT / ".github" / "workflows" / "promote-toolchain.yml").read_text(encoding="utf-8")
         rollback = (ROOT / ".github" / "workflows" / "rollback.yml").read_text(encoding="utf-8")
 
-        for workflow in (dag_node, reusable, reusable_container, toolchain):
+        for workflow in (dag_security, reusable, reusable_container, toolchain):
             self.assertIn("aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25", workflow)
             self.assertIn("v0.70.0", workflow)
             self.assertIn("supply_chain_policy.py", workflow)
             self.assertIn("ignore-unfixed: false", workflow)
 
         self.assertIn("dag-node.yml", central)
+        self.assertIn("dag-security.yml", central)
+        self.assertIn("security_complete", central)
         self.assertIn("supply_chain_policy.py", central)
-        self.assertIn("security-scan.json", dag_node)
-        self.assertIn("security-sbom.cdx.json", dag_node)
+        self.assertNotIn("aquasecurity/trivy-action", dag_node)
+        self.assertNotIn("supply_chain_policy.py", dag_node)
+        self.assertIn("security-scan.json", dag_security)
+        self.assertIn("security-sbom.cdx.json", dag_security)
         self.assertIn("security-scan.json", reusable)
         self.assertIn("security-sbom.cdx.json", reusable)
 

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from hardware_catalog import validate_hardware_catalog
+from package_artifact import build_artifact_name
 from toolchain_catalog import (
     immutable_reference,
     index_toolchains,
@@ -42,12 +43,23 @@ def build_matrix(
             execution_mode = definition["execution_mode"]
             container_image = immutable_reference(definition) if execution_mode == "container" else ""
             test_command = target.get("test_command", "")
-            if lane == "fast":
+            if lane in {"fast", "smoke"}:
                 test_command = target.get("fast_test_command", test_command)
             include.append(
                 {
                     "project": project["name"],
                     "path": project["path"],
+                    "artifact_name": build_artifact_name(
+                        project["name"],
+                        target["soc"],
+                        target["target_os"],
+                        target["arch"],
+                        target["toolchain"],
+                        toolchain_identity(definition),
+                        os.getenv("GITHUB_SHA", "local"),
+                    ),
+                    "build_parallelism": str(target.get("build_parallelism", "auto")),
+                    "cache_scope": str(target.get("cache_scope", "project")),
                     "depends_on": json.dumps(depends_on, separators=(",", ":")),
                     "soc": target["soc"],
                     "target_os": target["target_os"],
@@ -83,7 +95,7 @@ def main() -> int:
     parser.add_argument("--hardware-profiles", default="ci/hardware-profiles.json")
     parser.add_argument("--project")
     parser.add_argument("--projects-json")
-    parser.add_argument("--lane", choices=("fast", "full", "none"), default="full")
+    parser.add_argument("--lane", choices=("fast", "full", "none", "smoke"), default="full")
     args = parser.parse_args()
 
     data = load_catalog(Path(args.catalog))

@@ -187,6 +187,13 @@ def validate_catalog(
             fast_test_command = target.get("fast_test_command", test_command)
             if not isinstance(fast_test_command, str):
                 errors.append(f"{tprefix}.fast_test_command must be a string")
+            build_parallelism = target.get("build_parallelism", "auto")
+            if build_parallelism != "auto" and (
+                not isinstance(build_parallelism, int)
+                or isinstance(build_parallelism, bool)
+                or build_parallelism < 1
+            ):
+                errors.append(f"{tprefix}.build_parallelism must be 'auto' or a positive integer")
             artifacts = target.get("artifact_paths")
             if not _string_list(artifacts) or not artifacts:
                 errors.append(f"{tprefix}.artifact_paths must be a non-empty string list")
@@ -195,6 +202,9 @@ def validate_catalog(
             if not _string_list(dependency_lock_files):
                 errors.append(f"{tprefix}.dependency_lock_files must be a string list")
 
+            cache_scope = target.get("cache_scope", "project")
+            if cache_scope not in {"project", "toolchain", "none"}:
+                errors.append(f"{tprefix}.cache_scope must be project, toolchain or none")
             cache_paths = target.get("cache_paths", [])
             if not _string_list(cache_paths):
                 errors.append(f"{tprefix}.cache_paths must be a string list")
@@ -205,6 +215,10 @@ def validate_catalog(
                 cache_key_files = []
             if cache_paths and not cache_key_files:
                 errors.append(f"{tprefix}.cache_key_files is required when cache_paths is configured")
+            if cache_scope == "none" and cache_paths:
+                errors.append(f"{tprefix}.cache_scope=none cannot define cache_paths")
+            if cache_scope == "toolchain" and cache_paths != [".ci-cache/ccache"]:
+                errors.append(f"{tprefix}.cache_scope=toolchain requires cache_paths=[.ci-cache/ccache]")
 
     for project in projects:
         if isinstance(project, dict):

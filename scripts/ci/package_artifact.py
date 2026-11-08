@@ -75,6 +75,31 @@ def _resolve_toolchain_identity(toolchain: str, explicit: str, container_image: 
     return f"host:{toolchain}"
 
 
+def build_artifact_name(
+    project: str,
+    soc: str,
+    target_os: str,
+    arch: str,
+    toolchain: str,
+    toolchain_identity: str,
+    source_sha: str,
+) -> str:
+    """Return the exact Artifact Contract v2 name before a build starts."""
+    short_sha = _safe_slug(source_sha[:12])
+    identity_suffix = _identity_suffix(toolchain_identity)
+    return "-".join(
+        [
+            _safe_slug(project),
+            _safe_slug(soc),
+            _safe_slug(target_os),
+            _safe_slug(arch),
+            _safe_slug(toolchain),
+            identity_suffix,
+            short_sha,
+        ]
+    )
+
+
 def _file_record(path: Path, workdir: Path) -> dict:
     stat = path.stat()
     return {
@@ -277,24 +302,19 @@ def main() -> int:
     upstream_artifacts = _load_upstream_index(args.upstream_index)
 
     git_sha = os.getenv("GITHUB_SHA", "local")
-    short_sha = _safe_slug(git_sha[:12])
     toolchain_identity = _resolve_toolchain_identity(
         args.toolchain,
         args.toolchain_identity,
         args.container_image,
     )
-    identity_suffix = _identity_suffix(toolchain_identity)
-    toolchain_slug = _safe_slug(args.toolchain)
-    base = "-".join(
-        [
-            _safe_slug(args.project),
-            _safe_slug(args.soc),
-            _safe_slug(args.target_os),
-            _safe_slug(args.arch),
-            toolchain_slug,
-            identity_suffix,
-            short_sha,
-        ]
+    base = build_artifact_name(
+        args.project,
+        args.soc,
+        args.target_os,
+        args.arch,
+        args.toolchain,
+        toolchain_identity,
+        git_sha,
     )
 
     try:
