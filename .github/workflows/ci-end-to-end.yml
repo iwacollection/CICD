@@ -1,0 +1,64 @@
+name: CI End-to-End Observability
+
+on:
+  workflow_run:
+    workflows: ["Build Matrix"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  collect:
+    name: Collect completed Build Matrix timing
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout trusted main-branch collector
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: collector
+          persist-credentials: false
+
+      - name: Download parent Build Matrix performance report
+        id: parent_report
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-performance-report
+          path: parent-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Collect run, job queue and execution timings
+        env:
+          CI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_REPOSITORY: ${{ github.repository }}
+          CI_PARENT_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 collector/scripts/ci/end_to_end_metrics.py \\
+            --repo "$CI_REPOSITORY" \\
+            --run-id "$CI_PARENT_RUN_ID" \\
+            --report-json parent-report/ci-performance-report.json \\
+            --output-json ci-end-to-end-report.json \\
+            --output-markdown ci-end-to-end-report.md
+          cat ci-end-to-end-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload end-to-end timing evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-end-to-end-report-${{ github.event.workflow_run.id }}
+          path: |
+            ci-end-to-end-report.json
+            ci-end-to-end-report.md
+          if-no-files-found: warn
+          retention-days: 90
