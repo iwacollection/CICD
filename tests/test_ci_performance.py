@@ -315,7 +315,8 @@ class CiPerformanceTests(unittest.TestCase):
             root = Path(directory)
             working = root / "working.json"
             output = root / "job" / "ci-stage-metrics.json"
-            telemetry_file = root / ".ci-telemetry" / "build-telemetry.json"
+            telemetry_dir = root / ".ci-telemetry"
+            telemetry_file = telemetry_dir / "build-telemetry-build.json"
             start_stage(working, "build")
             finish_stage(working, "build")
             telemetry_file.parent.mkdir(parents=True)
@@ -345,7 +346,15 @@ class CiPerformanceTests(unittest.TestCase):
                               "incremental_noop": True},
                 },
             }), encoding="utf-8")
-            self.assertTrue(attach_build_telemetry(working, telemetry_file))
+            test_telemetry = telemetry_dir / "build-telemetry-test.json"
+            test_telemetry.write_text(json.dumps({
+                "schema_version": 1,
+                "phase": "test",
+                "ccache": {"available": True, "hits": 0, "misses": 0},
+                "resources": {"effective_jobs": 2, "delta": {"cpu": {"throttled_usec": 10}}},
+                "cmake_ninja": {},
+            }), encoding="utf-8")
+            self.assertTrue(attach_build_telemetry(working, telemetry_dir))
             finalize_metrics(working, output)
             aggregate = aggregate_metrics(root)
             summary = aggregate["build_telemetry_summary"]
@@ -589,6 +598,9 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertIn("hardware_build", build)
         self.assertIn("hardware_test", build)
         self.assertEqual(build.count("CI_BUILD_JOBS: ${{ inputs.build_parallelism }}"), 4)
+        self.assertIn("CI_BUILD_PHASE: build", build)
+        self.assertIn("CI_BUILD_PHASE: test", build)
+        self.assertIn('--telemetry-file "source/$CI_WORKING_DIRECTORY/.ci-telemetry"', build)
         self.assertIn("Finish artifact verify timer", build)
         self.assertIn("name: Detached security evidence barrier", central)
         self.assertIn('SECURITY_RESULT: ${{ needs.security_complete.result }}', central)
