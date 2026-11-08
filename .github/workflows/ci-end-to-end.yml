@@ -44,11 +44,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 collector/scripts/ci/end_to_end_metrics.py \\
-            --repo "$CI_REPOSITORY" \\
-            --run-id "$CI_PARENT_RUN_ID" \\
-            --report-json parent-report/ci-performance-report.json \\
-            --output-json ci-end-to-end-report.json \\
+          python3 collector/scripts/ci/end_to_end_metrics.py \
+            --repo "$CI_REPOSITORY" \
+            --run-id "$CI_PARENT_RUN_ID" \
+            --report-json parent-report/ci-performance-report.json \
+            --output-json ci-end-to-end-report.json \
             --output-markdown ci-end-to-end-report.md
           cat ci-end-to-end-report.md >> "$GITHUB_STEP_SUMMARY"
 
