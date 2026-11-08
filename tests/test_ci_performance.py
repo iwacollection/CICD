@@ -117,7 +117,7 @@ class CiPerformanceTests(unittest.TestCase):
 
         completed = SimpleNamespace(
             returncode=0,
-            stdout="cc\\tGCC 14.2.0\\ncmake\\tcmake version 3.31.0\\n",
+            stdout="cc\tGCC 14.2.0\ncmake\tcmake version 3.31.0\n",
         )
         with patch("collect_build_metadata.subprocess.run", return_value=completed) as run:
             metadata = collect_metadata(ROOT)
