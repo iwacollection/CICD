@@ -125,7 +125,9 @@ class CiPerformanceTests(unittest.TestCase):
                 self.assertEqual(os.environ["CMAKE_BUILD_PARALLEL_LEVEL"], "4")
                 self.assertEqual(os.environ["CCACHE_DIR"], str(workdir / ".cache" / "ccache"))
                 self.assertTrue((workdir / ".cache" / "ccache").is_dir())
-                self.assertIn("CCACHE_DIR=/workspace/.cache/ccache", args)
+                ccache_env_index = args.index("CCACHE_DIR=/workspace/.cache/ccache")
+                self.assertGreater(ccache_env_index, 0)
+                self.assertEqual(args[ccache_env_index - 1], "-e")
                 self.assertIn("CMAKE_BUILD_PARALLEL_LEVEL=4", args)
 
     def test_performance_regression_monitor_is_lane_scoped_and_detects_p95_regressions(self) -> None:
