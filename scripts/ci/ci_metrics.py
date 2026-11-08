@@ -28,6 +28,7 @@ def _metadata() -> dict[str, str]:
         "artifact_name": "CI_ARTIFACT_NAME",
         "target": "CI_TARGET",
         "kind": "CI_METRICS_KIND",
+        "lane": "CI_LANE",
         "runner": "RUNNER_NAME",
         "runner_os": "RUNNER_OS",
         "runner_arch": "RUNNER_ARCH",

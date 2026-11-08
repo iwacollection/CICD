@@ -92,6 +92,7 @@ jobs:
       CI_ARTIFACT_NAME: ${{ inputs.artifact_name }}
       CI_TARGET: ${{ inputs.soc }}/${{ inputs.target_os }}/${{ inputs.arch }}
       CI_METRICS_KIND: build
+      CI_LANE: ${{ inputs.lane }}
     steps:
       - name: Mark source checkout start
         shell: bash
@@ -399,9 +400,18 @@ jobs:
             echo "Container toolchains must be pinned by immutable sha256 digest: $CI_CONTAINER_IMAGE" >&2
             exit 1
           fi
-          docker pull "$CI_CONTAINER_IMAGE"
           expected="${CI_CONTAINER_IMAGE##*@}"
-          repo_digests="$(docker image inspect "$CI_CONTAINER_IMAGE" --format '{{json .RepoDigests}}')"
+          repo_digests=""
+          if docker image inspect "$CI_CONTAINER_IMAGE" >/dev/null 2>&1; then
+            repo_digests="$(docker image inspect "$CI_CONTAINER_IMAGE" --format '{{json .RepoDigests}}')"
+          fi
+          if [[ "$repo_digests" != *"@$expected"* ]]; then
+            echo "Immutable toolchain not present locally; pulling $expected"
+            docker pull "$CI_CONTAINER_IMAGE"
+            repo_digests="$(docker image inspect "$CI_CONTAINER_IMAGE" --format '{{json .RepoDigests}}')"
+          else
+            echo "Reusing locally cached immutable toolchain $expected"
+          fi
           if [[ "$repo_digests" != *"@$expected"* ]]; then
             echo "Pulled image does not resolve to expected digest $expected" >&2
             exit 1

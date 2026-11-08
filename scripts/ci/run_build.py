@@ -30,6 +30,17 @@ def _resolve_build_jobs(value: str) -> str:
     return str(int(requested))
 
 
+def _configure_build_environment(workdir: Path, requested_jobs: str) -> str:
+    """Align compiler caches and CMake parallelism with the restored project cache."""
+    jobs = _resolve_build_jobs(requested_jobs)
+    ccache_dir = workdir / ".cache" / "ccache"
+    ccache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["CI_BUILD_JOBS"] = jobs
+    os.environ["CMAKE_BUILD_PARALLEL_LEVEL"] = jobs
+    os.environ["CCACHE_DIR"] = str(ccache_dir)
+    return jobs
+
+
 def _ensure_source_date_epoch(workdir: Path) -> str:
     """Use the checked-out source commit timestamp as the deterministic build clock."""
     existing = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
@@ -75,6 +86,7 @@ def _container_env_args(workdir: Path) -> list[str]:
             "HOME=/workspace/.ci-home",
             "-e",
             "MAVEN_OPTS=-Dmaven.repo.local=/workspace/.cache/maven/repository",
+            "CCACHE_DIR=/workspace/.cache/ccache",
         ]
     )
 
@@ -110,6 +122,7 @@ def _container_env_args(workdir: Path) -> list[str]:
         "EXPECTED_MAVEN_VERSION",
         "MAVEN_ARGS",
         "CI_BUILD_JOBS",
+        "CMAKE_BUILD_PARALLEL_LEVEL",
     ):
         value = os.environ.get(key, "")
         if value:
@@ -162,9 +175,7 @@ def main() -> int:
 
     try:
         source_date_epoch = _ensure_source_date_epoch(workdir)
-        os.environ["CI_BUILD_JOBS"] = _resolve_build_jobs(
-            os.environ.get("CI_BUILD_JOBS", "auto")
-        )
+        _configure_build_environment(workdir, os.environ.get("CI_BUILD_JOBS", "auto"))
     except (RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
