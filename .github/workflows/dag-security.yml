@@ -114,55 +114,41 @@ jobs:
       - name: Start Trivy scan timer
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage trivy_scan
 
-      - name: Scan project vulnerabilities, licenses, secrets and misconfigurations
-        id: trivy_scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
         with:
-          scan-type: fs
-          scan-ref: source/${{ inputs.path }}
-          scanners: vuln,license,secret,misconfig
-          severity: HIGH,CRITICAL
-          ignore-unfixed: false
-          format: json
-          output: security-evidence/security-scan.json
-          exit-code: "0"
           version: v0.70.0
+          cache: true
 
-      - name: Finish Trivy scan
-        if: always()
-        continue-on-error: true
+      - name: Resolve Trivy database cache key
+        id: trivy_db_date
+        shell: bash
+        run: echo "date=$(date +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Trivy database cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .cache/trivy
+          key: cache-trivy-${{ steps.trivy_db_date.outputs.date }}
+          restore-keys: cache-trivy-
+
+      - name: Generate Trivy scan report and SBOM concurrently
+        id: parallel_trivy
         env:
-          STAGE_OUTCOME: ${{ steps.trivy_scan.outcome }}
+          SECURITY_SCAN_REF: source/${{ inputs.path }}
+          SECURITY_SCAN_CACHE_DIR: ${{ github.workspace }}/.cache/trivy
+          SECURITY_SBOM_CACHE_DIR: ${{ runner.temp }}/trivy-sbom-cache
         shell: bash
         run: |
-          rc=0
-          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
-          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage trivy_scan --exit-code "$rc"
-
-      - name: Start SBOM generation timer
-        run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage sbom_generation
-
-      - name: Generate CycloneDX SBOM
-        id: sbom
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
-        with:
-          scan-type: fs
-          scan-ref: source/${{ inputs.path }}
-          format: cyclonedx
-          output: security-evidence/security-sbom.cdx.json
-          version: v0.70.0
-          skip-setup-trivy: true
-
-      - name: Finish SBOM generation timer
-        if: always()
-        continue-on-error: true
-        env:
-          STAGE_OUTCOME: ${{ steps.sbom.outcome }}
-        shell: bash
-        run: |
-          rc=0
-          [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
-          python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage sbom_generation --exit-code "$rc"
+          set -euo pipefail
+          python3 .ci-platform/scripts/ci/parallel_trivy.py \
+            --scan-ref "$SECURITY_SCAN_REF" \
+            --scan-output security-evidence/security-scan.json \
+            --sbom-output security-evidence/security-sbom.cdx.json \
+            --metrics-file "$RUNNER_TEMP/ci-stage-metrics.json" \
+            --scan-cache-dir "$SECURITY_SCAN_CACHE_DIR" \
+            --sbom-cache-dir "$SECURITY_SBOM_CACHE_DIR" \
+            --trivy-stage-prestarted
 
       - name: Start supply-chain policy timer
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage supply_chain_policy

@@ -372,6 +372,117 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(summary["resources"]["io_read_bytes_total"], 1000)
         self.assertEqual(summary["resources"]["io_pressure_some_usec_total"], 2500)
 
+    def test_parallel_trivy_generates_both_outputs_and_overlaps_stage_runtime(self) -> None:
+        from parallel_trivy import run_parallel
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake_trivy = bin_dir / "trivy"
+            fake_trivy.write_text(
+                """#!/usr/bin/env python3
+import json, os, sys, time
+from pathlib import Path
+args = sys.argv[1:]
+fmt = args[args.index('--format') + 1]
+out = Path(args[args.index('--output') + 1])
+events = Path(os.environ['FAKE_TRIVY_EVENTS'])
+with events.open('a', encoding='utf-8') as handle: handle.write(f"start {fmt} {time.monotonic_ns()}\\n")
+time.sleep(0.2)
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_text(json.dumps({'format': fmt}), encoding='utf-8')
+with events.open('a', encoding='utf-8') as handle: handle.write(f"end {fmt} {time.monotonic_ns()}\\n")
+""",
+                encoding="utf-8",
+            )
+            fake_trivy.chmod(0o755)
+            metrics_file = root / "metrics.json"
+            metrics_file.write_text(json.dumps({"schema_version": 1, "stages": {}}), encoding="utf-8")
+            from ci_metrics import start_stage
+            start_stage(metrics_file, "trivy_scan")
+            events = root / "events.log"
+
+            with patch.dict(
+                os.environ,
+                {
+                    "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
+                    "FAKE_TRIVY_EVENTS": str(events),
+                },
+                clear=False,
+            ):
+                result = run_parallel(
+                    scan_ref="source/example",
+                    scan_output=root / "evidence" / "scan.json",
+                    sbom_output=root / "evidence" / "sbom.json",
+                    metrics_file=metrics_file,
+                    scan_cache_dir=root / "cache" / "scan",
+                    sbom_cache_dir=root / "cache" / "sbom",
+                    trivy_stage_prestarted=True,
+                )
+
+            self.assertTrue(result["success"])
+            self.assertEqual(json.loads((root / "evidence" / "scan.json").read_text())["format"], "json")
+            self.assertEqual(json.loads((root / "evidence" / "sbom.json").read_text())["format"], "cyclonedx")
+            metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
+            self.assertEqual(metrics["stages"]["trivy_scan"]["status"], "success")
+            self.assertEqual(metrics["stages"]["sbom_generation"]["status"], "success")
+            self.assertGreater(metrics["stages"]["trivy_scan"]["duration_ms"], 0)
+            self.assertGreater(metrics["stages"]["sbom_generation"]["duration_ms"], 0)
+
+            events_by_type = {}
+            for line in events.read_text(encoding="utf-8").splitlines():
+                event, fmt, timestamp = line.split()
+                events_by_type.setdefault(event, []).append(int(timestamp))
+            self.assertEqual(len(events_by_type["start"]), 2)
+            self.assertEqual(len(events_by_type["end"]), 2)
+            self.assertLess(max(events_by_type["start"]), min(events_by_type["end"]))
+
+    def test_parallel_trivy_failure_is_recorded_and_propagated(self) -> None:
+        from parallel_trivy import run_parallel
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake_trivy = bin_dir / "trivy"
+            fake_trivy.write_text(
+                """#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+args = sys.argv[1:]
+fmt = args[args.index('--format') + 1]
+out = Path(args[args.index('--output') + 1])
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_text(json.dumps({'format': fmt}), encoding='utf-8')
+sys.exit(23 if fmt == 'json' else 0)
+""",
+                encoding="utf-8",
+            )
+            fake_trivy.chmod(0o755)
+            metrics_file = root / "metrics.json"
+            metrics_file.write_text(json.dumps({"schema_version": 1, "stages": {}}), encoding="utf-8")
+
+            with patch.dict(
+                os.environ,
+                {"PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", "")},
+                clear=False,
+            ):
+                result = run_parallel(
+                    scan_ref="source/example",
+                    scan_output=root / "evidence" / "scan.json",
+                    sbom_output=root / "evidence" / "sbom.json",
+                    metrics_file=metrics_file,
+                    scan_cache_dir=root / "cache" / "scan",
+                    sbom_cache_dir=root / "cache" / "sbom",
+                )
+
+            self.assertFalse(result["success"])
+            metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
+            self.assertEqual(metrics["stages"]["trivy_scan"]["status"], "failure")
+            self.assertEqual(metrics["stages"]["trivy_scan"]["exit_code"], 23)
+            self.assertEqual(metrics["stages"]["sbom_generation"]["status"], "success")
+
     def test_performance_regression_monitor_is_lane_scoped_and_detects_p95_regressions(self) -> None:
         from performance_regression import evaluate_regressions
 
@@ -640,9 +751,16 @@ class CiPerformanceTests(unittest.TestCase):
         archive = (ROOT / ".github" / "workflows" / "archive-artifacts.yml").read_text(encoding="utf-8")
 
         self.assertNotIn("aquasecurity/trivy-action", build)
-        self.assertIn("aquasecurity/trivy-action", security)
-        self.assertIn("Generate CycloneDX SBOM", security)
-        self.assertIn("skip-setup-trivy: true", security)
+        self.assertNotIn("aquasecurity/trivy-action", security)
+        self.assertIn("aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514", security)
+        self.assertIn("actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae", security)
+        self.assertIn("Generate Trivy scan report and SBOM concurrently", security)
+        self.assertIn("parallel_trivy.py", security)
+        self.assertIn("Start Trivy scan timer", security)
+        self.assertIn("--trivy-stage-prestarted", security)
+        self.assertIn("--report security-evidence/security-scan.json", security)
+        self.assertIn("--sbom security-evidence/security-sbom.cdx.json", security)
+        self.assertIn("if: always()", security)
         self.assertIn("if: always()", security)
         self.assertIn("hardware_build", build)
         self.assertIn("hardware_test", build)

@@ -103,7 +103,7 @@ cmake --build build --parallel "$CI_BUILD_JOBS"
 
 每个阶段的结束步骤使用 `if: always()` 记录退出结果。失败阶段会保留实际耗时并标记 `failure`；Job 在阶段中断时由 finalizer 标记为 `interrupted`，不会把失败伪装成成功。记录指标的步骤使用 `continue-on-error`，避免统计工具故障覆盖真正的构建/安全失败。
 
-Trivy Action 默认启用其数据库和检查规则缓存。本工作流在同一个 Security Job 的第二次 Trivy 调用（SBOM 生成）使用 `skip-setup-trivy: true`，复用前一步已经安装的同版本二进制。没有设置 `TRIVY_SKIP_DB_UPDATE`，因此不会为了节省下载时间而主动跳过漏洞数据库更新。参考 [Trivy Action 缓存和重复 Setup 说明](https://github.com/aquasecurity/trivy-action#cache)。
+Security Job 在 Trivy 安装和数据库缓存恢复之前启动 `trivy_scan` 计时，以保持其与改造前“Trivy Action + 数据库缓存恢复 + 扫描”的计时边界一致；随后显式安装固定版本 Trivy v0.70.0，并分别运行漏洞扫描与 CycloneDX SBOM 生成两个 Trivy 进程。两个进程在同一个 Runner、同一个 source checkout 中并行执行，不额外创建两个 GitHub Actions Job，因此不会增加 Runner 启动和跨 Job 工件传输。扫描进程启用 `vuln,license,secret,misconfig` 四类扫描，保留 HIGH/CRITICAL 严重级别和 JSON 报告；扫描使用每日更新的 Trivy DB 缓存（缓存键按日期轮转，恢复使用 `cache-trivy-` 前缀），不跳过漏洞数据库更新。SBOM 进程单独使用临时缓存目录，并设置 `--skip-db-update`、`--skip-java-db-update`、`--skip-check-update`，因为它只生成组件清单，不负责漏洞判定。两个输出仍为 `security-scan.json` 和 `security-sbom.cdx.json`，完成后继续执行原有 supply-chain policy、security identity manifest、单个 detached evidence artifact 上传和最终 security barrier。任一进程启动失败或退出码非零都会使 Security Job 失败；阶段计时分别记录实际进程生命周期。
 
 构建环境元数据采集也已批处理：以前每探测一个编译器/构建工具就启动一次 Docker；现在把 13 个工具的版本探测命令放入同一个 Bash 容器调用中，再逐工具解析结果。缺失的工具仍然跳过，不会因某个工具不存在而让其他探测中断。
 
@@ -170,6 +170,12 @@ The report records:
 **Cleanup events are not an exact eviction count.** ccache reports how many cleanup operations ran; each cleanup can remove a variable number of entries to return below configured limits. The cache file count and size are snapshots, not a per-file deletion audit. For misses, direct/preprocessed ratio and uncacheable reasons should be inspected together. If misses remain unexpectedly high, run a diagnostic build with ccache debug enabled and compare its per-object input and debug logs before changing sloppiness or hash settings.
 
 The stats log is intentionally separate per build, so concurrent jobs sharing one `CCACHE_DIR` do not need to reset global counters and do not contaminate one another's per-build hit rate.
+
+
+
+### Trivy/SBOM parallel experiment baseline
+
+The pre-change PR #65 Build Matrix artifact contained four Security Job samples. Trivy scan duration was median 12.71s / P95 14.37s; CycloneDX SBOM generation was median 4.62s / P95 5.24s; total Security Job duration was median 21.73s / P95 24.17s. These four targets are a small CI fixture sample, not a production-wide performance claim. The parallel implementation is an experiment: compare the same target set and runner class after the change, confirm policy/evidence gates remain green, and retain it only if Security Job wall-clock duration decreases without increasing failure or resource contention. The `trivy_scan` timer deliberately includes Trivy setup and database-cache restore as well as the scan, matching the old measurement boundary. `sbom_generation` measures only the SBOM child process. These overlapping per-stage durations must not be added to estimate the job wall time.
 
 ### Shared compiler cache and isolation
 
