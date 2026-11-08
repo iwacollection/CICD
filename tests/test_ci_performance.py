@@ -12,7 +12,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
-from ci_metrics import aggregate_metrics, finalize_metrics, finish_stage, start_stage  # noqa: E402
+from ci_metrics import aggregate_metrics, attach_build_telemetry, finalize_metrics, finish_stage, start_stage  # noqa: E402
 from discover_matrix import build_matrix  # noqa: E402
 from dag_plan import _dag_cache_paths  # noqa: E402
 from impact_analysis import analyze_impact  # noqa: E402
@@ -92,7 +92,9 @@ class CiPerformanceTests(unittest.TestCase):
         )
         self.assertEqual(item["artifact_name"], expected)
         self.assertEqual(item["build_parallelism"], "auto")
-        self.assertEqual(item["cache_paths"], "examples/cpp-lib/.cache/ccache")
+        self.assertEqual(item["cache_paths"], ".ci-cache/ccache")
+        self.assertEqual(item["cache_scope"], "toolchain")
+        self.assertTrue(item["build_command"].startswith("python3 \"$CI_CMAKE_BUILD_HELPER\""))
 
     def test_stage_metrics_finalize_and_aggregate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -137,6 +139,172 @@ class CiPerformanceTests(unittest.TestCase):
                 self.assertGreater(ccache_env_index, 0)
                 self.assertEqual(args[ccache_env_index - 1], "-e")
                 self.assertIn("CMAKE_BUILD_PARALLEL_LEVEL=4", args)
+
+
+
+    def test_build_matrix_uses_host_execution_for_packaging_only_nodes(self) -> None:
+        matrix = build_matrix(
+            self.projects,
+            self.toolchains,
+            project_names={"hello-service", "hello-release"},
+            lane="full",
+        )
+        self.assertEqual(len(matrix["include"]), 2)
+        for target in matrix["include"]:
+            self.assertEqual(target["execution_mode"], "host")
+            self.assertEqual(target["container_image"], "")
+            self.assertEqual(target["cache_scope"], "none")
+            self.assertEqual(target["cache_paths"], "")
+
+    def test_toolchain_shared_cache_root_is_exact_and_scoped(self) -> None:
+        self.assertEqual(
+            _dag_cache_paths(".ci-cache/ccache"),
+            "source/.ci-cache/ccache",
+        )
+        with self.assertRaisesRegex(ValueError, "unsafe DAG cache path"):
+            _dag_cache_paths("../outside-cache")
+
+    def test_resource_aware_parallelism_respects_cpu_and_memory_cgroups(self) -> None:
+        from run_build import _detect_resource_limits, _resolve_build_jobs
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "cpu.max").write_text("200000 100000\n", encoding="utf-8")
+            (root / "cpuset.cpus.effective").write_text("0-7\n", encoding="utf-8")
+            (root / "memory.max").write_text(str(8 * 1024 * 1024 * 1024), encoding="utf-8")
+            limits = _detect_resource_limits(
+                root,
+                cpu_count=8,
+                affinity_count=8,
+                memory_per_job_mb=2048,
+                memory_reserve_mb=1024,
+            )
+
+        self.assertEqual(limits["cpu_limit"], 2)
+        self.assertEqual(limits["memory_job_limit"], 3)
+        self.assertEqual(limits["effective_jobs"], 2)
+        self.assertEqual(_resolve_build_jobs("auto", limits), "2")
+        self.assertEqual(_resolve_build_jobs("4", limits), "4")
+
+    def test_build_runner_uses_repo_shared_ccache_dir_and_per_build_stats_log(self) -> None:
+        from run_build import _configure_build_environment, _container_env_args
+
+        with tempfile.TemporaryDirectory() as directory:
+            source_root = Path(directory) / "source"
+            workdir = source_root / "examples" / "cpp-lib"
+            workdir.mkdir(parents=True)
+            with patch.dict(os.environ, {"CI_BUILD_JOBS": "auto", "CI_CCACHE_SCOPE": "toolchain"}, clear=False):
+                jobs = _configure_build_environment(workdir, "auto")
+                args = _container_env_args(workdir)
+                self.assertTrue((source_root / ".ci-cache" / "ccache").is_dir())
+                self.assertEqual(os.environ["CCACHE_DIR"], str(source_root / ".ci-cache" / "ccache"))
+                self.assertTrue(os.environ["CCACHE_STATSLOG"].endswith(".ci-telemetry/ccache.stats.log"))
+                self.assertIn("CCACHE_DIR=/ccache", args)
+                self.assertIn("CCACHE_STATSLOG=/workspace/.ci-telemetry/ccache.stats.log", args)
+                self.assertGreaterEqual(int(jobs), 1)
+
+    def test_ccache_build_local_statistics_include_hits_misses_size_and_cleanups(self) -> None:
+        from compile_telemetry import parse_ccache_stats
+
+        build_stats = (
+            "Cacheable calls: 10 / 10 (100.0%)\n"
+            "  Hits: 8 / 10 (80.0%)\n"
+            "    Direct: 6 / 8 (75.0%)\n"
+            "    Preprocessed: 2 / 8 (25.0%)\n"
+            "  Misses: 2 / 10 (20.0%)\n"
+            "Uncacheable calls: 0 / 10 (0.0%)\n"
+        )
+        global_stats = (
+            "Cache size (GB): 0.3 / 5.0 (6.0%)\n"
+            "Files: 120\n"
+            "Cleanups: 3\n"
+        )
+        result = parse_ccache_stats(build_stats, global_stats)
+        self.assertEqual(result["hits"], 8)
+        self.assertEqual(result["hits_direct"], 6)
+        self.assertEqual(result["hits_preprocessed"], 2)
+        self.assertEqual(result["misses"], 2)
+        self.assertEqual(result["hit_rate_percent"], 80.0)
+        self.assertEqual(result["cleanup_events"], 3)
+        self.assertEqual(result["files_in_cache"], 120)
+        self.assertEqual(result["cache_size_gib"], 0.3)
+
+    def test_ninja_introspection_reports_graph_commands_and_noop_incremental_state(self) -> None:
+        from cmake_build import _ninja_introspection
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_dir = root / "build"
+            bin_dir = root / "bin"
+            build_dir.mkdir()
+            bin_dir.mkdir()
+            (build_dir / "build.ninja").write_text("# fake ninja\n", encoding="utf-8")
+            (build_dir / ".ninja_log").write_text(
+                "# ninja log v5\n1\t5\t0\tCMakeFiles/app.dir/main.cpp.o\tabc\n",
+                encoding="utf-8",
+            )
+            fake_ninja = bin_dir / "ninja"
+            fake_ninja.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "args=sys.argv[1:]\n"
+                "if '-t' in args and 'graph' in args:\n"
+                " print('\\"0\\" [label=source];\\n\\"1\\" [label=object];\\n\\"0\\" -> \\"1\\";')\n"
+                "elif '-t' in args and 'targets' in args:\n"
+                " print('app: phony\\nmain.o: cxx')\n"
+                "elif '-t' in args and 'commands' in args:\n"
+                " print('c++ -c main.cpp -o main.o')\n"
+                "elif '-n' in args:\n"
+                " print('ninja: no work to do.')\n"
+                "sys.exit(0)\n",
+                encoding="utf-8",
+            )
+            fake_ninja.chmod(0o755)
+            with patch.dict(os.environ, {"PATH": str(bin_dir)}):
+                result = _ninja_introspection(build_dir, root, baseline_entries=0)
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["graph_edges"], 1)
+        self.assertEqual(result["target_count"], 2)
+        self.assertEqual(result["command_count"], 1)
+        self.assertEqual(result["object_compile_edges"], 1)
+        self.assertTrue(result["incremental_noop"])
+
+    def test_build_telemetry_attaches_and_aggregates_cache_and_cmake_data(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            working = root / "working.json"
+            output = root / "job" / "ci-stage-metrics.json"
+            telemetry_file = root / ".ci-telemetry" / "build-telemetry.json"
+            start_stage(working, "build")
+            finish_stage(working, "build")
+            telemetry_file.parent.mkdir(parents=True)
+            telemetry_file.write_text(json.dumps({
+                "schema_version": 1,
+                "ccache": {
+                    "available": True, "hits": 8, "misses": 2,
+                    "hit_rate_percent": 80.0, "cleanup_events": 1,
+                    "cache_size_gib": 0.3, "files_in_cache": 120,
+                },
+                "cmake_ninja": {
+                    "configure_generate_ms": 1200,
+                    "compile_link_ms": 800,
+                    "ninja": {"available": True, "graph_nodes": 12, "graph_edges": 8,
+                              "target_count": 4, "executed_edges": 2,
+                              "object_compile_edges": 1, "pending_actions_after_build": 0,
+                              "incremental_noop": True},
+                },
+            }), encoding="utf-8")
+            self.assertTrue(attach_build_telemetry(working, telemetry_file))
+            finalize_metrics(working, output)
+            aggregate = aggregate_metrics(root)
+            summary = aggregate["build_telemetry_summary"]
+
+        self.assertEqual(summary["ccache"]["hit_rate_percent"], 80.0)
+        self.assertEqual(summary["ccache"]["cleanup_events_total"], 1)
+        self.assertEqual(summary["cmake_phases"]["configure_generate_ms"]["median_ms"], 1200)
+        self.assertEqual(summary["ninja"]["graph_nodes"]["median"], 12)
+        self.assertEqual(summary["incremental_noop_successes"], 1)
 
     def test_performance_regression_monitor_is_lane_scoped_and_detects_p95_regressions(self) -> None:
         from performance_regression import evaluate_regressions
@@ -372,6 +540,9 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertIn("security_evidence.py merge", archive)
         self.assertIn("name: Aggregate CI stage timings", central)
         self.assertIn("name: Mainline CI performance regression monitor", central)
+        self.assertIn("name: Attach compiler cache and CMake/Ninja telemetry", build)
+        self.assertIn("cache_scope: ${{ inputs.cache_scope }}", build)
+        self.assertEqual(central.split("max-parallel: 4").__len__(), 9)
         security_calls = central.split("uses: ./.github/workflows/dag-security.yml")
         self.assertEqual(len(security_calls) - 1, 8)
         for block in security_calls[1:]:
