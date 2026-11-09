@@ -182,7 +182,7 @@
       "compiler": "gcc-13/g++-13",
       "language": "cpp",
       "verification_fixture": "examples/cpp-conan-consumer",
-      "verification_command": "CONAN_LOCK_BOOTSTRAP=1 bash ci/build.sh",
+      "verification_command": "bash ci/build.sh",
       "compiler_version": "13.4.0-10ubuntu1",
       "base_os": "Ubuntu 26.04 LTS",
       "apt_snapshot": "20261107T000000Z",
