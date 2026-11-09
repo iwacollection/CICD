@@ -183,7 +183,6 @@ def _configure_build_environment(workdir: Path, requested_jobs: str) -> str:
     for env_name, filename in (
         ("CI_CMAKE_BUILD_HELPER", "cmake_build.sh"),
         ("CI_CONAN_BUILD_HELPER", "conan_cmake_build.sh"),
-        ("CI_CONAN_PACKAGE_LIST_HELPER", "conan_package_list.py"),
         ("CI_CONAN_CTEST_HELPER", "conan_ctest.sh"),
     ):
         helper = helper_dir / filename
@@ -240,7 +239,6 @@ def _container_env_args(workdir: Path) -> list[str]:
         "-e", "CCACHE_STATSLOG=/workspace/.ci-telemetry/ccache.stats.log",
         "-e", "CI_CMAKE_BUILD_HELPER=/ci-platform/cmake_build.sh",
         "-e", "CI_CONAN_BUILD_HELPER=/ci-platform/conan_cmake_build.sh",
-        "-e", "CI_CONAN_PACKAGE_LIST_HELPER=/ci-platform/conan_package_list.py",
         "-e", "CI_CONAN_CTEST_HELPER=/ci-platform/conan_ctest.sh",
     ])
 
@@ -297,7 +295,7 @@ def container_command(workdir: Path, command: str, image: str) -> list[str]:
         args.extend(["-v", f"{cache_dir}:/ccache"])
 
     helper_dir = Path(__file__).resolve().parent
-    for filename in ("cmake_build.sh", "conan_cmake_build.sh", "conan_package_list.py", "conan_ctest.sh"):
+    for filename in ("cmake_build.sh", "conan_cmake_build.sh", "conan_ctest.sh", "conan_package_list.py"):
         helper = helper_dir / filename
         if helper.is_file():
             args.extend(["-v", f"{helper}:/ci-platform/{filename}:ro"])
