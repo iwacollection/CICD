@@ -10,8 +10,8 @@ fi
 cd "$(dirname "$0")/.."
 readonly TARGET_TRIPLE="aarch64-linux-gnu"
 readonly SYSROOT="/usr/aarch64-linux-gnu"
-readonly APT_SNAPSHOT="20261109T000000Z"
-readonly EXPECTED_COMPILER="13.4.0"
+readonly APT_SNAPSHOT="20261108T000000Z"
+readonly EXPECTED_COMPILER="13.5.0"
 readonly CONAN_VERSION="2.34.0"
 mkdir -p .ci-telemetry .ci-cache
 : > .ci-telemetry/stages.tsv
@@ -39,12 +39,23 @@ test -s "$SYSROOT/include/features.h"
 compiler_package="$(dpkg-query -W -f='${Version}' g++-13-aarch64-linux-gnu)"
 gcc_package="$(dpkg-query -W -f='${Version}' gcc-13-aarch64-linux-gnu)"
 libc_package="$(dpkg-query -W -f='${Version}' libc6-dev-arm64-cross)"
+linux_headers_package="$(dpkg-query -W -f='${Version}' linux-libc-dev-arm64-cross)"
+qemu_package="$(dpkg-query -W -f='${Version}' qemu-user)"
+apt_package="$(dpkg-query -W -f='${Version}' apt)"
 linker_version="$(aarch64-linux-gnu-ld --version | head -n 1)"
 qemu_version="$(qemu-aarch64 --version | head -n 1)"
-test "$qemu_version" = "qemu-aarch64 version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.3)"
+grep -F "11.1.2" <<< "$qemu_version"
 host_compiler_version="$(g++-13 -dumpfullversion -dumpversion)"
 host_gcc_package="$(dpkg-query -W -f='${Version}' gcc-13)"
 host_gxx_package="$(dpkg-query -W -f='${Version}' g++-13)"
+test "$compiler_package" = "13.5.0-1cross1"
+test "$gcc_package" = "13.5.0-1cross1"
+test "$libc_package" = "2.43-3cross8"
+test "$linux_headers_package" = "7.2.12-1"
+test "$qemu_package" = "1:11.1.2+ds-3"
+test "$apt_package" = "3.3.3"
+test "$host_gcc_package" = "13.5.0-1"
+test "$host_gxx_package" = "13.5.0-1"
 
 sysroot_file_hash="$(
   find "$SYSROOT" -type f -print0 \
@@ -74,13 +85,13 @@ package_inventory_sha256="$(printf '%s\n' "$package_inventory" | sha256sum | awk
 sdk_digest="$(
   printf '%s\n' \
     "$TARGET_TRIPLE" "$EXPECTED_COMPILER" "$compiler_package" "$gcc_package" \
-    "$libc_package" "$host_compiler_version" "$host_gcc_package" "$host_gxx_package" \
+    "$libc_package" "$linux_headers_package" "$host_compiler_version" "$host_gcc_package" "$host_gxx_package" \
     "$linker_version" "$sysroot_digest" "$package_inventory_sha256" "$APT_SNAPSHOT" \
     | sha256sum | awk '{print $1}'
 )"
 
 python3 - "$mode" "$TARGET_TRIPLE" "$EXPECTED_COMPILER" "$compiler_package" "$gcc_package" \
-  "$libc_package" "$linker_version" "$SYSROOT" "$sysroot_digest" \
+  "$libc_package" "$linux_headers_package" "$linker_version" "$SYSROOT" "$sysroot_digest" \
   "$package_inventory_sha256" "$sdk_digest" "$APT_SNAPSHOT" "$qemu_version" \
   "$host_compiler_version" "$host_gcc_package" "$host_gxx_package" <<'PY'
 import json
@@ -88,7 +99,7 @@ import pathlib
 import sys
 
 (
-    mode, triple, compiler_version, gxx_package, gcc_package, libc_package, linker, sysroot,
+    mode, triple, compiler_version, gxx_package, gcc_package, libc_package, linux_headers_package, linker, sysroot,
     sysroot_digest, package_digest, sdk_digest, snapshot, qemu,
     host_compiler_version, host_gcc_package, host_gxx_package,
 ) = sys.argv[1:]
@@ -103,8 +114,9 @@ identity = {
     },
     "linker": linker,
     "sysroot": {"path": sysroot, "sha256": sysroot_digest},
+    "target_headers": {"package": "linux-libc-dev-arm64-cross", "version": linux_headers_package},
     "sdk": {
-        "version": "ubuntu-resolute-20261109-gcc13-cross",
+        "version": "debian-forky-20261108-gcc13-cross",
         "apt_snapshot": snapshot,
         "package_inventory_sha256": package_digest,
         "sha256": sdk_digest,
@@ -135,6 +147,25 @@ print(f"target_sysroot_sha256={sysroot_digest}")
 print(f"target_sdk_sha256={sdk_digest}")
 PY
 
+# Cache namespaces are target identities, not merely architecture labels.
+# The SDK digest includes the actual cross sysroot file tree, package
+# inventory, compiler and linker identity from the locked target SDK.
+readonly TARGET_CXX_ABI="libstdc++11"
+readonly TARGET_CXX_STANDARD="17"
+readonly CACHE_NAMESPACE="${TARGET_TRIPLE}-gcc${EXPECTED_COMPILER}-${TARGET_CXX_ABI}-cxx${TARGET_CXX_STANDARD}-${sdk_digest}"
+export CACHE_NAMESPACE
+export CCACHE_DIR="$PWD/.ci-cache/ccache/$CACHE_NAMESPACE"
+export CONAN_HOME="$PWD/.ci-cache/conan/$CACHE_NAMESPACE"
+mkdir -p "$CCACHE_DIR" "$CONAN_HOME"
+
+# A fresh isolated CONAN_HOME has no implicit Conan Center remote.
+if conan remote list | grep -qE '^conancenter:'; then
+  conan remote update conancenter --url=https://center2.conan.io
+else
+  conan remote add conancenter https://center2.conan.io
+fi
+conan remote list | grep -F "https://center2.conan.io"
+
 LOCK_FILE="conan.lock"
 if [[ ! -s "$LOCK_FILE" ]]; then
   if [[ "$mode" != "--bootstrap" ]]; then
@@ -149,16 +180,6 @@ if [[ ! -s "$LOCK_FILE" ]]; then
       --lockfile-out="$LOCK_FILE"
 fi
 
-# Cache namespaces are target identities, not merely architecture labels.
-# The SDK digest includes the actual cross sysroot file tree, package
-# inventory, compiler and linker identity from the locked target SDK.
-readonly TARGET_CXX_ABI="libstdc++11"
-readonly TARGET_CXX_STANDARD="17"
-readonly CACHE_NAMESPACE="${TARGET_TRIPLE}-gcc${EXPECTED_COMPILER}-${TARGET_CXX_ABI}-cxx${TARGET_CXX_STANDARD}-${sdk_digest}"
-export CACHE_NAMESPACE
-export CCACHE_DIR="$PWD/.ci-cache/ccache/$CACHE_NAMESPACE"
-export CONAN_HOME="$PWD/.ci-cache/conan/$CACHE_NAMESPACE"
-mkdir -p "$CCACHE_DIR" "$CONAN_HOME"
 
 cache_fingerprint="$(python3 - <<'PY'
 import glob
