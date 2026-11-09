@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
 from cache_fingerprint import fingerprint_files  # noqa: E402
+from conan_package_list import select_download_source  # noqa: E402
 from dependency_plan import build_plan  # noqa: E402
 from validate_config import load_catalog, validate_catalog  # noqa: E402
 
@@ -61,6 +62,18 @@ class ConanDependencyContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "matched no files: conan.lock"):
                 fingerprint_files(root, ["conanfile.txt", "conan.lock"])
 
+    def test_conan_package_list_skips_remote_when_all_locked_packages_are_cached(self) -> None:
+        self.assertEqual(select_download_source({"Local Cache": {"zlib": []}}), "local-cache")
+        self.assertEqual(select_download_source({"conancenter": {"zlib": []}}), "remote")
+        self.assertEqual(
+            select_download_source({"Local Cache": {"fmt": []}, "conancenter": {"zlib": []}}),
+            "remote",
+        )
+        with self.assertRaisesRegex(ValueError, "empty"):
+            select_download_source({})
+        with self.assertRaisesRegex(ValueError, "unrecognized"):
+            select_download_source({"unknown-origin": {}})
+
     def test_conan_package_cache_and_ccache_are_separate_from_outputs(self) -> None:
         for name in ("conan-format-lib", "conan-compression-lib", "conan-demo-app"):
             project = next(p for p in self.catalog["projects"] if p["name"] == name)
@@ -76,9 +89,11 @@ class ConanDependencyContractTests(unittest.TestCase):
         runner = (ROOT / "scripts" / "ci" / "run_build.py").read_text(encoding="utf-8")
         self.assertIn('("CI_CONAN_BUILD_HELPER", "conan_cmake_build.sh")', runner)
         self.assertIn('("CI_CONAN_CTEST_HELPER", "conan_ctest.sh")', runner)
+        self.assertIn('("CI_CONAN_PACKAGE_LIST_HELPER", "conan_package_list.py")', runner)
         self.assertIn("CI_CONAN_BUILD_HELPER=/ci-platform/conan_cmake_build.sh", runner)
         self.assertIn("CI_CONAN_CTEST_HELPER=/ci-platform/conan_ctest.sh", runner)
-        self.assertIn('"cmake_build.sh", "conan_cmake_build.sh", "conan_ctest.sh"', runner)
+        self.assertIn("CI_CONAN_PACKAGE_LIST_HELPER=/ci-platform/conan_package_list.py", runner)
+        self.assertIn('"cmake_build.sh", "conan_cmake_build.sh", "conan_ctest.sh", "conan_package_list.py"', runner)
         for name in ("conan-format-lib", "conan-compression-lib", "conan-demo-app"):
             project = next(p for p in self.catalog["projects"] if p["name"] == name)
             self.assertEqual(project["targets"][0]["build_command"], 'bash "$CI_CONAN_BUILD_HELPER"')
@@ -95,6 +110,9 @@ class ConanDependencyContractTests(unittest.TestCase):
         self.assertIn("missing_packages+=(ccache)", script)
         self.assertIn("dependency_resolution_ms", script)
         self.assertIn("dependency_download_ms", script)
+        self.assertIn("dependency_download_skipped", script)
+        self.assertIn("dependency_download_source", script)
+        self.assertIn("CI_CONAN_PACKAGE_LIST_HELPER", script)
         self.assertIn("--graph=.ci-telemetry/conan-graph.json", script)
         self.assertIn("dependency_local_install_generate_ms", script)
         self.assertIn('download_start="$(now_ns)"', script)
