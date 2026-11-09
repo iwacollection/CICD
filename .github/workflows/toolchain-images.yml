@@ -230,6 +230,14 @@ jobs:
           echo "Dockerfile SHA256: $(sha256sum "$DOCKERFILE" | awk '{print $1}')"
           docker image inspect "ci-toolchain-verify:$GITHUB_SHA" --format 'Local image ID: {{.Id}}'
 
+      - name: Upload generated C++ Conan lockfile for initial review
+        if: matrix.toolchain == 'gcc13-conan234' && hashFiles('examples/cpp-conan-consumer/conan.lock') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cpp-conan-lock-bootstrap-${{ github.sha }}
+          path: examples/cpp-conan-consumer/conan.lock
+          if-no-files-found: error
+
       - name: Upload verification evidence
         if: always() && hashFiles('toolchain-security.json', 'toolchain-sbom.cdx.json') != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -165,6 +165,24 @@
       "verification_fixture": "examples/cpp-gcc12-service",
       "verification_command": "cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=g++-12 && cmake --build build && ctest --test-dir build --output-on-failure",
       "compiler_version": "12.5.0-9ubuntu1"
+    },
+    {
+      "id": "gcc13-conan234",
+      "status": "candidate",
+      "execution_mode": "container",
+      "description": "GCC 13 C++ build environment extended with pinned Conan 2.34.0 for reproducible multi-module dependency resolution.",
+      "image": "ghcr.io/iwacollection/cicd-toolchain-gcc13-conan",
+      "digest": "",
+      "dockerfile": "docker/toolchains/cpp-conan/Dockerfile",
+      "context": "docker/toolchains/cpp-conan",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "smoke_command": "bash /usr/local/bin/cpp-conan-smoke",
+      "compiler": "gcc-13/g++-13",
+      "language": "cpp",
+      "verification_fixture": "examples/cpp-conan-consumer",
+      "verification_command": "CONAN_LOCK_BOOTSTRAP=1 bash ci/build.sh"
     }
   ]
 }
