@@ -138,7 +138,7 @@ jobs:
           if [[ "$FORCE_FULL" == "true" ]]; then
             args+=(--force-full)
           fi
-          export CI_IMPACT_PLAN_FILE="$RUNNER_TEMP/ci-impact-plan.json"
+          export CI_IMPACT_PLAN_FILE="$GITHUB_WORKSPACE/ci-impact-plan.json"
           python3 scripts/ci/impact_analysis.py "${args[@]}"
           python3 scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage impact_analysis
 
