@@ -228,7 +228,7 @@ grep -F "AArch64" .ci-telemetry/elf-header.txt
 grep -F "Machine:" .ci-telemetry/elf-header.txt
 grep -F "NEEDED" .ci-telemetry/elf-dynamic.txt
 grep -F "ARM aarch64" .ci-telemetry/elf-file.txt
-if grep -Eq '\\((RPATH|RUNPATH)\\)' .ci-telemetry/elf-dynamic.txt; then
+if grep -Eq '\((RPATH|RUNPATH)\)' .ci-telemetry/elf-dynamic.txt; then
   echo "ERROR: target ELF embeds a build-host RPATH/RUNPATH; refusing non-portable artifact" >&2
   exit 1
 fi
