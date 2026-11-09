@@ -82,7 +82,7 @@ bash "$CI_CMAKE_BUILD_HELPER" \
   --define CMAKE_BUILD_TYPE=Release \
   --define CMAKE_CXX_COMPILER=g++-13 \
   --define CMAKE_CXX_COMPILER_LAUNCHER=ccache \
-  --define "CMAKE_TOOLCHAIN_FILE=$PWD/build/conan/generators/conan_toolchain.cmake"
+  --define "CMAKE_TOOLCHAIN_FILE=$PWD/build/conan/conan_toolchain.cmake"
 build_end="$(now_ns)"
 build_ms="$(elapsed_ms "$build_start" "$build_end")"
 

@@ -71,7 +71,7 @@ class ConanDependencyContractTests(unittest.TestCase):
         script = (ROOT / "scripts" / "ci" / "conan_cmake_build.sh").read_text(encoding="utf-8")
         self.assertIn('CONAN_VERSION="2.34.0"', script)
         self.assertIn('--lockfile="$LOCK_FILE"', script)
-        self.assertIn("build/conan/generators/conan_toolchain.cmake", script)
+        self.assertIn("build/conan/conan_toolchain.cmake", script)
         self.assertIn("--build=missing", script)
         self.assertIn("ninja-build", script)
         self.assertIn("dependency_install_fetch_build_ms", script)
