@@ -12,6 +12,22 @@ if [[ ! -s "$LOCK_FILE" ]]; then
   echo "ERROR: required Conan lockfile is missing: $LOCK_FILE" >&2
   exit 2
 fi
+
+# The hosted ubuntu-latest Runner does not guarantee Ninja is preinstalled.
+# Keep the declared Ninja generator reproducible instead of silently falling
+# back to a different build backend.
+if ! command -v ninja >/dev/null 2>&1; then
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "ERROR: Ninja is required but neither ninja nor sudo is available" >&2
+    exit 2
+  fi
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq ninja-build
+fi
+if ! command -v ninja >/dev/null 2>&1; then
+  echo "ERROR: Ninja installation completed but the executable is still unavailable" >&2
+  exit 2
+fi
 for input in conanfile.txt "$CONAN_PROFILE_HOST" "$CONAN_PROFILE_BUILD"; do
   if [[ ! -s "$input" ]]; then
     echo "ERROR: required Conan input is missing or empty: $input" >&2

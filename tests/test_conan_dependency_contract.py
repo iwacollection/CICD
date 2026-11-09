@@ -56,6 +56,8 @@ class ConanDependencyContractTests(unittest.TestCase):
 
     def test_conan_helpers_are_read_only_mounted_into_container_builds(self) -> None:
         runner = (ROOT / "scripts" / "ci" / "run_build.py").read_text(encoding="utf-8")
+        self.assertIn('("CI_CONAN_BUILD_HELPER", "conan_cmake_build.sh")', runner)
+        self.assertIn('("CI_CONAN_CTEST_HELPER", "conan_ctest.sh")', runner)
         self.assertIn("CI_CONAN_BUILD_HELPER=/ci-platform/conan_cmake_build.sh", runner)
         self.assertIn("CI_CONAN_CTEST_HELPER=/ci-platform/conan_ctest.sh", runner)
         self.assertIn('"cmake_build.sh", "conan_cmake_build.sh", "conan_ctest.sh"', runner)
@@ -71,6 +73,7 @@ class ConanDependencyContractTests(unittest.TestCase):
         self.assertIn('--lockfile="$LOCK_FILE"', script)
         self.assertIn("build/conan/generators/conan_toolchain.cmake", script)
         self.assertIn("--build=missing", script)
+        self.assertIn("ninja-build", script)
         self.assertIn("dependency_install_fetch_build_ms", script)
 
 

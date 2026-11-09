@@ -179,9 +179,15 @@ def _configure_build_environment(workdir: Path, requested_jobs: str) -> str:
     os.environ["CCACHE_STATSLOG"] = str(stats_log)
     os.environ.setdefault("CCACHE_MAXSIZE", "2G")
     os.environ["CI_BUILD_RESOURCE_PROFILE_JSON"] = json.dumps(resource_limits, sort_keys=True)
-    helper = Path(__file__).resolve().with_name("cmake_build.sh")
-    if helper.is_file():
-        os.environ["CI_CMAKE_BUILD_HELPER"] = str(helper)
+    helper_dir = Path(__file__).resolve().parent
+    for env_name, filename in (
+        ("CI_CMAKE_BUILD_HELPER", "cmake_build.sh"),
+        ("CI_CONAN_BUILD_HELPER", "conan_cmake_build.sh"),
+        ("CI_CONAN_CTEST_HELPER", "conan_ctest.sh"),
+    ):
+        helper = helper_dir / filename
+        if helper.is_file():
+            os.environ[env_name] = str(helper)
     return jobs
 
 
