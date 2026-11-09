@@ -178,7 +178,7 @@
       "platforms": [
         "linux/amd64"
       ],
-      "smoke_command": "test \"$(aarch64-linux-gnu-g++-13 -dumpmachine)\" = \"aarch64-linux-gnu\" && test \"$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)\" = \"13.4.0\" && aarch64-linux-gnu-ld --version && qemu-aarch64 --version && conan --version | grep -Fx \"Conan version 2.34.0\"",
+      "smoke_command": "test \"$(aarch64-linux-gnu-g++-13 -dumpmachine)\" = \"aarch64-linux-gnu\" && test \"$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)\" = \"13.4.0\" && aarch64-linux-gnu-ld --version && qemu-aarch64 --version && ninja --version && make --version && conan --version | grep -Fx \"Conan version 2.34.0\"",
       "language": "cpp",
       "compiler": "aarch64-linux-gnu-gcc-13/aarch64-linux-gnu-g++-13",
       "compiler_version": "13.4.0",
