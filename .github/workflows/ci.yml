@@ -138,6 +138,7 @@ jobs:
           if [[ "$FORCE_FULL" == "true" ]]; then
             args+=(--force-full)
           fi
+          export CI_IMPACT_PLAN_FILE="$GITHUB_WORKSPACE/ci-impact-plan.json"
           python3 scripts/ci/impact_analysis.py "${args[@]}"
           python3 scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage impact_analysis
 
@@ -167,7 +168,10 @@ jobs:
             echo "- DAG levels: ${{ steps.dag.outputs.level_count }}"
             echo "- Matrix targets: ${{ steps.dag.outputs.total_targets }}"
             echo "- Levels: ${{ steps.dag.outputs.levels }}"
+            echo "- Dependency closure: ${{ steps.impact.outputs.dependency_closure }}"
+            echo "- Downstream consumer closure: ${{ steps.impact.outputs.dependent_closure }}"
             echo "- Decision: ${{ steps.impact.outputs.reason }}"
+            echo "- Detailed per-project inclusion/exclusion reasons: ci-impact-plan.json in ci-metrics-discover artifact"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Finalize discovery stage metrics
@@ -187,7 +191,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ci-metrics-discover
-          path: ci-stage-metrics.json
+          path: |
+            ci-stage-metrics.json
+            ci-impact-plan.json
           if-no-files-found: ignore
           retention-days: 14
           compression-level: 0

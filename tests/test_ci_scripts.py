@@ -565,5 +565,174 @@ class CiPlatformTests(unittest.TestCase):
         self.assertEqual(workflow.count("git diff --name-only --no-renames"), 2)
 
 
+    def test_deleted_source_file_selects_owner_and_transitive_consumers_with_reasons(self) -> None:
+        data = {
+            "projects": [
+                {"name": "lib", "enabled": True, "path": "libs/core", "depends_on": [], "targets": []},
+                {"name": "service", "enabled": True, "path": "services/api", "depends_on": ["lib"], "targets": []},
+                {"name": "ui", "enabled": True, "path": "apps/ui", "depends_on": ["service"], "targets": []},
+                {"name": "other", "enabled": True, "path": "apps/other", "depends_on": [], "targets": []},
+            ]
+        }
+        result = analyze_impact(data, ["libs/core/src/removed.cpp"])
+        self.assertEqual(result["projects"], ["lib", "service", "ui"])
+        self.assertEqual(result["direct_projects"], ["lib"])
+        self.assertEqual(result["dependent_closure"], ["service", "ui"])
+        self.assertEqual(result["dependency_closure"], [])
+        self.assertIn(
+            "direct path match: libs/core/src/removed.cpp",
+            result["project_reasons"]["lib"]["reasons"],
+        )
+        self.assertIn(
+            "downstream consumer of lib",
+            result["project_reasons"]["service"]["reasons"],
+        )
+        self.assertFalse(result["project_reasons"]["other"]["included"])
+        self.assertTrue(result["project_reasons"]["other"]["reasons"])
+
+    def test_shared_public_header_selects_all_declared_consumers(self) -> None:
+        data = {
+            "projects": [
+                {"name": "format-lib", "enabled": True, "path": "libs/format", "impact_paths": ["shared/public/**"], "depends_on": [], "targets": []},
+                {"name": "codec-lib", "enabled": True, "path": "libs/codec", "impact_paths": ["shared/public/**"], "depends_on": [], "targets": []},
+                {"name": "format-app", "enabled": True, "path": "apps/format", "depends_on": ["format-lib"], "targets": []},
+                {"name": "codec-app", "enabled": True, "path": "apps/codec", "depends_on": ["codec-lib"], "targets": []},
+                {"name": "integration", "enabled": True, "path": "tests/integration", "depends_on": ["format-app", "codec-app"], "targets": []},
+            ]
+        }
+        result = analyze_impact(data, ["shared/public/api.h"])
+        self.assertEqual(result["direct_projects"], ["format-lib", "codec-lib"])
+        self.assertEqual(
+            result["projects"],
+            ["format-lib", "codec-lib", "format-app", "codec-app", "integration"],
+        )
+        self.assertIn(
+            "direct path match: shared/public/api.h",
+            result["project_reasons"]["codec-lib"]["reasons"],
+        )
+
+    def test_go_module_manifest_change_is_project_scoped(self) -> None:
+        data = {
+            "projects": [
+                {"name": "go-api", "enabled": True, "path": "services/go-api", "depends_on": [], "targets": []},
+                {"name": "go-consumer", "enabled": True, "path": "services/go-consumer", "depends_on": ["go-api"], "targets": []},
+                {"name": "cpp-app", "enabled": True, "path": "apps/cpp", "depends_on": [], "targets": []},
+            ]
+        }
+        result = analyze_impact(
+            data,
+            ["services/go-api/go.mod", "services/go-api/go.sum"],
+        )
+        self.assertEqual(result["lane"], "fast")
+        self.assertEqual(result["direct_projects"], ["go-api"])
+        self.assertEqual(result["projects"], ["go-api", "go-consumer"])
+        self.assertNotIn("cpp-app", result["projects"])
+
+    def test_toolchain_registry_project_catalog_and_shared_build_scripts_force_full(self) -> None:
+        data = {
+            "projects": [
+                {"name": "a", "enabled": True, "path": "apps/a", "depends_on": [], "targets": []},
+                {"name": "b", "enabled": True, "path": "apps/b", "depends_on": [], "targets": []},
+            ]
+        }
+        for path in (
+            "ci/toolchains.json",
+            "ci/projects.json",
+            "scripts/ci/run_build.py",
+            "docker/toolchains/go/go126/Dockerfile",
+        ):
+            with self.subTest(path=path):
+                result = analyze_impact(data, [path])
+                self.assertEqual(result["lane"], "full")
+                self.assertEqual(result["projects"], ["a", "b"])
+                self.assertTrue(
+                    all(
+                        result["project_reasons"][name]["included"]
+                        and result["project_reasons"][name]["reasons"]
+                        for name in ("a", "b")
+                    )
+                )
+
+    def test_workflow_change_selects_smoke_projects_and_prerequisites_not_dependents(self) -> None:
+        data = {
+            "projects": [
+                {"name": "base", "enabled": True, "path": "libs/base", "depends_on": [], "targets": []},
+                {"name": "smoke-app", "enabled": True, "path": "apps/smoke", "depends_on": ["base"], "ci_smoke": True, "targets": []},
+                {"name": "release", "enabled": True, "path": "apps/release", "depends_on": ["smoke-app"], "targets": []},
+            ]
+        }
+        result = analyze_impact(data, [".github/workflows/ci.yml"])
+        self.assertEqual(result["lane"], "smoke")
+        self.assertEqual(result["projects"], ["base", "smoke-app"])
+        self.assertEqual(result["dependency_closure"], ["base"])
+        self.assertEqual(result["dependent_closure"], [])
+        self.assertFalse(result["project_reasons"]["release"]["included"])
+
+    def test_workflow_change_without_declared_smoke_project_fails_full(self) -> None:
+        data = {
+            "projects": [
+                {"name": "a", "enabled": True, "path": "apps/a", "depends_on": [], "targets": []},
+                {"name": "b", "enabled": True, "path": "apps/b", "depends_on": [], "targets": []},
+            ]
+        }
+        result = analyze_impact(data, [".github/workflows/ci.yml"])
+        self.assertEqual(result["lane"], "full")
+        self.assertEqual(result["projects"], ["a", "b"])
+
+    def test_docs_plus_build_policy_change_never_selects_none(self) -> None:
+        data = {
+            "projects": [
+                {"name": "a", "enabled": True, "path": "apps/a", "depends_on": [], "targets": []},
+                {"name": "b", "enabled": True, "path": "apps/b", "depends_on": [], "targets": []},
+            ]
+        }
+        result = analyze_impact(data, ["docs/architecture.md", "ci/projects.json"])
+        self.assertEqual(result["lane"], "full")
+        self.assertEqual(result["projects"], ["a", "b"])
+
+    def test_project_reasons_cover_included_excluded_and_disabled_projects(self) -> None:
+        data = {
+            "projects": [
+                {"name": "selected", "enabled": True, "path": "apps/selected", "depends_on": [], "targets": []},
+                {"name": "unrelated", "enabled": True, "path": "apps/unrelated", "depends_on": [], "targets": []},
+                {"name": "disabled", "enabled": False, "path": "apps/disabled", "depends_on": [], "targets": []},
+            ]
+        }
+        result = analyze_impact(data, ["apps/selected/src/main.go"])
+        self.assertEqual(set(result["project_reasons"]), {"selected", "unrelated", "disabled"})
+        self.assertTrue(result["project_reasons"]["selected"]["included"])
+        self.assertFalse(result["project_reasons"]["unrelated"]["included"])
+        self.assertIn("excluded: project is disabled in ci/projects.json", result["project_reasons"]["disabled"]["reasons"])
+        self.assertEqual(result["excluded_projects"], ["unrelated", "disabled"])
+
+    def test_impact_plan_is_deterministic_and_incremental_selection_is_subset_of_full_oracle(self) -> None:
+        data = {
+            "projects": [
+                {"name": "lib-a", "enabled": True, "path": "libs/a", "depends_on": [], "targets": []},
+                {"name": "lib-b", "enabled": True, "path": "libs/b", "depends_on": [], "targets": []},
+                {"name": "service", "enabled": True, "path": "services/api", "depends_on": ["lib-a", "lib-b"], "targets": []},
+                {"name": "ui", "enabled": True, "path": "apps/ui", "depends_on": ["service"], "targets": []},
+            ]
+        }
+        changed = ["services/api/go.mod", "services/api/go.sum"]
+        first = analyze_impact(data, changed)
+        second = analyze_impact(data, changed)
+        full = analyze_impact(data, changed, force_full=True)
+        self.assertEqual(
+            json.dumps(first, ensure_ascii=False, sort_keys=True),
+            json.dumps(second, ensure_ascii=False, sort_keys=True),
+        )
+        self.assertTrue(set(first["projects"]).issubset(set(full["projects"])))
+        self.assertTrue({"lib-a", "lib-b", "service", "ui"}.issubset(set(first["projects"])))
+
+
+
+    def test_discover_uploads_the_explainable_impact_plan(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn('export CI_IMPACT_PLAN_FILE="$GITHUB_WORKSPACE/ci-impact-plan.json"', workflow)
+        self.assertIn("ci-impact-plan.json", workflow)
+        self.assertIn("project_reasons_json", (ROOT / "scripts" / "ci" / "impact_analysis.py").read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
