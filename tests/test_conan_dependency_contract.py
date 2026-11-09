@@ -65,8 +65,9 @@ class ConanDependencyContractTests(unittest.TestCase):
         for name in ("conan-format-lib", "conan-compression-lib", "conan-demo-app"):
             project = next(p for p in self.catalog["projects"] if p["name"] == name)
             target = project["targets"][0]
-            self.assertIn(".ci-cache/conan-home", target["cache_paths"])
-            self.assertIn(".cache/ccache", target["cache_paths"])
+            project_path = project["path"].rstrip("/") + "/"
+            self.assertIn(project_path + ".ci-cache/conan-home", target["cache_paths"])
+            self.assertIn(project_path + ".cache/ccache", target["cache_paths"])
             self.assertFalse(any(path.startswith("build/") for path in target["cache_paths"]))
             self.assertIn("conan.lock", target["dependency_lock_files"])
             self.assertIn("conan.lock", target["cache_key_files"])

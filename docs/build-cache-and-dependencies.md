@@ -207,7 +207,7 @@ Upload
 1. 先下载本次 Workflow Run 中声明的上游制品；
 2. 校验上游制品的源码 SHA、仓库身份和 digest；
 3. 根据项目配置中的 `cache_key_files` 计算缓存键 fingerprint（不会自动读取 `dependency_lock_files`）；
-4. 将项目、SoC、系统、架构、工具链 identity、上游 fingerprint 和锁文件 fingerprint 组成 cache key；
+4. 将 cache scope、项目、SoC、目标系统、架构、不可变工具链 identity 和本项目声明的 source/lock-file fingerprint 组成 exact cache key；上游制品 fingerprint 不属于编译器缓存身份，制品身份仍由 Artifact Contract 独立校验；
 5. 恢复缓存后执行构建；
 6. 构建成功后生成独立 Artifact Contract v2，不能把缓存目录当成制品上传。
 
@@ -234,12 +234,14 @@ Upload
 
 ### 10.3 缓存命中不等于构建可信
 
-当前 GitHub Actions 缓存配置使用精确 key，并提供同一项目/目标/工具链/上游 fingerprint 前缀的 restore key。restore key 可能恢复一个较旧的缓存，因此必须满足两个条件：
+当前 GitHub Actions 缓存使用 v4 稳定 exact key（不含 run_id/run_attempt），并提供同一 cache scope/项目/目标/不可变工具链 identity 的 restore prefix。源文件或锁文件 fingerprint 变化时，可能回退恢复同一项目较旧的缓存快照；这不是 exact hit。restore key 可能恢复旧快照，因此必须满足两个条件：
 
 - 依赖下载和编译系统本身仍要校验锁文件、包摘要和编译输入；
 - 最终输出仍要重新打包并执行 Artifact Contract v2 校验。
 
 不要把“cache hit”写进制品 Manifest 当成可信证明，也不要因为缓存命中就跳过测试。
+
+PR 工作流只允许恢复可信 base/main 缓存，不允许写入可信 main 缓存。只有成功的 main push，在 build/test、Artifact Contract 验证和 artifact 上传全部成功且 exact key 未命中时才保存缓存。GitHub Actions 缓存快照不可变，并行 Job 的新增条目不会自动合并；不要把共享 restore prefix 理解为跨项目缓存汇总。
 
 ### 10.4 常见故障：证据、止血、恢复
 
