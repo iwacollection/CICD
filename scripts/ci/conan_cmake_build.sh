@@ -111,6 +111,31 @@ install_start="$(now_ns)"
 install_end="$(now_ns)"
 install_ms="$(elapsed_ms "$install_start" "$install_end")"
 
+# Reinstall from the existing Conan home only. This must fail rather than
+# silently contact a remote or build a missing package.
+sha256sum "$LOCK_FILE" \
+  .ci-telemetry/conan-graph.json \
+  .ci-telemetry/conan-package-list.json \
+  .ci-telemetry/conan-download-result.json \
+  > .ci-telemetry/dependency-identity-before.sha256
+warm_install_start="$(now_ns)"
+"$CONAN" install . \
+  --output-folder=build/conan \
+  --profile:host="$CONAN_PROFILE_HOST" \
+  --profile:build="$CONAN_PROFILE_BUILD" \
+  --lockfile="$LOCK_FILE" \
+  --no-remote \
+  --build=never \
+  2>&1 | tee .ci-telemetry/conan-warm-install.log
+warm_install_end="$(now_ns)"
+warm_install_ms="$(elapsed_ms "$warm_install_start" "$warm_install_end")"
+sha256sum "$LOCK_FILE" \
+  .ci-telemetry/conan-graph.json \
+  .ci-telemetry/conan-package-list.json \
+  .ci-telemetry/conan-download-result.json \
+  > .ci-telemetry/dependency-identity-after.sha256
+diff -u .ci-telemetry/dependency-identity-before.sha256 .ci-telemetry/dependency-identity-after.sha256
+
 ccache --zero-stats
 build_start="$(now_ns)"
 bash "$CI_CMAKE_BUILD_HELPER" \
@@ -145,21 +170,23 @@ warm_ms="$(elapsed_ms "$warm_start" "$warm_end")"
 cp .ci-telemetry/cmake-build.json .ci-telemetry/cmake-warm-pass.json
 ccache --show-stats > .ci-telemetry/ccache-warm-pass.txt
 
-python3 - "$resolve_ms" "$package_list_ms" "$download_ms" "$install_ms" "$build_ms" "$warm_ms" "$CONAN_VERSION" "$LOCK_FILE" <<'PY'
+python3 - "$resolve_ms" "$package_list_ms" "$download_ms" "$install_ms" "$warm_install_ms" "$build_ms" "$warm_ms" "$CONAN_VERSION" "$LOCK_FILE" <<'PY'
 import hashlib
 import json
 import pathlib
 import re
 import sys
 
-resolve_ms, package_list_ms, download_ms, install_ms, build_ms, warm_ms = map(int, sys.argv[1:7])
-version, lock_path = sys.argv[7:9]
+resolve_ms, package_list_ms, download_ms, install_ms, warm_install_ms, build_ms, warm_ms = map(int, sys.argv[1:8])
+version, lock_path = sys.argv[8:10]
 root = pathlib.Path(".")
 lock_sha = hashlib.sha256((root / lock_path).read_bytes()).hexdigest()
 graph_path = root / ".ci-telemetry/conan-graph.json"
 graph_sha = hashlib.sha256(graph_path.read_bytes()).hexdigest()
+dependency_identity_sha = hashlib.sha256(
+    (root / ".ci-telemetry/dependency-identity-before.sha256").read_bytes()
+).hexdigest()
 download_log = (root / ".ci-telemetry/conan-download.log").read_text(errors="replace")
-install_log = (root / ".ci-telemetry/conan-install.log").read_text(errors="replace")
 download_result = json.loads((root / ".ci-telemetry/conan-download-result.json").read_text(encoding="utf-8"))
 if not isinstance(download_result, dict):
     raise SystemExit("Conan download result is not a JSON object")
@@ -191,6 +218,9 @@ telemetry = {
     "dependency_download_ms": download_ms,
     "dependency_download_log_lines": sum("Downloading" in line for line in download_log.splitlines()),
     "dependency_local_install_generate_ms": install_ms,
+    "dependency_warm_cache_reuse_ms": warm_install_ms,
+    "dependency_identity_sha256": dependency_identity_sha,
+    "dependency_cache_reuse_verified": True,
     "clean_configure_compile_total_ms": build_ms,
     "configure_generate_ms": first_cmake["configure_generate_ms"],
     "compile_link_ms": first_cmake["compile_link_ms"],

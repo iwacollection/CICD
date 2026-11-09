@@ -318,6 +318,8 @@ Conan remote
 - dependency_package_list_ms：根据解析后的 Conan graph 查询远端包列表的耗时；
 - dependency_download_ms：执行 conan download --list 的远端包下载窗口；Conan package cache 已命中时该值可能很低；
 - dependency_local_install_generate_ms：使用 --no-remote 在本地缓存完成包安装和 CMakeDeps/CMakeToolchain 生成；若缺少匹配的二进制包，--build=missing 仍可能在这个阶段编译依赖；
+- dependency_warm_cache_reuse_ms：随后再次执行 --no-remote --build=never 的本地 warm install；缺少本地二进制包时直接失败，不会回源或补编译；
+- dependency_cache_reuse_verified：warm install 成功，且 conan.lock、解析图、远端 package list、download result 四份 SHA256 文件前后完全一致时才为 true；
 - configure_generate_ms / compile_link_ms：CMake helper 分别测出的首次配置生成与编译/链接耗时；
 - warm_configure_generate_ms / warm_compile_link_ms：清理 build 输出、保留 ccache 后第二次配置和编译耗时；
 - test_ms：集成应用的 CTest 时间；
