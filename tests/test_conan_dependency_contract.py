@@ -96,7 +96,7 @@ class ConanDependencyContractTests(unittest.TestCase):
         self.assertIn("dependency_download_ms", script)
         self.assertIn("--graph=.ci-telemetry/conan-graph.json", script)
         self.assertIn("dependency_local_install_generate_ms", script)
-        self.assertIn('conan download \\\\', script)
+        self.assertIn('download_start="$(now_ns)"', script)
         self.assertIn('--list=.ci-telemetry/conan-package-list.json', script)
         self.assertIn("--no-remote", script)
         self.assertIn("warm_cache_validation", script)
