@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
 from cache_fingerprint import fingerprint_files  # noqa: E402
 from dependency_plan import build_plan  # noqa: E402
+from conan_package_list import prepare_download_list  # noqa: E402
 from validate_config import load_catalog, validate_catalog  # noqa: E402
 
 
@@ -74,15 +75,53 @@ class ConanDependencyContractTests(unittest.TestCase):
     def test_conan_helpers_are_read_only_mounted_into_container_builds(self) -> None:
         runner = (ROOT / "scripts" / "ci" / "run_build.py").read_text(encoding="utf-8")
         self.assertIn('("CI_CONAN_BUILD_HELPER", "conan_cmake_build.sh")', runner)
+        self.assertIn('("CI_CONAN_PACKAGE_LIST_HELPER", "conan_package_list.py")', runner)
         self.assertIn('("CI_CONAN_CTEST_HELPER", "conan_ctest.sh")', runner)
         self.assertIn("CI_CONAN_BUILD_HELPER=/ci-platform/conan_cmake_build.sh", runner)
+        self.assertIn("CI_CONAN_PACKAGE_LIST_HELPER=/ci-platform/conan_package_list.py", runner)
         self.assertIn("CI_CONAN_CTEST_HELPER=/ci-platform/conan_ctest.sh", runner)
-        self.assertIn('"cmake_build.sh", "conan_cmake_build.sh", "conan_ctest.sh"', runner)
+        self.assertIn('"cmake_build.sh", "conan_cmake_build.sh", "conan_package_list.py", "conan_ctest.sh"', runner)
         for name in ("conan-format-lib", "conan-compression-lib", "conan-demo-app"):
             project = next(p for p in self.catalog["projects"] if p["name"] == name)
             self.assertEqual(project["targets"][0]["build_command"], 'bash "$CI_CONAN_BUILD_HELPER"')
         app = next(p for p in self.catalog["projects"] if p["name"] == "conan-demo-app")
         self.assertEqual(app["targets"][0]["test_command"], 'bash "$CI_CONAN_CTEST_HELPER"')
+
+    def test_conan_package_list_skips_remote_for_local_cache_and_filters_remote_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "package-list.json"
+            remote = root / "remote-list.json"
+            result = root / "download-result.json"
+
+            source.write_text(json.dumps({"Local Cache": {"fmt/11.0.2": {"revisions": {}}}}), encoding="utf-8")
+            self.assertEqual("local-cache", prepare_download_list(source, remote, result))
+            local_result = json.loads(result.read_text(encoding="utf-8"))
+            self.assertTrue(local_result["remote_download_skipped"])
+            self.assertEqual("Local Cache", local_result["source"])
+            self.assertFalse(remote.exists())
+
+            source.write_text(
+                json.dumps({
+                    "Local Cache": {"fmt/11.0.2": {"revisions": {"cached": {}}}},
+                    "conancenter": {"fmt/11.0.2": {"revisions": {"remote": {}}}},
+                }),
+                encoding="utf-8",
+            )
+            self.assertEqual("remote", prepare_download_list(source, remote, result))
+            self.assertEqual(
+                {"conancenter": {"fmt/11.0.2": {"revisions": {"remote": {}}}}},
+                json.loads(remote.read_text(encoding="utf-8")),
+            )
+            self.assertFalse(result.exists())
+
+    def test_conan_package_list_rejects_unknown_origins(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "package-list.json"
+            source.write_text(json.dumps({"unexpected-remote": {"fmt/11.0.2": {}}}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unexpected Conan package-list origins"):
+                prepare_download_list(source, root / "remote.json", root / "result.json")
 
     def test_conan_build_uses_pinned_version_lock_and_generated_toolchain(self) -> None:
         script = (ROOT / "scripts" / "ci" / "conan_cmake_build.sh").read_text(encoding="utf-8")
@@ -97,7 +136,9 @@ class ConanDependencyContractTests(unittest.TestCase):
         self.assertIn("--graph=.ci-telemetry/conan-graph.json", script)
         self.assertIn("dependency_local_install_generate_ms", script)
         self.assertIn('download_start="$(now_ns)"', script)
-        self.assertIn('--list=.ci-telemetry/conan-package-list.json', script)
+        self.assertIn('--list=.ci-telemetry/conan-remote-package-list.json', script)
+        self.assertIn('dependency_remote_download_skipped', script)
+        self.assertIn('local-cache', script)
         self.assertIn("--no-remote", script)
         self.assertIn("--build=never", script)
         self.assertIn("conan-warm-install.log", script)
