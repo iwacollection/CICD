@@ -7,12 +7,12 @@ This fixture builds a Linux AArch64 executable on an x86_64 Linux host. It separ
 Debian Forky is Debian testing, not a released stable distribution. The image pins Forky for the base OS, GCC and target sysroot; it imports only the statically linked `qemu-user` package from the same dated Sid archive snapshot because Debian's tracker still lists three open QEMU CVEs against Forky's current 11.1.2 package. The rest of the system retains Forky release priority. This image is an isolated build-toolchain candidate only and is not a production runtime base. It is being evaluated because the earlier Trixie image scan surfaced vulnerable versions of QEMU, libxml2, util-linux, Python and cross sysroot components. Newer package versions do not themselves prove security: the normal HIGH/CRITICAL Trivy gate, SBOM, provenance, ABI and runtime checks must all pass without suppressions or policy exceptions before promotion.
 
 - Target triple: `aarch64-linux-gnu`
-- Build-host compiler: native x86_64 GCC/G++ 13.5.0 (`gcc-13`, `g++-13`)
+- Build-host compiler: native x86_64 GCC/G++ 13.5.0 (`gcc-13`, `g++-13`, package `13.5.0-3`)
 - Target compiler: AArch64 GCC/G++ 13.5.0 (`gcc-13-aarch64-linux-gnu`, `g++-13-aarch64-linux-gnu`)
 - Target ABI: Linux AArch64, `armv8`, `libstdc++11`, C++17
-- Sysroot root: `/usr/aarch64-linux-gnu` (cross glibc 2.43-3cross8; Linux UAPI headers 7.2.12-1)
+- Sysroot root: `/usr/aarch64-linux-gnu` (cross glibc 2.43-3cross8; Linux UAPI headers 7.2.15-1)
 - Base image: pinned official Debian Forky slim (testing) amd64 manifest digest `sha256:27b88700aef98dd3dd0b32538f8e5d662a88237ec8fbf969254c8d3c93dfdab1`
-- APT snapshot: `20261108T000000Z`
+- APT snapshot: `20261108T000000Z` (Forky GCC 13.5.0-3 and Linux UAPI headers 7.2.15-1 were already migrated by Nov 8)
 - APT: 3.3.6 (CVE-2026-109518 fixed); cross binutils: 2.47.50.20261021-1; QEMU user-mode: 1:11.1.3+ds-1 (static binary from Debian Sid snapshot `20261108T000000Z`; QEMU package provenance is included in the SDK digest)
 - Conan CLI: 2.34.0, installed from the upstream Linux AMD64 release `.deb` after verifying SHA-256 `94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1`
 - Third-party dependency: `fmt/11.0.2`
@@ -25,7 +25,7 @@ Debian Forky is Debian testing, not a released stable distribution. The image pi
 | Base OS, APT, native/cross GCC, cross glibc, Linux headers, Binutils, CMake/Ninja | Debian Forky | `20261108T000000Z` | Exact package versions are asserted during image build and again by `ci/verify.sh` |
 | QEMU user-mode emulator only | Debian Sid | `20261108T000000Z` | `qemu-user=1:11.1.3+ds-1`, static user-mode binaries |
 
-The Sid repository is added only to obtain the QEMU release that fixes the three issues still open against Forky's `1:11.1.2+ds-3`. The system upgrade and all compiler/sysroot package selection explicitly target Forky; QEMU is installed separately by exact version. No Sid upgrade is applied to the base system. The verifier records the QEMU package version and source snapshot in `target-sdk.lock` and incorporates both into the SDK cache digest. This mixed-suite edge is intentional, isolated and subject to the same Trivy gate as every other package.
+The Sid repository is added only to obtain the QEMU release that fixes the three issues still open against Forky's `1:11.1.2+ds-3`. The system upgrade and all compiler/sysroot package selection explicitly target Forky. APT's default release is pinned to Forky before installing APT, so `libapt-pkg7.0` cannot silently come from Sid. QEMU is installed separately by exact version; its package dependencies must continue to resolve against Forky. No Sid upgrade is applied to the base system. The verifier records the QEMU package version and source snapshot in `target-sdk.lock` and incorporates both into the SDK cache digest. This mixed-suite edge is intentional, isolated and subject to the same Trivy gate as every other package.
 
 The Candidate image is built on an amd64 runner and contains the cross compiler, target headers/libraries and QEMU user-mode emulator. This is not an ARM runner and does not prove device-specific behavior. Forky remains unpromoted until the security gate passes.
 

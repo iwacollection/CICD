@@ -2,10 +2,10 @@ FROM debian:forky-slim@sha256:27b88700aef98dd3dd0b32538f8e5d662a88237ec8fbf96925
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG APT_VERSION=3.3.6
-ARG HOST_GCC_PACKAGE_VERSION=13.5.0-1
+ARG HOST_GCC_PACKAGE_VERSION=13.5.0-3
 ARG CROSS_GCC_VERSION=13.5.0-1cross1
 ARG CROSS_LIBC_VERSION=2.43-3cross8
-ARG CROSS_LINUX_HEADERS_VERSION=7.2.12-1
+ARG CROSS_LINUX_HEADERS_VERSION=7.2.15-1
 ARG BINUTILS_VERSION=2.47.50.20261021-1
 ARG QEMU_VERSION=1:11.1.3+ds-1
 ARG CONAN_VERSION=2.34.0
@@ -20,8 +20,10 @@ RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources \
        "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261108T000000Z forky main" \
        "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261108T000000Z sid main" \
        > /etc/apt/sources.list \
+    && printf '%s\n' 'APT::Default-Release "forky";' > /etc/apt/apt.conf.d/99default-release \
     && apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=0 install -y --no-install-recommends "apt=${APT_VERSION}" \
+    && test "$(dpkg-query -W -f='${Version}' libapt-pkg7.0)" = "$APT_VERSION" \
     && apt-get -t forky -o Acquire::Retries=0 full-upgrade -y \
     && apt-get -t forky -o Acquire::Retries=0 install -y --no-install-recommends \
        "gcc-13=${HOST_GCC_PACKAGE_VERSION}" \

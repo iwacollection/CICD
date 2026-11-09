@@ -126,8 +126,14 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
         self.assertIn("debian-forky-20261108-gcc13-cross", script)
         self.assertIn("https://center2.conan.io", script)
         self.assertIn('test "$qemu_package" = "1:11.1.3+ds-1"', script)
+        self.assertIn('test "$linux_headers_package" = "7.2.15-1"', script)
+        self.assertIn('test "$host_gcc_package" = "13.5.0-3"', script)
+        self.assertIn('test "$host_gxx_package" = "13.5.0-3"', script)
         self.assertIn('grep -F "11.1.3" <<< "$qemu_version"', script)
         self.assertIn('readonly QEMU_ORIGIN="debian-sid-snapshot-20261108T000000Z"', script)
+        dockerfile = (ROOT / "docker" / "toolchains" / "cpp" / "aarch64-gcc13" / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn('APT::Default-Release "forky";', dockerfile)
+        self.assertIn("libapt-pkg7.0", dockerfile)
         self.assertIn('"origin": qemu_origin', script)
 
 
