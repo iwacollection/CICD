@@ -1,10 +1,37 @@
 {
-  "schema_version": 1,
-  "status": "bootstrap-required",
-  "target_triple": "aarch64-linux-gnu",
-  "sdk": {
-    "version": "debian-forky-20261108-gcc13-cross",
-    "apt_snapshot": "20261108T000000Z"
+  "build_host_compiler": {
+    "family": "GCC",
+    "gcc_package": "13.5.0-3",
+    "gxx_package": "13.5.0-3",
+    "version": "13.5.0"
   },
-  "reason": "Not a verified SDK lock. Generate the actual toolchain, sysroot and package digests with ci/verify.sh --bootstrap inside the pinned image, then commit that generated identity."
+  "compiler": {
+    "family": "GCC",
+    "gcc_package": "13.5.0-1cross1",
+    "gxx_package": "13.5.0-1cross1",
+    "version": "13.5.0"
+  },
+  "emulator": {
+    "binary_version": "qemu-aarch64 version 11.1.3 (Debian 1:11.1.3+ds-1)",
+    "origin": "debian-sid-snapshot-20261108T000000Z",
+    "package": "qemu-user",
+    "package_version": "1:11.1.3+ds-1"
+  },
+  "linker": "GNU ld (GNU Binutils for Debian) 2.47.50.20261021",
+  "schema_version": 1,
+  "sdk": {
+    "apt_snapshot": "20261108T000000Z",
+    "package_inventory_sha256": "ae5854bf6d81adff564ac4fa6d301c37e092b74f05cf2c9cb008c63ef8420200",
+    "sha256": "f04032cbd84d4ce1888af7c88ab35a8ba8ee430484e7497bbb113cd03fab23a2",
+    "version": "debian-forky-20261108-gcc13-cross"
+  },
+  "sysroot": {
+    "path": "/usr/aarch64-linux-gnu",
+    "sha256": "f4c21e500f13e1d3e0bcd281be59c4a9383a2c0f4d3cdf6d617cc295e0ea6061"
+  },
+  "target_headers": {
+    "package": "linux-libc-dev-arm64-cross",
+    "version": "7.2.15-1"
+  },
+  "target_triple": "aarch64-linux-gnu"
 }

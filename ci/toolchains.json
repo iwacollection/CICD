@@ -187,7 +187,7 @@
       "sdk_version": "debian-forky-20261108-gcc13-cross",
       "apt_snapshot": "20261108T000000Z",
       "verification_fixture": "examples/cpp-aarch64-cross",
-      "verification_command": "bash ./ci/verify.sh --bootstrap"
+      "verification_command": "bash ./ci/verify.sh"
     }
   ]
 }
