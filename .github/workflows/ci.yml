@@ -108,13 +108,13 @@ jobs:
             if [[ -z "${PR_BASE_SHA:-}" || -z "${PR_HEAD_SHA:-}" ]]; then
               force_full=true
             else
-              git diff --name-only "$PR_BASE_SHA" "$PR_HEAD_SHA" -- > "$changed_file"
+              git diff --name-only --no-renames "$PR_BASE_SHA" "$PR_HEAD_SHA" -- > "$changed_file"
             fi
           else
             if [[ -z "${PUSH_BEFORE_SHA:-}" || "$PUSH_BEFORE_SHA" =~ ^0+$ ]]; then
               force_full=true
             else
-              git diff --name-only "$PUSH_BEFORE_SHA" "$CURRENT_SHA" -- > "$changed_file"
+              git diff --name-only --no-renames "$PUSH_BEFORE_SHA" "$CURRENT_SHA" -- > "$changed_file"
             fi
           fi
 
