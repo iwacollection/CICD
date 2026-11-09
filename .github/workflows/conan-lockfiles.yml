@@ -1,0 +1,65 @@
+name: Generate Conan lockfiles
+
+on:
+  pull_request:
+    paths:
+      - "examples/conan-format-lib/**"
+      - "examples/conan-compression-lib/**"
+      - "examples/conan-demo-app/**"
+      - ".github/workflows/conan-lockfiles.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conan-lockfiles-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: Generate Conan 2 lockfiles from declared recipes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install the exact Conan version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/conan-venv"
+          "$RUNNER_TEMP/conan-venv/bin/python" -m pip install --disable-pip-version-check "conan==2.34.0"
+          "$RUNNER_TEMP/conan-venv/bin/conan" --version | grep -Fx "Conan version 2.34.0"
+
+      - name: Generate lockfiles with Conan graph resolution
+        shell: bash
+        env:
+          CONAN: ${{ runner.temp }}/conan-venv/bin/conan
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/conan-lockfiles"
+          for project in examples/conan-format-lib examples/conan-compression-lib examples/conan-demo-app; do
+            (
+              cd "$project"
+              "$CONAN" lock create . \
+                --profile:host=profiles/host \
+                --profile:build=profiles/build \
+                --remote=conancenter \
+                --lockfile-out=conan.lock
+              python3 -c 'import json, pathlib; p=pathlib.Path("conan.lock"); d=json.loads(p.read_text()); assert d.get("version") and d.get("requires"), "Conan produced an empty/incomplete lockfile"; print(f"{p}: Conan lock schema={d['"'"'version'"'"']} requires={len(d['"'"'requires'"'"'])}")'
+              cp conan.lock "$RUNNER_TEMP/conan-lockfiles/${project##*/}.conan.lock"
+            )
+          done
+          sha256sum "$RUNNER_TEMP"/conan-lockfiles/*.conan.lock
+
+      - name: Upload Conan-generated lockfiles
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: conan-generated-lockfiles
+          path: ${{ runner.temp }}/conan-lockfiles/*.conan.lock
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

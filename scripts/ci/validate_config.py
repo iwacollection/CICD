@@ -213,6 +213,12 @@ def validate_catalog(
             if not _string_list(cache_key_files):
                 errors.append(f"{tprefix}.cache_key_files must be a string list")
                 cache_key_files = []
+            if _string_list(dependency_lock_files):
+                missing_lock_inputs = sorted(set(dependency_lock_files) - set(cache_key_files))
+                if missing_lock_inputs:
+                    errors.append(
+                        f"{tprefix}.dependency_lock_files must also be listed in cache_key_files: {missing_lock_inputs}"
+                    )
             if cache_paths and not cache_key_files:
                 errors.append(f"{tprefix}.cache_key_files is required when cache_paths is configured")
             if cache_scope == "none" and cache_paths:
