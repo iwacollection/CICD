@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import re
+import tarfile
 import sys
 import tempfile
 import unittest
@@ -16,6 +19,7 @@ from dag_plan import render_dag  # noqa: E402
 from dependency_plan import build_levels  # noqa: E402
 from discover_matrix import build_matrix  # noqa: E402
 from impact_analysis import analyze_impact  # noqa: E402
+from resolve_upstream_artifacts import resolve as resolve_upstream_artifacts  # noqa: E402
 from toolchain_catalog import (  # noqa: E402
     build_context_sha256,
     candidate_build_definition_sha256,
@@ -732,6 +736,142 @@ class CiPlatformTests(unittest.TestCase):
         self.assertIn('export CI_IMPACT_PLAN_FILE="$GITHUB_WORKSPACE/ci-impact-plan.json"', workflow)
         self.assertIn("ci-impact-plan.json", workflow)
         self.assertIn("project_reasons_json", (ROOT / "scripts" / "ci" / "impact_analysis.py").read_text(encoding="utf-8"))
+
+
+    def _create_upstream_artifact_fixture(
+        self,
+        root: Path,
+        *,
+        bundle_content: bytes = b"trusted upstream output",
+        manifest_content: bytes | None = None,
+    ) -> tuple[Path, Path]:
+        artifact_dir = root / "dag-lib"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        bundle = artifact_dir / "lib.tar.gz"
+        with tarfile.open(bundle, "w:gz") as archive:
+            info = tarfile.TarInfo("dist/lib.txt")
+            info.size = len(bundle_content)
+            info.mode = 0o644
+            archive.addfile(info, io.BytesIO(bundle_content))
+
+        recorded_content = bundle_content if manifest_content is None else manifest_content
+        manifest = {
+            "schema_version": 2,
+            "artifact_name": "lib-artifact",
+            "project": "lib",
+            "source_sha": "a" * 40,
+            "source_repository": "iwacollection/CICD",
+            "workflow_run_id": "123",
+            "workflow_run_attempt": "1",
+            "target": {
+                "soc": "generic",
+                "target_os": "linux",
+                "arch": "x86_64",
+                "toolchain": "gcc-host-v1",
+            },
+            "toolchain": {
+                "id": "gcc-host-v1",
+                "identity": "host:gcc-host-v1",
+                "execution_mode": "host",
+                "container_image": "",
+            },
+            "runner": {"labels": ["ubuntu-latest"]},
+            "compiler_versions": {},
+            "dependencies": {"locks": [], "upstream_artifacts": []},
+            "bundle": {
+                "file": bundle.name,
+                "sha256": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+                "size_bytes": bundle.stat().st_size,
+                "format": "tar.gz",
+                "reproducible": True,
+                "source_date_epoch": 0,
+            },
+            "files": [
+                {
+                    "path": "dist/lib.txt",
+                    "sha256": hashlib.sha256(recorded_content).hexdigest(),
+                    "size_bytes": len(recorded_content),
+                }
+            ],
+        }
+        manifest_path = artifact_dir / "lib.manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        return bundle, manifest_path
+
+    def _resolve_upstream_fixture(
+        self,
+        directory: Path,
+        destination: Path,
+        *,
+        expected_source_sha: str = "a" * 40,
+        target_os: str = "linux",
+    ) -> dict:
+        return resolve_upstream_artifacts(
+            directory,
+            ["lib"],
+            soc="generic",
+            target_os=target_os,
+            arch="x86_64",
+            destination=destination,
+            expected_source_sha=expected_source_sha,
+            expected_repository="iwacollection/CICD",
+        )
+
+    def test_upstream_resolver_fails_closed_when_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(ValueError, "no compatible upstream artifact"):
+                self._resolve_upstream_fixture(root, root / "resolved")
+
+    def test_upstream_resolver_fails_closed_on_source_sha_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_upstream_artifact_fixture(root)
+            with self.assertRaisesRegex(ValueError, "manifest source_sha mismatch"):
+                self._resolve_upstream_fixture(
+                    root,
+                    root / "resolved",
+                    expected_source_sha="b" * 40,
+                )
+
+    def test_upstream_resolver_fails_closed_on_target_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_upstream_artifact_fixture(root)
+            with self.assertRaisesRegex(ValueError, "no compatible upstream artifact"):
+                self._resolve_upstream_fixture(
+                    root,
+                    root / "resolved",
+                    target_os="windows",
+                )
+
+    def test_upstream_resolver_fails_closed_on_corrupted_bundle_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle, _ = self._create_upstream_artifact_fixture(root)
+            bundle.write_bytes(bundle.read_bytes() + b"corrupted")
+            with self.assertRaisesRegex(ValueError, "upstream bundle digest mismatch"):
+                self._resolve_upstream_fixture(root, root / "resolved")
+
+    def test_upstream_resolver_fails_closed_on_manifest_member_digest_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_upstream_artifact_fixture(
+                root,
+                bundle_content=b"tampered payload",
+                manifest_content=b"expected payload",
+            )
+            with self.assertRaisesRegex(ValueError, "bundle member digest mismatch"):
+                self._resolve_upstream_fixture(root, root / "resolved")
+
+    def test_upstream_resolver_accepts_verified_contract_v2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_upstream_artifact_fixture(root)
+            result = self._resolve_upstream_fixture(root, root / "resolved")
+            self.assertEqual(result["count"], 1)
+            self.assertTrue((root / "resolved" / "lib" / "dist" / "lib.txt").is_file())
+            self.assertTrue(Path(result["index"]).is_file())
 
 
 if __name__ == "__main__":
