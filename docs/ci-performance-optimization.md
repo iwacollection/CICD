@@ -255,3 +255,44 @@ The separate `CI End-to-End Observability` workflow runs after a `Build Matrix` 
 
 The first report should be read as an attribution tool: use run queue and Job queue to identify scheduling delays, Job runtime to identify slow DAG nodes, and stage timings to identify the work inside the slow Job. This separates GitHub scheduling, dependency topology, Runner execution, and the actual build/security stages instead of collapsing them into one undifferentiated duration.
 
+## 10. 可复现的 C++ / ccache 基准实验
+
+`scripts/ci/ccache_benchmark.py` 是手动运行的实验工具，不会成为每次 PR/Push 的阻断门禁。它把指定的 CMake 项目复制到临时目录，在独立 ccache 缓存中依次测量：
+
+1. 冷构建：空缓存下首次配置和编译；
+2. 无改动重建：不改源文件再次执行 Ninja，确认是否为 no-op；
+3. 单个源文件变化：只向指定源文件追加注释，观察 Ninja 重编译范围及 ccache 结果；
+4. 公共头文件变化：只向指定头文件追加注释，观察依赖传播和重编译范围；
+5. 编译参数变化：使用独立构建目录并增加一个 C++ 编译宏，验证编译参数变化后的缓存键隔离；
+6. ccache 关闭对照：同一份变更后的源码在独立构建目录中设置 `CCACHE_DISABLE=1`；
+7. 可选第二项目：使用同一个临时缓存目录，实测同工具链跨项目是否真的复用对象缓存。
+
+示例（路径需要替换成实际项目中的 CMakeLists.txt、一个 .cpp 文件和一个被多个源文件包含的公共头文件）：
+
+```bash
+python3 scripts/ci/ccache_benchmark.py \
+  --source-dir /workspace/my-cpp-project \
+  --source-file src/worker.cpp \
+  --header-file include/common/types.h \
+  --build-jobs 4 \
+  --output-json ccache-benchmark-report.json
+```
+
+如果要测量同一工具链缓存是否能跨项目复用，再增加：
+
+```bash
+  --secondary-source-dir /workspace/another-cpp-project
+```
+
+报告会记录每个阶段的耗时、Ninja 日志新增构建边数量、构建后待执行动作、ccache hit/miss 和缓存容量。源文件和头文件的修改只发生在临时副本中，原始工作区不变。运行环境需要安装 CMake、Ninja、ccache 和 C++ 编译器。
+
+**如何读结果：**
+
+- `warm_noop` 的 Ninja 新增边应为 0，待执行动作应为 0；这证明增量构建系统没有重复工作，不代表 ccache 命中。
+- `source_incremental` 和 `header_incremental` 要同时看 Ninja 实际执行边数与 ccache hit/miss。Ninja 决定哪些编译任务需要执行，ccache 决定这些任务是否能复用编译结果，两者不能混为一个命中率。
+- 公共头文件变化通常会影响所有依赖它的编译单元；应重点观察执行边数，而不是只看缓存命中率。
+- 编译参数变化后应观察 miss 是否上升，不能为了追求命中率而跨编译参数错误复用产物。
+- `cache_disabled_control` 和冷构建的耗时差异受 Runner、CPU 频率、磁盘和系统负载影响。单次对照只能用于发现方向，不能作为收益承诺。
+- 第二项目的 cache hit 才是共享缓存是否有效的实测证据；项目路径、编译器身份、编译参数或源码内容不同，都可能导致无法复用。
+
+仓库内的 `examples/cpp-lib` 和 `examples/cpp-app` 是流程 smoke fixture，规模太小，不应作为大型 C++ 工程性能基线。正式评估至少选择一个真实工程，并在相同 Runner 类型、相同工具链 digest、相同并行度下重复冷构建和热构建；分别报告中位数/P95、执行编译边数、ccache hit/miss、缓存恢复耗时和样本数。只有重复实验显示端到端墙钟时间下降，才可以宣称构建提速。
