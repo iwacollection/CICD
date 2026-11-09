@@ -15,15 +15,17 @@ def classify_package_list(data: object, remote: str) -> str:
         raise ValueError("Conan package list is empty; refusing to skip dependency resolution")
 
     origins = set(data)
+    unexpected_origins = origins - {LOCAL_CACHE_ORIGIN, remote}
+    if unexpected_origins:
+        unexpected = ", ".join(sorted(str(origin) for origin in unexpected_origins))
+        raise ValueError(f"Conan package list contains unexpected origins: {unexpected}")
     if origins == {LOCAL_CACHE_ORIGIN}:
         return "local-cache-only"
     if remote in origins:
         return "remote-required"
 
-    unexpected = ", ".join(sorted(str(origin) for origin in origins))
     raise ValueError(
-        f"Conan package list has no expected remote '{remote}' and is not local-cache-only; "
-        f"reported origins: {unexpected}"
+        f"Conan package list has no expected remote '{remote}' and is not local-cache-only"
     )
 
 
