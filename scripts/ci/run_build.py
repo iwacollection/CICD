@@ -295,7 +295,7 @@ def container_command(workdir: Path, command: str, image: str) -> list[str]:
         args.extend(["-v", f"{cache_dir}:/ccache"])
 
     helper_dir = Path(__file__).resolve().parent
-    for filename in ("cmake_build.sh", "conan_cmake_build.sh", "conan_ctest.sh"):
+    for filename in ("cmake_build.sh", "conan_cmake_build.sh", "conan_ctest.sh", "conan_package_list.py"):
         helper = helper_dir / filename
         if helper.is_file():
             args.extend(["-v", f"{helper}:/ci-platform/{filename}:ro"])

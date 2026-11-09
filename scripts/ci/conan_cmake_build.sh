@@ -89,15 +89,34 @@ if not isinstance(data, dict) or not data:
 print(f"conan_package_list_origins={','.join(data.keys())}")
 PY
 
-download_start="$(now_ns)"
-"$CONAN" download \
-  --list=.ci-telemetry/conan-package-list.json \
-  --remote=conancenter \
-  --format=json \
-  --out-file=.ci-telemetry/conan-download-result.json \
-  2>&1 | tee .ci-telemetry/conan-download.log
-download_end="$(now_ns)"
-download_ms="$(elapsed_ms "$download_start" "$download_end")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+package_list_mode="$(python3 "$SCRIPT_DIR/conan_package_list.py" \
+  --package-list .ci-telemetry/conan-package-list.json \
+  --remote conancenter)"
+echo "conan_package_list_mode=$package_list_mode"
+
+if [[ "$package_list_mode" == "remote-required" ]]; then
+  download_start="$(now_ns)"
+  "$CONAN" download \
+    --list=.ci-telemetry/conan-package-list.json \
+    --remote=conancenter \
+    --format=json \
+    --out-file=.ci-telemetry/conan-download-result.json \
+    2>&1 | tee .ci-telemetry/conan-download.log
+  download_end="$(now_ns)"
+  download_ms="$(elapsed_ms "$download_start" "$download_end")"
+  download_status="downloaded"
+else
+  # A warm Conan home can already contain every locked package. Conan's
+  # --list output then contains only "Local Cache"; asking the remote download
+  # command to consume that list fails because conancenter is not an origin.
+  # Keep the offline install and warm-reuse checks below as the correctness gate.
+  echo "All locked Conan packages are already present in Local Cache; remote download is not required."
+  printf '%s\n' '{"status":"skipped","reason":"all locked packages are already present in Local Cache","remote":"conancenter"}' > .ci-telemetry/conan-download-result.json
+  : > .ci-telemetry/conan-download.log
+  download_ms=0
+  download_status="skipped-local-cache"
+fi
 
 install_start="$(now_ns)"
 "$CONAN" install . \
@@ -170,7 +189,7 @@ warm_ms="$(elapsed_ms "$warm_start" "$warm_end")"
 cp .ci-telemetry/cmake-build.json .ci-telemetry/cmake-warm-pass.json
 ccache --show-stats > .ci-telemetry/ccache-warm-pass.txt
 
-python3 - "$resolve_ms" "$package_list_ms" "$download_ms" "$install_ms" "$warm_install_ms" "$build_ms" "$warm_ms" "$CONAN_VERSION" "$LOCK_FILE" <<'PY'
+python3 - "$resolve_ms" "$package_list_ms" "$download_ms" "$install_ms" "$warm_install_ms" "$build_ms" "$warm_ms" "$download_status" "$CONAN_VERSION" "$LOCK_FILE" <<'PY'
 import hashlib
 import json
 import pathlib
@@ -178,7 +197,7 @@ import re
 import sys
 
 resolve_ms, package_list_ms, download_ms, install_ms, warm_install_ms, build_ms, warm_ms = map(int, sys.argv[1:8])
-version, lock_path = sys.argv[8:10]
+download_status, version, lock_path = sys.argv[8:11]
 root = pathlib.Path(".")
 lock_sha = hashlib.sha256((root / lock_path).read_bytes()).hexdigest()
 graph_path = root / ".ci-telemetry/conan-graph.json"
@@ -216,6 +235,7 @@ telemetry = {
     "dependency_resolution_ms": resolve_ms,
     "dependency_package_list_ms": package_list_ms,
     "dependency_download_ms": download_ms,
+    "dependency_download_status": download_status,
     "dependency_download_log_lines": sum("Downloading" in line for line in download_log.splitlines()),
     "dependency_local_install_generate_ms": install_ms,
     "dependency_warm_cache_reuse_ms": warm_install_ms,
