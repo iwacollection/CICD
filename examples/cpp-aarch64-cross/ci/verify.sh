@@ -53,7 +53,7 @@ test "$gcc_package" = "13.5.0-1cross1"
 test "$libc_package" = "2.43-3cross8"
 test "$linux_headers_package" = "7.2.12-1"
 test "$qemu_package" = "1:11.1.2+ds-3"
-test "$apt_package" = "3.3.3"
+test "$apt_package" = "3.3.6"
 test "$host_gcc_package" = "13.5.0-1"
 test "$host_gxx_package" = "13.5.0-1"
 
