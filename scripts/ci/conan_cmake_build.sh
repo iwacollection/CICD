@@ -13,21 +13,25 @@ if [[ ! -s "$LOCK_FILE" ]]; then
   exit 2
 fi
 
-# The hosted ubuntu-latest Runner does not guarantee Ninja is preinstalled.
-# Keep the declared Ninja generator reproducible instead of silently falling
-# back to a different build backend.
-if ! command -v ninja >/dev/null 2>&1; then
+# Hosted runners do not promise an identical preinstalled tool set.
+# Install only missing build tools; do not silently disable Ninja or ccache.
+missing_packages=()
+command -v ninja >/dev/null 2>&1 || missing_packages+=(ninja-build)
+command -v ccache >/dev/null 2>&1 || missing_packages+=(ccache)
+if (( ${#missing_packages[@]} > 0 )); then
   if ! command -v sudo >/dev/null 2>&1; then
-    echo "ERROR: Ninja is required but neither ninja nor sudo is available" >&2
+    echo "ERROR: required build tools are missing and sudo is unavailable: ${missing_packages[*]}" >&2
     exit 2
   fi
   sudo apt-get update -qq
-  sudo apt-get install -y -qq ninja-build
+  sudo apt-get install -y -qq "${missing_packages[@]}"
 fi
-if ! command -v ninja >/dev/null 2>&1; then
-  echo "ERROR: Ninja installation completed but the executable is still unavailable" >&2
-  exit 2
-fi
+for tool in ninja ccache; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "ERROR: required build tool remains unavailable after preflight installation: $tool" >&2
+    exit 2
+  fi
+done
 for input in conanfile.txt "$CONAN_PROFILE_HOST" "$CONAN_PROFILE_BUILD"; do
   if [[ ! -s "$input" ]]; then
     echo "ERROR: required Conan input is missing or empty: $input" >&2

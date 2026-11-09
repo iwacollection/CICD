@@ -74,6 +74,7 @@ class ConanDependencyContractTests(unittest.TestCase):
         self.assertIn("build/conan/conan_toolchain.cmake", script)
         self.assertIn("--build=missing", script)
         self.assertIn("ninja-build", script)
+        self.assertIn("missing_packages+=(ccache)", script)
         self.assertIn("dependency_install_fetch_build_ms", script)
 
 
