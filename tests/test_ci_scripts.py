@@ -747,7 +747,7 @@ class CiPlatformTests(unittest.TestCase):
     ) -> tuple[Path, Path]:
         artifact_dir = root / "dag-lib"
         artifact_dir.mkdir(parents=True, exist_ok=True)
-        bundle = artifact_dir / "lib.tar.gz"
+        bundle = artifact_dir / "lib-artifact.tar.gz"
         with tarfile.open(bundle, "w:gz") as archive:
             info = tarfile.TarInfo("dist/lib.txt")
             info.size = len(bundle_content)
@@ -761,6 +761,12 @@ class CiPlatformTests(unittest.TestCase):
             "project": "lib",
             "source_sha": "a" * 40,
             "source_repository": "iwacollection/CICD",
+            "source": {
+                "repository": "iwacollection/CICD",
+                "commit_sha": "a" * 40,
+                "workflow_run_id": "123",
+                "workflow_run_attempt": "1",
+            },
             "workflow_run_id": "123",
             "workflow_run_attempt": "1",
             "target": {
