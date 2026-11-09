@@ -100,10 +100,26 @@ class CiPlatformTests(unittest.TestCase):
         node = (ROOT / ".github" / "workflows" / "dag-node.yml").read_text(encoding="utf-8")
         key_lines = [line for line in node.splitlines() if "key: dag-ci-v4-" in line]
         self.assertEqual(len(key_lines), 2)
+        identity_fields = (
+            "inputs.cache_scope",
+            "inputs.project",
+            "inputs.soc",
+            "inputs.target_os",
+            "inputs.arch",
+            "inputs.toolchain_identity",
+        )
         for line in key_lines:
             self.assertNotIn("github.run_id", line)
             self.assertNotIn("github.run_attempt", line)
-            self.assertIn("inputs.project", line)
+            for field in identity_fields:
+                self.assertIn(field, line)
+
+        restore_block = node.split("restore-keys:", 1)[1].split(
+            "- name: Finish cache restore timer", 1
+        )[0]
+        for field in identity_fields:
+            self.assertIn(field, restore_block)
+        self.assertNotIn("steps.cache_key.outputs.fingerprint", restore_block)
 
         self.assertIn("uses: actions/cache/restore@", node)
         self.assertIn("uses: actions/cache/save@", node)
