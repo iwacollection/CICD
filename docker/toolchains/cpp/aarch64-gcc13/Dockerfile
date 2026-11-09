@@ -1,7 +1,6 @@
 FROM debian:forky-slim@sha256:27b88700aef98dd3dd0b32538f8e5d662a88237ec8fbf969254c8d3c93dfdab1
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG APT_SNAPSHOT=20261108T000000Z
 ARG APT_VERSION=3.3.3
 ARG HOST_GCC_PACKAGE_VERSION=13.5.0-1
 ARG CROSS_GCC_VERSION=13.5.0-1cross1
@@ -16,7 +15,7 @@ ARG CONAN_DEB_SHA256=94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61
 # candidate only. APT continues to verify signed Debian Release metadata.
 RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources \
     && printf '%s\n' \
-       "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${APT_SNAPSHOT} forky main" \
+       "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261108T000000Z forky main" \
        > /etc/apt/sources.list \
     && apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=0 install -y --no-install-recommends "apt=${APT_VERSION}" \
