@@ -5,12 +5,12 @@ This fixture builds a Linux AArch64 executable on an x86_64 Linux host. It delib
 ## Pinned target contract
 
 - Target triple: `aarch64-linux-gnu`
-- Build-host compiler: native x86_64 GCC/G++ 13.3.0 (`gcc-13`, `g++-13`)
-- Target compiler: AArch64 GCC/G++ 13.3.0 (`gcc-13-aarch64-linux-gnu`, `g++-13-aarch64-linux-gnu`)
+- Build-host compiler: native x86_64 GCC/G++ 13.4.0 (`gcc-13`, `g++-13`)
+- Target compiler: AArch64 GCC/G++ 13.4.0 (`gcc-13-aarch64-linux-gnu`, `g++-13-aarch64-linux-gnu`)
 - Target ABI: Linux AArch64, `armv8`, `libstdc++11`, C++17
-- Sysroot root: `/usr/aarch64-linux-gnu`
-- Ubuntu base image: pinned Debian 13 (trixie) image digest
-- APT snapshot: `20261108T000000Z`
+- Sysroot root: `/usr/aarch64-linux-gnu` (cross glibc 2.43; Linux UAPI headers 7.0.0-13.13cross1)
+- Base image: pinned official Ubuntu 26.04 LTS (Resolute) OCI index digest `sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c`
+- APT snapshot: `20261109T000000Z` (Ubuntu native snapshot configuration)
 - Conan CLI: 2.34.0, installed from the upstream Linux AMD64 release `.deb` after verifying SHA-256 `94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1`
 - Third-party dependency: `fmt/11.0.2`
 - Runtime validation: `qemu-aarch64 -L /usr/aarch64-linux-gnu`
@@ -27,13 +27,13 @@ The Candidate image is built on an amd64 runner and contains the cross compiler,
 
 ## Identity and cache contract
 
-The initial Candidate bootstrap produced and committed `conan.lock` and `ci/target-sdk.lock` from the actual build image. Normal verification runs `ci/verify.sh` without bootstrap and fail closed if either lock is missing or the observed identity differs. The SDK lock records:
+The Candidate bootstrap must produce `ci/target-sdk.lock` from the actual Ubuntu image. Commit that exact generated identity before switching CI from bootstrap to strict lock verification. The Conan dependency lock remains the separately reviewed fixed recipe revision. Normal verification runs `ci/verify.sh` without bootstrap and fail closed if either lock is missing or the observed identity differs. The SDK lock records:
 - target triple, cross compiler version/package revisions, and native build-host compiler version/package revisions
 - linker identity
 - sysroot path and tree SHA-256
 - SDK APT snapshot, package inventory digest and combined SDK digest
 
-A normal verification run refuses a missing or changed `target-sdk.lock`. The Conan `conan.lock`, both profiles, CMake toolchain file and target SDK lock are required cache-fingerprint inputs for a future DAG node. A different ABI, sysroot, SDK or dependency lock cannot be treated as the same target cache.
+A normal verification run refuses a missing or changed `target-sdk.lock`. The Conan `conan.lock`, both profiles, CMake toolchain file and generated target SDK lock are required cache-fingerprint inputs for a future DAG node. A different ABI, sysroot, SDK or dependency lock cannot be treated as the same target cache.
 
 ## Target cache isolation
 
@@ -52,6 +52,6 @@ This fixture proves target-aware fingerprint calculation and local cache-directo
 
 ## Verification
 
-The script consumes the committed Conan dependency lock and SDK identity lock, performs Conan dependency installation, CMake/Ninja configure and compile/link, ELF machine/dependency inspection, CTest using QEMU and a direct QEMU run. It never resolves a new dependency graph during normal CI verification. It creates a tar archive containing the AArch64 static library and executable and writes build evidence with timings and SHA-256.
+The script consumes the committed Conan dependency lock and SDK identity lock, performs Conan dependency installation, CMake/Ninja configure and compile/link, ELF machine/dependency and ARM attributes inspection, GLIBC/GLIBCXX/CXXABI symbol-version compatibility against the target sysroot, no-RPATH/RUNPATH validation, CTest using QEMU and a direct QEMU run. It never resolves a new dependency graph during normal CI verification. It creates a tar archive containing the AArch64 static library and executable and writes build evidence with timings and SHA-256.
 
 The QEMU test is a useful Linux userspace smoke test only. Kernel/driver compatibility, hardware performance, bootloader integration and board-specific behavior still require a real ARM64 device runner/HIL setup.
