@@ -31,6 +31,8 @@ run_timed() {
 test "$(conan --version)" = "Conan version ${CONAN_VERSION}"
 test "$(aarch64-linux-gnu-g++-13 -dumpmachine)" = "$TARGET_TRIPLE"
 test "$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)" = "$EXPECTED_COMPILER"
+test "$(gcc-13 -dumpfullversion -dumpversion)" = "$EXPECTED_COMPILER"
+test "$(g++-13 -dumpfullversion -dumpversion)" = "$EXPECTED_COMPILER"
 test -d "$SYSROOT"
 test -s "$SYSROOT/include/features.h"
 
@@ -39,6 +41,9 @@ gcc_package="$(dpkg-query -W -f='${Version}' gcc-13-aarch64-linux-gnu)"
 libc_package="$(dpkg-query -W -f='${Version}' libc6-dev-arm64-cross)"
 linker_version="$(aarch64-linux-gnu-ld --version | head -n 1)"
 qemu_version="$(qemu-aarch64 --version | head -n 1)"
+host_compiler_version="$(g++-13 -dumpfullversion -dumpversion)"
+host_gcc_package="$(dpkg-query -W -f='${Version}' gcc-13)"
+host_gxx_package="$(dpkg-query -W -f='${Version}' g++-13)"
 
 sysroot_file_hash="$(
   find "$SYSROOT" -type f -print0 \
@@ -58,29 +63,29 @@ sysroot_digest="$(
 )"
 package_inventory="$(
   dpkg-query -W -f='${binary:Package}=${Version}\n' \
-    g++-13-aarch64-linux-gnu gcc-13-aarch64-linux-gnu \
-    libc6-dev-arm64-cross binutils-aarch64-linux-gnu qemu-user \
+    gcc-13 g++-13 g++-13-aarch64-linux-gnu gcc-13-aarch64-linux-gnu \
+    libc6-dev-arm64-cross binutils-aarch64-linux-gnu qemu-user cmake ninja-build make ccache \
     | LC_ALL=C sort
 )"
 package_inventory_sha256="$(printf '%s\n' "$package_inventory" | sha256sum | awk '{print $1}')"
 sdk_digest="$(
   printf '%s\n' \
     "$TARGET_TRIPLE" "$EXPECTED_COMPILER" "$compiler_package" "$gcc_package" \
-    "$libc_package" "$linker_version" "$sysroot_digest" \
-    "$package_inventory_sha256" "$APT_SNAPSHOT" \
-    | sha256sum | awk '{print $1}'
+    "$libc_package" "$host_compiler_version" "$host_gcc_package" "$host_gxx_package" \
+    "$linker_version" "$sysroot_digest" "$package_inventory_sha256" "$APT_SNAPSHOT" \
 )"
 
 python3 - "$mode" "$TARGET_TRIPLE" "$EXPECTED_COMPILER" "$compiler_package" "$gcc_package" \
   "$libc_package" "$linker_version" "$SYSROOT" "$sysroot_digest" \
-  "$package_inventory_sha256" "$sdk_digest" "$APT_SNAPSHOT" "$qemu_version" <<'PY'
-import json
+  "$package_inventory_sha256" "$sdk_digest" "$APT_SNAPSHOT" "$qemu_version" \
+  "$host_compiler_version" "$host_gcc_package" "$host_gxx_package" <<'PY'
 import pathlib
 import sys
 
 (
-    mode, triple, compiler_version, gxx_package, gcc_package, libc_package,
-    linker, sysroot, sysroot_digest, package_digest, sdk_digest, snapshot, qemu,
+    mode, triple, compiler_version, gxx_package, gcc_package, libc_package, linker, sysroot,
+    sysroot_digest, package_digest, sdk_digest, snapshot, qemu,
+    host_compiler_version, host_gcc_package, host_gxx_package,
 ) = sys.argv[1:]
 identity = {
     "schema_version": 1,
@@ -99,6 +104,12 @@ identity = {
         "package_inventory_sha256": package_digest,
         "sha256": sdk_digest,
     },
+    "build_host_compiler": {
+        "family": "GCC",
+        "version": host_compiler_version,
+        "gcc_package": host_gcc_package,
+        "gxx_package": host_gxx_package,
+    },
     "emulator": qemu,
 }
 lock_path = pathlib.Path("ci/target-sdk.lock")
@@ -110,10 +121,11 @@ if not lock_path.is_file():
 else:
     expected = json.loads(lock_path.read_text(encoding="utf-8"))
     if expected != identity:
-        raise SystemExit("target SDK identity mismatch; sysroot/compiler/linker/SDK changed")
+        raise SystemExit("target SDK identity mismatch; sysroot, host/target compiler, linker or SDK changed")
 pathlib.Path(".ci-telemetry/target-sdk-identity.json").write_text(encoded, encoding="utf-8")
 print(f"target_triple={triple}")
 print(f"target_compiler=GCC {compiler_version}")
+print(f"build_host_compiler=GCC {host_compiler_version}")
 print(f"target_sysroot_sha256={sysroot_digest}")
 print(f"target_sdk_sha256={sdk_digest}")
 PY
