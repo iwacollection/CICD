@@ -2,9 +2,12 @@ FROM docker.io/library/ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b39
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Pin the Ubuntu 26.04 archive snapshot. This keeps GCC, kernel headers,
-# libc and all transitive OS packages on one immutable package universe.
-RUN echo 'APT::Snapshot "20261107T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+# Freeze the Ubuntu 26.04 archive. The minimal base lacks CA roots, so bootstrap
+# only ca-certificates with TLS peer verification disabled; APT still verifies
+# signed Release metadata and package hashes. All subsequent traffic uses TLS.
+RUN printf '%s\\n' 'APT::Snapshot "20261107T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+    && apt-get -o Acquire::https::Verify-Peer=false update \
+    && apt-get -o Acquire::https::Verify-Peer=false install -y --no-install-recommends ca-certificates \
     && apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
@@ -16,7 +19,6 @@ RUN echo 'APT::Snapshot "20261107T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
        git \
        python3 \
        python3-venv \
-       ca-certificates \
     && ln -sf /usr/bin/gcc-13 /usr/local/bin/gcc \
     && ln -sf /usr/bin/g++-13 /usr/local/bin/g++ \
     && python3 -m venv /opt/conan-venv \
