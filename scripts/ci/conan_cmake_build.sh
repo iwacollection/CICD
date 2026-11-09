@@ -77,27 +77,30 @@ list_start="$(now_ns)"
 list_end="$(now_ns)"
 package_list_ms="$(elapsed_ms "$list_start" "$list_end")"
 
-python3 - .ci-telemetry/conan-package-list.json <<'PY'
-import json
-import pathlib
-import sys
+download_mode="$(python3 "$CI_CONAN_PACKAGE_LIST_HELPER" \
+  --input .ci-telemetry/conan-package-list.json \
+  --remote-output .ci-telemetry/conan-remote-package-list.json \
+  --result-output .ci-telemetry/conan-download-result.json)"
+printf 'conan_package_list_origins=%s\n' "$(python3 -c 'import json; print(",".join(json.load(open(".ci-telemetry/conan-package-list.json", encoding="utf-8")).keys()))')"
 
-path = pathlib.Path(sys.argv[1])
-data = json.loads(path.read_text(encoding="utf-8"))
-if not isinstance(data, dict) or not data:
-    raise SystemExit("Conan package list is empty; refusing to report a successful download stage")
-print(f"conan_package_list_origins={','.join(data.keys())}")
-PY
-
-download_start="$(now_ns)"
-"$CONAN" download \
-  --list=.ci-telemetry/conan-package-list.json \
-  --remote=conancenter \
-  --format=json \
-  --out-file=.ci-telemetry/conan-download-result.json \
-  2>&1 | tee .ci-telemetry/conan-download.log
-download_end="$(now_ns)"
-download_ms="$(elapsed_ms "$download_start" "$download_end")"
+download_ms=0
+: > .ci-telemetry/conan-download.log
+if [[ "$download_mode" == "remote" ]]; then
+  download_start="$(now_ns)"
+  "$CONAN" download \
+    --list=.ci-telemetry/conan-remote-package-list.json \
+    --remote=conancenter \
+    --format=json \
+    --out-file=.ci-telemetry/conan-download-result.json \
+    2>&1 | tee .ci-telemetry/conan-download.log
+  download_end="$(now_ns)"
+  download_ms="$(elapsed_ms "$download_start" "$download_end")"
+elif [[ "$download_mode" == "local-cache" ]]; then
+  echo "Conan graph is already present in Local Cache; remote download skipped."
+else
+  echo "ERROR: unsupported Conan package-list mode: $download_mode" >&2
+  exit 2
+fi
 
 install_start="$(now_ns)"
 "$CONAN" install . \
@@ -216,6 +219,8 @@ telemetry = {
     "dependency_resolution_ms": resolve_ms,
     "dependency_package_list_ms": package_list_ms,
     "dependency_download_ms": download_ms,
+    "dependency_download_source": download_result.get("source", "conancenter"),
+    "dependency_remote_download_skipped": bool(download_result.get("remote_download_skipped", False)),
     "dependency_download_log_lines": sum("Downloading" in line for line in download_log.splitlines()),
     "dependency_local_install_generate_ms": install_ms,
     "dependency_warm_cache_reuse_ms": warm_install_ms,
@@ -233,7 +238,7 @@ telemetry = {
     "ccache_warm_pass_misses": warm_misses,
     "ccache_warm_hit_delta": warm_hit_delta,
     "warm_cache_validation": "passed",
-    "notes": "dependency_download_ms measures the conan download --list remote package transfer stage. dependency_local_install_generate_ms runs conan install --no-remote and may include --build=missing source builds when a matching binary is not available. Warm validation cleans CMake/Ninja outputs but preserves ccache and requires at least one additional compiler-cache hit."
+    "notes": "dependency_download_ms measures only actual conan download --list remote package transfer. It is zero and dependency_remote_download_skipped is true when the locked graph is already in Local Cache. dependency_local_install_generate_ms runs conan install --no-remote and may include --build=missing source builds when a matching binary is not available. Warm validation cleans CMake/Ninja outputs but preserves ccache and requires at least one additional compiler-cache hit."
 }
 path = root / ".ci-telemetry/conan-build-timings.json"
 path.write_text(json.dumps(telemetry, indent=2) + "\n", encoding="utf-8")
