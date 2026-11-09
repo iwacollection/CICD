@@ -21,6 +21,7 @@ The Candidate image is built on an amd64 runner and contains the cross compiler,
 - `profiles/build` is x86_64. Conan build-context tools and build requirements run here.
 - `profiles/host` is armv8. Conan host-context packages, fmt and application outputs are built for AArch64.
 - `tools.build:compiler_executables` selects the AArch64 GCC frontends.
+- Both Ninja and GNU Make are installed: the top-level fixture uses Ninja, while some Conan package recipes still configure their own source builds with the `Unix Makefiles` generator.
 - `ci/aarch64-toolchain.cmake` configures CMake's Linux/AArch64 target and restricts system include/library lookup to the target triplet root.
 
 ## Identity and cache contract
