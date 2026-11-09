@@ -132,6 +132,55 @@ if [[ ! -s "$LOCK_FILE" ]]; then
       --lockfile-out="$LOCK_FILE"
 fi
 
+# Cache namespaces are target identities, not merely architecture labels.
+# The SDK digest includes the actual cross sysroot file tree, package
+# inventory, compiler and linker identity from the locked target SDK.
+readonly TARGET_CXX_ABI="libstdc++11"
+readonly TARGET_CXX_STANDARD="17"
+readonly CACHE_NAMESPACE="${TARGET_TRIPLE}-gcc${EXPECTED_COMPILER}-${TARGET_CXX_ABI}-cxx${TARGET_CXX_STANDARD}-${sdk_digest}"
+export CCACHE_DIR="$PWD/.ci-cache/ccache/$CACHE_NAMESPACE"
+export CONAN_HOME="$PWD/.ci-cache/conan/$CACHE_NAMESPACE"
+mkdir -p "$CCACHE_DIR" "$CONAN_HOME"
+
+cache_fingerprint="$(python3 - <<'PY'
+import glob
+import hashlib
+import json
+from pathlib import Path
+
+root = Path.cwd().resolve()
+patterns = json.loads(Path("ci/cache-key-files.json").read_text(encoding="utf-8"))
+files = set()
+for pattern in patterns:
+    candidate = Path(pattern)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise SystemExit(f"unsafe cache-key pattern: {pattern}")
+    matches = [
+        Path(item).resolve()
+        for item in glob.glob(str(root / pattern), recursive=True)
+        if Path(item).is_file()
+    ]
+    if not matches:
+        raise SystemExit(f"required cache-key input matched no files: {pattern}")
+    for item in matches:
+        item.relative_to(root)
+        files.add(item)
+
+digest = hashlib.sha256()
+for item in sorted(files):
+    relative = item.relative_to(root).as_posix()
+    digest.update(relative.encode("utf-8"))
+    digest.update(b"\\0")
+    digest.update(item.read_bytes())
+    digest.update(b"\\0")
+fingerprint = digest.hexdigest()
+Path(".ci-telemetry/cache-fingerprint.txt").write_text(fingerprint + "\\n", encoding="utf-8")
+print(fingerprint)
+PY
+)"
+printf 'target_cache_namespace=%s\\n' "$CACHE_NAMESPACE"
+printf 'target_cache_fingerprint=%s\\n' "$cache_fingerprint"
+
 run_timed dependency_download_and_install \
   conan install . \
     --output-folder=build/conan \
@@ -145,7 +194,7 @@ run_timed configure \
   cmake -S . -B build/arm64 -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$PWD/build/conan/conan_toolchain.cmake" \
-    '-DCMAKE_CROSSCOMPILING_EMULATOR=qemu-aarch64;-L;/usr/aarch64-linux-gnu'
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \\\n    '-DCMAKE_CROSSCOMPILING_EMULATOR=qemu-aarch64;-L;/usr/aarch64-linux-gnu'
 
 run_timed compile_link \
   cmake --build build/arm64 --parallel "${CI_BUILD_JOBS:-2}"
@@ -181,8 +230,21 @@ timings = {}
 for line in pathlib.Path(".ci-telemetry/stages.tsv").read_text(encoding="utf-8").splitlines():
     stage, elapsed = line.split("\t", 1)
     timings[stage + "_ms"] = int(elapsed)
+cache_stats = pathlib.Path(".ci-telemetry/ccache-stats.txt")
+import subprocess
+try:
+    subprocess.run(["ccache", "--show-stats", "--verbose"], check=False, stdout=cache_stats.open("w"), stderr=subprocess.STDOUT)
+except OSError:
+    cache_stats.write_text("ccache statistics unavailable\\n", encoding="utf-8")
 evidence = {
     "schema_version": 1,
+    "cache": {
+        "fingerprint": pathlib.Path(".ci-telemetry/cache-fingerprint.txt").read_text(encoding="utf-8").strip(),
+        "namespace": "${CACHE_NAMESPACE}",
+        "conan_home": "${CONAN_HOME}",
+        "ccache_dir": "${CCACHE_DIR}",
+        "ccache_stats": cache_stats.read_text(encoding="utf-8").splitlines(),
+    },
     "target": identity,
     "artifact": {
         "path": str(artifact),
