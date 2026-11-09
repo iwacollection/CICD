@@ -4,7 +4,7 @@ This fixture builds a Linux AArch64 executable on an x86_64 Linux host. It separ
 
 ## Candidate status and target contract
 
-Debian Forky is Debian testing, not a released stable distribution. This image is an isolated build-toolchain candidate only and is not a production runtime base. It is being evaluated because the earlier Trixie image scan surfaced vulnerable versions of QEMU, libxml2, util-linux, Python and cross sysroot components. Newer package versions do not themselves prove security: the normal HIGH/CRITICAL Trivy gate, SBOM, provenance, ABI and runtime checks must all pass without suppressions or policy exceptions before promotion.
+Debian Forky is Debian testing, not a released stable distribution. The image pins Forky for the base OS, GCC and target sysroot; it imports only the statically linked `qemu-user` package from the same dated Sid archive snapshot because Debian's tracker still lists three open QEMU CVEs against Forky's current 11.1.2 package. The rest of the system retains Forky release priority. This image is an isolated build-toolchain candidate only and is not a production runtime base. It is being evaluated because the earlier Trixie image scan surfaced vulnerable versions of QEMU, libxml2, util-linux, Python and cross sysroot components. Newer package versions do not themselves prove security: the normal HIGH/CRITICAL Trivy gate, SBOM, provenance, ABI and runtime checks must all pass without suppressions or policy exceptions before promotion.
 
 - Target triple: `aarch64-linux-gnu`
 - Build-host compiler: native x86_64 GCC/G++ 13.5.0 (`gcc-13`, `g++-13`)
@@ -13,7 +13,7 @@ Debian Forky is Debian testing, not a released stable distribution. This image i
 - Sysroot root: `/usr/aarch64-linux-gnu` (cross glibc 2.43-3cross8; Linux UAPI headers 7.2.12-1)
 - Base image: pinned official Debian Forky slim (testing) amd64 manifest digest `sha256:27b88700aef98dd3dd0b32538f8e5d662a88237ec8fbf969254c8d3c93dfdab1`
 - APT snapshot: `20261108T000000Z`
-- APT: 3.3.6 (CVE-2026-109518 fixed); cross binutils: 2.47.50.20261021-1; QEMU user-mode: 1:11.1.2+ds-3
+- APT: 3.3.6 (CVE-2026-109518 fixed); cross binutils: 2.47.50.20261021-1; QEMU user-mode: 1:11.1.3+ds-1 (static binary from the same pinned Debian Sid snapshot)
 - Conan CLI: 2.34.0, installed from the upstream Linux AMD64 release `.deb` after verifying SHA-256 `94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1`
 - Third-party dependency: `fmt/11.0.2`
 - Runtime validation: `qemu-aarch64 -L /usr/aarch64-linux-gnu`
