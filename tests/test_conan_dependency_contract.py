@@ -78,8 +78,13 @@ class ConanDependencyContractTests(unittest.TestCase):
         )
 
     def test_conan_package_list_fails_closed_for_unknown_remote_origins(self) -> None:
-        with self.assertRaisesRegex(ValueError, "has no expected remote"):
+        with self.assertRaisesRegex(ValueError, "unexpected origins"):
             classify_package_list({"Local Cache": {}, "other-remote": {}}, "conancenter")
+        with self.assertRaisesRegex(ValueError, "unexpected origins"):
+            classify_package_list(
+                {"Local Cache": {}, "conancenter": {}, "other-remote": {}},
+                "conancenter",
+            )
 
     def test_conan_package_list_fails_closed_when_empty(self) -> None:
         with self.assertRaisesRegex(ValueError, "is empty"):
@@ -121,7 +126,8 @@ class ConanDependencyContractTests(unittest.TestCase):
         self.assertIn("dependency_download_ms", script)
         self.assertIn("dependency_download_status", script)
         self.assertIn("conan_package_list.py", script)
-        self.assertIn("local-cache-only", script)
+        package_list_helper = (ROOT / "scripts" / "ci" / "conan_package_list.py").read_text(encoding="utf-8")
+        self.assertIn("local-cache-only", package_list_helper)
         self.assertIn("--graph=.ci-telemetry/conan-graph.json", script)
         self.assertIn("dependency_local_install_generate_ms", script)
         self.assertIn('download_start="$(now_ns)"', script)
