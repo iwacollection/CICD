@@ -727,5 +727,12 @@ class CiPlatformTests(unittest.TestCase):
 
 
 
+    def test_discover_uploads_the_explainable_impact_plan(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn('export CI_IMPACT_PLAN_FILE="$GITHUB_WORKSPACE/ci-impact-plan.json"', workflow)
+        self.assertIn("ci-impact-plan.json", workflow)
+        self.assertIn("project_reasons_json", (ROOT / "scripts" / "ci" / "impact_analysis.py").read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
