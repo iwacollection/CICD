@@ -370,12 +370,12 @@ jobs:
       - name: Restore build cache
         id: cache_restore
         if: inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ inputs.cache_paths }}
-          key: dag-ci-v3-${{ inputs.cache_scope }}-${{ inputs.cache_scope == 'toolchain' && 'shared' || inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ inputs.project }}-${{ steps.cache_key.outputs.fingerprint }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: dag-ci-v4-${{ inputs.cache_scope }}-${{ inputs.cache_scope == 'toolchain' && 'shared' || inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ inputs.project }}-${{ steps.cache_key.outputs.fingerprint }}
           restore-keys: |
-            dag-ci-v3-${{ inputs.cache_scope }}-${{ inputs.cache_scope == 'toolchain' && 'shared' || inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-
+            dag-ci-v4-${{ inputs.cache_scope }}-${{ inputs.cache_scope == 'toolchain' && 'shared' || inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ inputs.project }}-
 
       - name: Finish cache restore timer
         if: always() && inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true'
@@ -436,6 +436,7 @@ jobs:
 
 
       - name: Build
+        id: build
         if: steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware != 'true'
         shell: bash
         env:
@@ -494,6 +495,7 @@ jobs:
           python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hardware_build --exit-code "$rc"
 
       - name: Test
+        id: test
         if: inputs.test_command != '' && steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware != 'true'
         shell: bash
         env:
@@ -683,6 +685,13 @@ jobs:
           rc=0
           [[ "$STAGE_OUTCOME" == "success" ]] || rc=1
           python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage artifact_upload --exit-code "$rc"
+
+      - name: Save build cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.cache_paths != '' && steps.trust.outputs.hardware_pr != 'true' && steps.cache_restore.outputs.cache-hit != 'true' && (steps.build.outcome == 'success' || steps.hardware_build.outcome == 'success') && (inputs.test_command == '' || steps.test.outcome == 'success' || steps.hardware_test.outcome == 'success') && steps.artifact_verify.outcome == 'success' && steps.artifact_upload.outcome == 'success'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ inputs.cache_paths }}
+          key: dag-ci-v4-${{ inputs.cache_scope }}-${{ inputs.cache_scope == 'toolchain' && 'shared' || inputs.project }}-${{ inputs.soc }}-${{ inputs.target_os }}-${{ inputs.arch }}-${{ inputs.toolchain_identity }}-${{ inputs.project }}-${{ steps.cache_key.outputs.fingerprint }}
 
 
       - name: DAG node summary
