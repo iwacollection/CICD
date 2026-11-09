@@ -13,7 +13,7 @@ Debian Forky is Debian testing, not a released stable distribution. The image pi
 - Sysroot root: `/usr/aarch64-linux-gnu` (cross glibc 2.43-3cross8; Linux UAPI headers 7.2.12-1)
 - Base image: pinned official Debian Forky slim (testing) amd64 manifest digest `sha256:27b88700aef98dd3dd0b32538f8e5d662a88237ec8fbf969254c8d3c93dfdab1`
 - APT snapshot: `20261108T000000Z`
-- APT: 3.3.6 (CVE-2026-109518 fixed); cross binutils: 2.47.50.20261021-1; QEMU user-mode: 1:11.1.3+ds-1 (static binary from the same pinned Debian Sid snapshot)
+- APT: 3.3.6 (CVE-2026-109518 fixed); cross binutils: 2.47.50.20261021-1; QEMU user-mode: 1:11.1.3+ds-1 (static binary from Debian Sid snapshot `20261108T000000Z`; QEMU package provenance is included in the SDK digest)
 - Conan CLI: 2.34.0, installed from the upstream Linux AMD64 release `.deb` after verifying SHA-256 `94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1`
 - Third-party dependency: `fmt/11.0.2`
 - Runtime validation: `qemu-aarch64 -L /usr/aarch64-linux-gnu`
