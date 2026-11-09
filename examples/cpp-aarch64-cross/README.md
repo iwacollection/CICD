@@ -27,7 +27,7 @@ The Candidate image is built on an amd64 runner and contains the cross compiler,
 
 ## Identity and cache contract
 
-`ci/verify.sh --bootstrap` generates `ci/target-sdk.lock` from the actual compiler, linker, cross package inventory and sysroot file tree. The file records:
+The initial Candidate bootstrap produced and committed `conan.lock` and `ci/target-sdk.lock` from the actual build image. Normal verification runs `ci/verify.sh` without bootstrap and fail closed if either lock is missing or the observed identity differs. The SDK lock records:
 - target triple, cross compiler version/package revisions, and native build-host compiler version/package revisions
 - linker identity
 - sysroot path and tree SHA-256
@@ -52,6 +52,6 @@ This fixture proves target-aware fingerprint calculation and local cache-directo
 
 ## Verification
 
-The script performs Conan graph lock generation/install, CMake/Ninja configure and compile/link, ELF machine/dependency inspection, CTest using QEMU and a direct QEMU run. It creates a tar archive containing the AArch64 static library and executable and writes build evidence with timings and SHA-256.
+The script consumes the committed Conan dependency lock and SDK identity lock, performs Conan dependency installation, CMake/Ninja configure and compile/link, ELF machine/dependency inspection, CTest using QEMU and a direct QEMU run. It never resolves a new dependency graph during normal CI verification. It creates a tar archive containing the AArch64 static library and executable and writes build evidence with timings and SHA-256.
 
 The QEMU test is a useful Linux userspace smoke test only. Kernel/driver compatibility, hardware performance, bootloader integration and board-specific behavior still require a real ARM64 device runner/HIL setup.
