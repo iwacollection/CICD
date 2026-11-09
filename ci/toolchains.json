@@ -170,7 +170,7 @@
       "id": "cpp-aarch64-gcc13-cross",
       "status": "candidate",
       "execution_mode": "container",
-      "description": "Candidate Ubuntu 26.04 AArch64 Linux cross-toolchain using GCC/G++ 13.4.0, a pinned APT snapshot, an identified cross sysroot and QEMU user-mode execution. Not Active until scan, SBOM, provenance and immutable digest gates pass.",
+      "description": "Candidate Debian 13 AArch64 Linux cross-toolchain using GCC/G++ 13.3.0, a pinned Debian archive snapshot, an identified cross sysroot and QEMU user-mode execution. Not Active until scan, SBOM, provenance and immutable digest gates pass.",
       "image": "ghcr.io/iwacollection/cicd-toolchain-cpp-aarch64-gcc13",
       "digest": "",
       "dockerfile": "docker/toolchains/cpp/aarch64-gcc13/Dockerfile",
@@ -178,16 +178,16 @@
       "platforms": [
         "linux/amd64"
       ],
-      "smoke_command": "test \"$(gcc-13 -dumpfullversion -dumpversion)\" = \"13.4.0\" && test \"$(g++-13 -dumpfullversion -dumpversion)\" = \"13.4.0\" && test \"$(aarch64-linux-gnu-g++-13 -dumpmachine)\" = \"aarch64-linux-gnu\" && test \"$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)\" = \"13.4.0\" && aarch64-linux-gnu-ld --version && qemu-aarch64 --version && ninja --version && make --version && conan --version | grep -Fx \"Conan version 2.34.0\"",
+      "smoke_command": "test \"$(gcc-13 -dumpfullversion -dumpversion)\" = \"13.3.0\" && test \"$(g++-13 -dumpfullversion -dumpversion)\" = \"13.3.0\" && test \"$(aarch64-linux-gnu-g++-13 -dumpmachine)\" = \"aarch64-linux-gnu\" && test \"$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)\" = \"13.3.0\" && aarch64-linux-gnu-ld --version && qemu-aarch64 --version && ninja --version && make --version && conan --version | grep -Fx \"Conan version 2.34.0\"",
       "language": "cpp",
       "compiler": "aarch64-linux-gnu-gcc-13/aarch64-linux-gnu-g++-13",
-      "compiler_version": "13.4.0",
+      "compiler_version": "13.3.0",
       "target_triple": "aarch64-linux-gnu",
       "sysroot_path": "/usr/aarch64-linux-gnu",
-      "sdk_version": "ubuntu-resolute-20261107-gcc13-cross",
-      "apt_snapshot": "20261107T000000Z",
+      "sdk_version": "debian-trixie-20261108-gcc13-cross",
+      "apt_snapshot": "20261108T000000Z",
       "verification_fixture": "examples/cpp-aarch64-cross",
-      "verification_command": "bash ./ci/verify.sh"
+      "verification_command": "bash ./ci/verify.sh --bootstrap"
     }
   ]
 }
