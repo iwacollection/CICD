@@ -10,7 +10,7 @@ ARG CROSS_LIBC_VERSION=2.43-2ubuntu2cross1
 RUN rm -f /etc/apt/apt.conf.d/50snapshot \
     && apt-get -o Acquire::Retries=3 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=3 install -y --no-install-recommends ca-certificates \
-    && printf 'APT::Snapshot "%s";\n' "$APT_SNAPSHOT" > /etc/apt/apt.conf.d/50snapshot \
+    && printf '%s\n' 'APT::Snapshot "20261107T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=60 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=60 install -y --no-install-recommends \
        gcc-13-aarch64-linux-gnu="$CROSS_GCC_VERSION" \
