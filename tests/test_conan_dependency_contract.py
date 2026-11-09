@@ -83,6 +83,9 @@ class ConanDependencyContractTests(unittest.TestCase):
         self.assertIn("ninja-build", script)
         self.assertIn("missing_packages+=(ccache)", script)
         self.assertIn("dependency_install_fetch_build_ms", script)
+        self.assertIn("warm_cache_validation", script)
+        self.assertIn('cmake --build build --target clean', script)
+        self.assertIn("ccache_warm_hit_delta", script)
 
 
 if __name__ == "__main__":
