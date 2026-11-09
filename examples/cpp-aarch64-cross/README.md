@@ -18,6 +18,15 @@ Debian Forky is Debian testing, not a released stable distribution. The image pi
 - Third-party dependency: `fmt/11.0.2`
 - Runtime validation: `qemu-aarch64 -L /usr/aarch64-linux-gnu`
 
+### Package source boundary
+
+| Component | Archive suite | Immutable snapshot | Pinned identity |
+|---|---|---|---|
+| Base OS, APT, native/cross GCC, cross glibc, Linux headers, Binutils, CMake/Ninja | Debian Forky | `20261108T000000Z` | Exact package versions are asserted during image build and again by `ci/verify.sh` |
+| QEMU user-mode emulator only | Debian Sid | `20261108T000000Z` | `qemu-user=1:11.1.3+ds-1`, static user-mode binaries |
+
+The Sid repository is added only to obtain the QEMU release that fixes the three issues still open against Forky's `1:11.1.2+ds-3`. The system upgrade and all compiler/sysroot package selection explicitly target Forky; QEMU is installed separately by exact version. No Sid upgrade is applied to the base system. The verifier records the QEMU package version and source snapshot in `target-sdk.lock` and incorporates both into the SDK cache digest. This mixed-suite edge is intentional, isolated and subject to the same Trivy gate as every other package.
+
 The Candidate image is built on an amd64 runner and contains the cross compiler, target headers/libraries and QEMU user-mode emulator. This is not an ARM runner and does not prove device-specific behavior. Forky remains unpromoted until the security gate passes.
 
 ## Host versus target
