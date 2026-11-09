@@ -109,6 +109,8 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
         script = (self.fixture / "ci" / "verify.sh").read_text(encoding="utf-8")
         self.assertIn('if [[ "$mode" != "--bootstrap" ]]', script)
         self.assertIn("required ci/target-sdk.lock is missing", script)
+        self.assertIn("import json", script)
+        self.assertIn('"build_host_compiler": {', script)
         self.assertIn("required Conan lockfile is missing", script)
         self.assertIn("aarch64-linux-gnu-readelf -h", script)
         self.assertIn("qemu-aarch64 -L", script)
