@@ -45,7 +45,7 @@ class CiPlatformTests(unittest.TestCase):
         matrix = build_matrix(self.projects, self.toolchains)
         self.assertEqual(
             [item["project"] for item in matrix["include"]],
-            ["hello-lib", "hello-cpp", "hello-service", "hello-release"],
+            ["hello-lib", "hello-cpp", "hello-service", "hello-release", "conan-format-lib", "conan-compression-lib", "conan-demo-app"],
         )
         targets = {item["project"]: item for item in matrix["include"]}
         target = targets["hello-cpp"]

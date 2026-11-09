@@ -280,8 +280,7 @@
           "build_parallelism": "auto",
           "cache_scope": "project"
         }
-      ],
-      "ci_smoke": true
+      ]
     },
     {
       "name": "conan-compression-lib",
@@ -325,8 +324,7 @@
           "build_parallelism": "auto",
           "cache_scope": "project"
         }
-      ],
-      "ci_smoke": true
+      ]
     },
     {
       "name": "conan-demo-app",
@@ -372,8 +370,7 @@
           "build_parallelism": "auto",
           "cache_scope": "project"
         }
-      ],
-      "ci_smoke": true
+      ]
     }
   ]
 }

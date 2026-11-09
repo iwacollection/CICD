@@ -50,7 +50,7 @@ class CiPerformanceTests(unittest.TestCase):
                 self.assertEqual(result["lane"], "full")
                 self.assertEqual(
                     result["projects"],
-                    ["hello-lib", "hello-cpp", "embedded-firmware-template", "hello-service", "hello-release"],
+                    ["hello-lib", "hello-cpp", "embedded-firmware-template", "hello-service", "hello-release", "conan-format-lib", "conan-compression-lib", "conan-demo-app"],
                 )
 
     def test_smoke_lane_uses_fast_test_commands(self) -> None:
