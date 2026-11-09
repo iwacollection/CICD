@@ -79,6 +79,7 @@ python3 - "$mode" "$TARGET_TRIPLE" "$EXPECTED_COMPILER" "$compiler_package" "$gc
   "$libc_package" "$linker_version" "$SYSROOT" "$sysroot_digest" \
   "$package_inventory_sha256" "$sdk_digest" "$APT_SNAPSHOT" "$qemu_version" \
   "$host_compiler_version" "$host_gcc_package" "$host_gxx_package" <<'PY'
+import json
 import pathlib
 import sys
 
