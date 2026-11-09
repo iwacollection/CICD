@@ -22,6 +22,16 @@ class CppDependencyContractTests(unittest.TestCase):
         self.assertIn("conan.lock", contract["fingerprint_files"])
         self.assertIn("profiles/gcc13-linux-x86_64", contract["fingerprint_files"])
 
+    def test_checked_in_conan_lockfile_is_real_and_valid(self) -> None:
+        lock_path = FIXTURE / "conan.lock"
+        self.assertTrue(lock_path.is_file())
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        self.assertEqual(lock.get("version"), "0.5")
+        self.assertTrue(any(
+            ref.startswith("fmt/11.0.2#") for ref in lock.get("requires", [])
+        ))
+        self.assertEqual(validate_contract(FIXTURE, require_lock=True), [])
+
     def test_missing_lockfile_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
