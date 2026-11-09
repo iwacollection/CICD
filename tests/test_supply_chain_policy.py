@@ -41,8 +41,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
             dockerfile.write_text(
                 "FROM ubuntu:26.04@sha256:" + "b" * 64 + "\n"
                 "ARG APT_SNAPSHOT=20261109T000000Z\n"
-                "RUN printf 'APT::Snapshot \\"%s\\";\\\\n' \\"$APT_SNAPSHOT\\" "
-                "> /etc/apt/apt.conf.d/50snapshot && apt-get update\n",
+                "RUN printf 'snapshot=%s' $APT_SNAPSHOT > /tmp/snapshot && apt-get update\n",
                 encoding="utf-8",
             )
             self.assertEqual(validate_dockerfile(dockerfile, self.policy), [])
@@ -53,8 +52,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
             dockerfile.write_text(
                 "FROM ubuntu:26.04@sha256:" + "b" * 64 + "\n"
                 "ARG APT_SNAPSHOT=latest\n"
-                "RUN printf 'APT::Snapshot \\"%s\\";' \\"$APT_SNAPSHOT\\" "
-                "> /etc/apt/apt.conf.d/50snapshot && apt-get update\n",
+                "RUN apt-get update\n",
                 encoding="utf-8",
             )
             self.assertTrue(any("Snapshot" in error for error in validate_dockerfile(dockerfile, self.policy)))
