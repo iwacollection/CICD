@@ -170,7 +170,7 @@
       "id": "cpp-aarch64-gcc13-cross",
       "status": "candidate",
       "execution_mode": "container",
-      "description": "Candidate Ubuntu 26.04 LTS (Resolute) AArch64 Linux cross-toolchain using GCC/G++ 13.4.0, pinned Ubuntu archive snapshot, glibc 2.43 and Linux 7.0 cross sysroot, with QEMU 10.2 user-mode execution. Not Active until fresh scan, SBOM, provenance and immutable digest gates pass.",
+      "description": "Candidate Debian Forky (testing) AArch64 Linux cross-toolchain using GCC/G++ 13.5.0, pinned Debian archive snapshot, cross glibc 2.43-3cross8, Linux UAPI headers 7.2.12-1 and QEMU 11.1.2. Forky is not a released stable distribution; this is build-only and remains unpromoted until security and verification gates pass.",
       "image": "ghcr.io/iwacollection/cicd-toolchain-cpp-aarch64-gcc13",
       "digest": "",
       "dockerfile": "docker/toolchains/cpp/aarch64-gcc13/Dockerfile",
@@ -178,14 +178,14 @@
       "platforms": [
         "linux/amd64"
       ],
-      "smoke_command": "test \"$(gcc-13 -dumpfullversion -dumpversion)\" = \"13.4.0\" && test \"$(g++-13 -dumpfullversion -dumpversion)\" = \"13.4.0\" && test \"$(aarch64-linux-gnu-g++-13 -dumpmachine)\" = \"aarch64-linux-gnu\" && test \"$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)\" = \"13.4.0\" && aarch64-linux-gnu-ld --version && qemu-aarch64 --version | grep -F \"10.2.1\" && ninja --version && make --version && conan --version | grep -Fx \"Conan version 2.34.0\"",
+      "smoke_command": "test \"$(gcc-13 -dumpfullversion -dumpversion)\" = \"13.5.0\" && test \"$(g++-13 -dumpfullversion -dumpversion)\" = \"13.5.0\" && test \"$(aarch64-linux-gnu-g++-13 -dumpmachine)\" = \"aarch64-linux-gnu\" && test \"$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)\" = \"13.5.0\" && aarch64-linux-gnu-ld --version && qemu-aarch64 --version | grep -F \"11.1.2\" && ninja --version && make --version && conan --version | grep -Fx \"Conan version 2.34.0\"",
       "language": "cpp",
       "compiler": "aarch64-linux-gnu-gcc-13/aarch64-linux-gnu-g++-13",
-      "compiler_version": "13.4.0",
+      "compiler_version": "13.5.0",
       "target_triple": "aarch64-linux-gnu",
       "sysroot_path": "/usr/aarch64-linux-gnu",
-      "sdk_version": "ubuntu-resolute-20261109-gcc13-cross",
-      "apt_snapshot": "20261109T000000Z",
+      "sdk_version": "debian-forky-20261108-gcc13-cross",
+      "apt_snapshot": "20261108T000000Z",
       "verification_fixture": "examples/cpp-aarch64-cross",
       "verification_command": "bash ./ci/verify.sh --bootstrap"
     }
