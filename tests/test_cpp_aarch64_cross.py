@@ -44,13 +44,16 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
         self.assertIn("aarch64-linux-gnu-g++-13", host)
         self.assertIn("arch=x86_64", build)
         self.assertNotIn("aarch64-linux-gnu", build)
+        self.assertIn("compiler.version=13", build)
+        self.assertIn("/usr/bin/gcc-13", build)
+        self.assertIn("/usr/bin/g++-13", build)
 
     def test_target_identity_files_are_required_build_inputs(self) -> None:
         names = ("conan.lock", "profiles/host", "profiles/build", "ci/aarch64-toolchain.cmake", "ci/target-sdk.lock")
         readme = (self.fixture / "README.md").read_text(encoding="utf-8")
         self.assertTrue(all(name in readme for name in names))
         script = (self.fixture / "ci" / "verify.sh").read_text(encoding="utf-8")
-        for value in ("target_triple", "sysroot_digest", "sdk_digest", "APT_SNAPSHOT"):
+        for value in ("target_triple", "sysroot_digest", "sdk_digest", "APT_SNAPSHOT", "host_compiler_version", "host_gcc_package", "host_gxx_package"):
             self.assertIn(value, script)
 
     def test_each_declared_cache_input_changes_the_real_manifest_fingerprint(self) -> None:
@@ -99,6 +102,7 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
         self.assertIn('TARGET_CXX_STANDARD="17"', script)
         self.assertIn("ci/cache-key-files.json", script)
         self.assertIn("CMAKE_CXX_COMPILER_LAUNCHER=ccache", script)
+        self.assertIn('"build_host_compiler": {', script)
 
 
     def test_verify_script_fails_closed_and_checks_elf_and_qemu(self) -> None:
