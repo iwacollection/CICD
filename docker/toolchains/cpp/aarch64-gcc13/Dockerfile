@@ -21,7 +21,7 @@ RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources \
     && apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=0 install -y --no-install-recommends "apt=${APT_VERSION}" \
     && apt-get -t forky -o Acquire::Retries=0 full-upgrade -y \
-    && apt-get -o Acquire::Retries=0 install -y --no-install-recommends \
+    && apt-get -t forky -o Acquire::Retries=0 install -y --no-install-recommends \
        "gcc-13=${HOST_GCC_PACKAGE_VERSION}" \
        "g++-13=${HOST_GCC_PACKAGE_VERSION}" \
        "gcc-13-aarch64-linux-gnu=${CROSS_GCC_VERSION}" \
