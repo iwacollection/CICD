@@ -12,7 +12,9 @@ ARG CONAN_VERSION=2.34.0
 ARG CONAN_DEB_SHA256=94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1
 
 # Forky is Debian testing (not stable). This isolated image is a build-toolchain
-# candidate only. APT continues to verify signed Debian Release metadata.
+# candidate only. Sid is indexed only for the exact static qemu-user version; all
+# system/compiler/sysroot upgrades and package selection remain targeted at Forky.
+# APT continues to verify signed Debian Release metadata.
 RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources \
     && printf '%s\n' \
        "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261108T000000Z forky main" \
