@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 readonly TARGET_TRIPLE="aarch64-linux-gnu"
 readonly SYSROOT="/usr/aarch64-linux-gnu"
 readonly APT_SNAPSHOT="20261108T000000Z"
+readonly QEMU_ORIGIN="debian-sid-snapshot-20261108T000000Z"
 readonly EXPECTED_COMPILER="13.5.0"
 readonly CONAN_VERSION="2.34.0"
 mkdir -p .ci-telemetry .ci-cache
@@ -86,13 +87,13 @@ sdk_digest="$(
   printf '%s\n' \
     "$TARGET_TRIPLE" "$EXPECTED_COMPILER" "$compiler_package" "$gcc_package" \
     "$libc_package" "$linux_headers_package" "$host_compiler_version" "$host_gcc_package" "$host_gxx_package" \
-    "$linker_version" "$sysroot_digest" "$package_inventory_sha256" "$APT_SNAPSHOT" \
+    "$linker_version" "$sysroot_digest" "$package_inventory_sha256" "$APT_SNAPSHOT" "$qemu_package" "$QEMU_ORIGIN" \
     | sha256sum | awk '{print $1}'
 )"
 
 python3 - "$mode" "$TARGET_TRIPLE" "$EXPECTED_COMPILER" "$compiler_package" "$gcc_package" \
   "$libc_package" "$linux_headers_package" "$linker_version" "$SYSROOT" "$sysroot_digest" \
-  "$package_inventory_sha256" "$sdk_digest" "$APT_SNAPSHOT" "$qemu_version" \
+  "$package_inventory_sha256" "$sdk_digest" "$APT_SNAPSHOT" "$qemu_version" "$qemu_package" "$QEMU_ORIGIN" \
   "$host_compiler_version" "$host_gcc_package" "$host_gxx_package" <<'PY'
 import json
 import pathlib
@@ -100,7 +101,7 @@ import sys
 
 (
     mode, triple, compiler_version, gxx_package, gcc_package, libc_package, linux_headers_package, linker, sysroot,
-    sysroot_digest, package_digest, sdk_digest, snapshot, qemu,
+    sysroot_digest, package_digest, sdk_digest, snapshot, qemu, qemu_package, qemu_origin,
     host_compiler_version, host_gcc_package, host_gxx_package,
 ) = sys.argv[1:]
 identity = {
@@ -127,7 +128,12 @@ identity = {
         "gcc_package": host_gcc_package,
         "gxx_package": host_gxx_package,
     },
-    "emulator": qemu,
+    "emulator": {
+        "binary_version": qemu,
+        "package": "qemu-user",
+        "package_version": qemu_package,
+        "origin": qemu_origin,
+    },
 }
 lock_path = pathlib.Path("ci/target-sdk.lock")
 encoded = json.dumps(identity, indent=2, sort_keys=True) + "\n"
