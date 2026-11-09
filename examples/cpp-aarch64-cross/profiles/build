@@ -8,4 +8,5 @@ compiler.cppstd=17
 build_type=Release
 
 [conf]
+tools.build:compiler_executables={"c":"/usr/bin/gcc-13","cpp":"/usr/bin/g++-13"}
 tools.cmake.cmaketoolchain:generator=Ninja
