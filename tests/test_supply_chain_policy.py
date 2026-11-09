@@ -35,6 +35,30 @@ class SupplyChainPolicyTests(unittest.TestCase):
         self.assertIn('APT::Snapshot "20260828T000000Z"', text)
 
 
+    def test_ubuntu_snapshot_arg_is_accepted_for_parameterized_apt_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            dockerfile = Path(directory) / "Dockerfile"
+            dockerfile.write_text(
+                "FROM ubuntu:26.04@sha256:" + "b" * 64 + "\n"
+                "ARG APT_SNAPSHOT=20261109T000000Z\n"
+                "RUN printf 'APT::Snapshot \\"%s\\";\\\\n' \\"$APT_SNAPSHOT\\" "
+                "> /etc/apt/apt.conf.d/50snapshot && apt-get update\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(validate_dockerfile(dockerfile, self.policy), [])
+
+    def test_invalid_ubuntu_snapshot_arg_does_not_satisfy_apt_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            dockerfile = Path(directory) / "Dockerfile"
+            dockerfile.write_text(
+                "FROM ubuntu:26.04@sha256:" + "b" * 64 + "\n"
+                "ARG APT_SNAPSHOT=latest\n"
+                "RUN printf 'APT::Snapshot \\"%s\\";' \\"$APT_SNAPSHOT\\" "
+                "> /etc/apt/apt.conf.d/50snapshot && apt-get update\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(any("Snapshot" in error for error in validate_dockerfile(dockerfile, self.policy)))
+
     def test_debian_snapshot_is_accepted_for_apt_based_toolchain(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             dockerfile = Path(directory) / "Dockerfile"
