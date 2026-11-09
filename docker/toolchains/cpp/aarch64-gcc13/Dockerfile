@@ -3,6 +3,7 @@ FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea264
 ARG DEBIAN_FRONTEND=noninteractive
 ARG APT_SNAPSHOT=20261107T000000Z
 ARG CROSS_GCC_VERSION=13.4.0-10ubuntu1cross1
+ARG HOST_GCC_PACKAGE_VERSION=13.4.0-10ubuntu1
 ARG CROSS_LIBC_VERSION=2.43-2ubuntu2cross1
 
 # Bootstrap TLS trust from ordinary archive metadata, then bind the cross
@@ -13,6 +14,8 @@ RUN rm -f /etc/apt/apt.conf.d/50snapshot \
     && printf '%s\n' 'APT::Snapshot "20261107T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=60 -o APT::Update::Error-Mode=any update \
     && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=60 install -y --no-install-recommends \
+       gcc-13="$HOST_GCC_PACKAGE_VERSION" \
+       g++-13="$HOST_GCC_PACKAGE_VERSION" \
        gcc-13-aarch64-linux-gnu="$CROSS_GCC_VERSION" \
        g++-13-aarch64-linux-gnu="$CROSS_GCC_VERSION" \
        libc6-dev-arm64-cross="$CROSS_LIBC_VERSION" \
@@ -20,6 +23,8 @@ RUN rm -f /etc/apt/apt.conf.d/50snapshot \
        qemu-user \
        cmake ninja-build make ccache file binutils \
        python3-venv \
+    && test "$(gcc-13 -dumpfullversion -dumpversion)" = "13.4.0" \
+    && test "$(g++-13 -dumpfullversion -dumpversion)" = "13.4.0" \
     && test "$(aarch64-linux-gnu-gcc-13 -dumpfullversion -dumpversion)" = "13.4.0" \
     && test "$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)" = "13.4.0" \
     && test "$(aarch64-linux-gnu-g++-13 -dumpmachine)" = "aarch64-linux-gnu" \
