@@ -5,12 +5,12 @@ This fixture builds a Linux AArch64 executable on an x86_64 Linux host. It delib
 ## Pinned target contract
 
 - Target triple: `aarch64-linux-gnu`
-- Build-host compiler: native x86_64 GCC/G++ 13.4.0 (`gcc-13`, `g++-13`)
-- Target compiler: AArch64 GCC/G++ 13.4.0 (`gcc-13-aarch64-linux-gnu`, `g++-13-aarch64-linux-gnu`)
+- Build-host compiler: native x86_64 GCC/G++ 13.3.0 (`gcc-13`, `g++-13`)
+- Target compiler: AArch64 GCC/G++ 13.3.0 (`gcc-13-aarch64-linux-gnu`, `g++-13-aarch64-linux-gnu`)
 - Target ABI: Linux AArch64, `armv8`, `libstdc++11`, C++17
 - Sysroot root: `/usr/aarch64-linux-gnu`
-- Ubuntu base image: pinned Ubuntu 26.04 image digest
-- APT snapshot: `20261107T000000Z`
+- Ubuntu base image: pinned Debian 13 (trixie) image digest
+- APT snapshot: `20261108T000000Z`
 - Conan CLI: 2.34.0, installed from the upstream Linux AMD64 release `.deb` after verifying SHA-256 `94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1`
 - Third-party dependency: `fmt/11.0.2`
 - Runtime validation: `qemu-aarch64 -L /usr/aarch64-linux-gnu`
