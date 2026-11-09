@@ -436,6 +436,7 @@ jobs:
 
 
       - name: Build
+        id: build
         if: steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware != 'true'
         shell: bash
         env:
@@ -494,6 +495,7 @@ jobs:
           python3 source/scripts/ci/ci_metrics.py finish --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage hardware_build --exit-code "$rc"
 
       - name: Test
+        id: test
         if: inputs.test_command != '' && steps.trust.outputs.hardware_pr != 'true' && steps.hardware.outputs.is_hardware != 'true'
         shell: bash
         env:
