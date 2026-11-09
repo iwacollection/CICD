@@ -175,6 +175,8 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError(f"source directory must contain CMakeLists.txt: {source_dir}")
     source_input = _inside(source_dir, Path(args.source_file))
     header_input = _inside(source_dir, Path(args.header_file))
+    if source_input == header_input:
+        raise ValueError("--source-file and --header-file must be different files")
     for tool in ("cmake", "ninja", "ccache", "c++"):
         if shutil.which(tool) is None:
             raise RuntimeError(f"required benchmark tool is missing: {tool}")
@@ -233,6 +235,16 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         phases.append({"name": "configure_changed_flags", **changed_configure})
         phases.append(_build_phase("compiler_flags_changed", project, changed_flags, cache_dir, base_env))
 
+        # Compare ccache-on and ccache-off from the exact same final source state.
+        cold_control_cache = root / "ccache-cold-control"
+        cold_control_cache.mkdir()
+        cold_control_build = root / "build-cold-cache-control"
+        cold_control_configure = _configure(project, cold_control_build, base_env, extra_args=args.cmake_arg)
+        phases.append({"name": "configure_cold_cache_control", **cold_control_configure})
+        cold_control_env = base_env.copy()
+        cold_control_env["CCACHE_DIR"] = str(cold_control_cache)
+        phases.append(_build_phase("cold_cache_control", project, cold_control_build, cold_control_cache, cold_control_env))
+
         no_cache_build = root / "build-cache-disabled"
         no_cache_env = base_env.copy()
         no_cache_env["CCACHE_DISABLE"] = "1"
@@ -274,7 +286,8 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                 "source_incremental": "One selected source file receives a comment-only content change.",
                 "header_incremental": "One selected shared header receives a comment-only content change.",
                 "compiler_flags_changed": "A separate build directory uses a changed C++ compiler flag; cache reuse is expected to fall.",
-                "cache_disabled_control": "Same source state with ccache disabled; compare timings, not just hit rate.",
+                "cold_cache_control": "Same final source state as the cache-disabled control, with a fresh empty ccache directory.",
+                "cache_disabled_control": "Same final source state as the cold-cache control, with ccache disabled; compare timings, not just hit rate.",
                 "secondary_project_shared_cache": "Optional second project uses the same isolated cache; observed hits, not assumptions, determine reuse.",
                 "limits": "This is a single-run experiment. Repeat on the same runner/toolchain and use representative production sources before claiming performance gains.",
             },
