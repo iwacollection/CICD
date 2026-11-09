@@ -1,50 +1,59 @@
-FROM ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
+FROM debian:forky-slim@sha256:27b88700aef98dd3dd0b32538f8e5d662a88237ec8fbf969254c8d3c93dfdab1
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG APT_SNAPSHOT=20261109T000000Z
-ARG CROSS_GCC_VERSION=13.4.0-10ubuntu1cross1
-ARG HOST_GCC_PACKAGE_VERSION=13.4.0-10ubuntu1
-ARG CROSS_LIBC_VERSION=2.43-2ubuntu2cross1
-ARG CROSS_LINUX_HEADERS_VERSION=7.0.0-13.13cross1
-ARG BINUTILS_VERSION=2.46-3ubuntu2
-ARG QEMU_VERSION=1:10.2.1+ds-1ubuntu3.3
-ARG APT_VERSION=3.2.1ubuntu0.1
+ARG APT_SNAPSHOT=20261108T000000Z
+ARG APT_VERSION=3.3.3
+ARG HOST_GCC_PACKAGE_VERSION=13.5.0-1
+ARG CROSS_GCC_VERSION=13.5.0-1cross1
+ARG CROSS_LIBC_VERSION=2.43-3cross8
+ARG CROSS_LINUX_HEADERS_VERSION=7.2.12-1
+ARG BINUTILS_VERSION=2.47.50.20261021-1
+ARG QEMU_VERSION=1:11.1.2+ds-3
 ARG CONAN_VERSION=2.34.0
 ARG CONAN_DEB_SHA256=94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1
 
-# Ubuntu's native snapshot integration pins the complete archive state,
-# including updates and security pockets. APT retries remain disabled as
-# defense in depth for CVE-2026-109518 while installing the fixed APT build.
-RUN printf 'APT::Snapshot "%s";\n' "$APT_SNAPSHOT" > /etc/apt/apt.conf.d/50snapshot \
+# Forky is Debian testing (not stable). This isolated image is a build-toolchain
+# candidate only. APT continues to verify signed Debian Release metadata.
+RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources \
+    && printf '%s\n' \
+       "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${APT_SNAPSHOT} forky main" \
+       > /etc/apt/sources.list \
     && apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any update \
-    && apt-get -o Acquire::Retries=0 install -y --no-install-recommends "apt=$APT_VERSION" \
+    && apt-get -o Acquire::Retries=0 install -y --no-install-recommends "apt=${APT_VERSION}" \
     && apt-get -o Acquire::Retries=0 full-upgrade -y \
     && apt-get -o Acquire::Retries=0 install -y --no-install-recommends \
-       gcc-13="$HOST_GCC_PACKAGE_VERSION" \
-       g++-13="$HOST_GCC_PACKAGE_VERSION" \
-       gcc-13-aarch64-linux-gnu="$CROSS_GCC_VERSION" \
-       g++-13-aarch64-linux-gnu="$CROSS_GCC_VERSION" \
-       libc6-dev-arm64-cross="$CROSS_LIBC_VERSION" \
-       linux-libc-dev-arm64-cross="$CROSS_LINUX_HEADERS_VERSION" \
-       libgcc-13-dev-arm64-cross="$CROSS_GCC_VERSION" \
-       libstdc++-13-dev-arm64-cross="$CROSS_GCC_VERSION" \
-       binutils-aarch64-linux-gnu="$BINUTILS_VERSION" \
-       qemu-user="$QEMU_VERSION" \
-       cmake ninja-build make ccache file binutils curl python3 ca-certificates \
+       "gcc-13=${HOST_GCC_PACKAGE_VERSION}" \
+       "g++-13=${HOST_GCC_PACKAGE_VERSION}" \
+       "gcc-13-aarch64-linux-gnu=${CROSS_GCC_VERSION}" \
+       "g++-13-aarch64-linux-gnu=${CROSS_GCC_VERSION}" \
+       "libc6-dev-arm64-cross=${CROSS_LIBC_VERSION}" \
+       "linux-libc-dev-arm64-cross=${CROSS_LINUX_HEADERS_VERSION}" \
+       "libgcc-13-dev-arm64-cross=${CROSS_GCC_VERSION}" \
+       "libstdc++-13-dev-arm64-cross=${CROSS_GCC_VERSION}" \
+       "binutils-aarch64-linux-gnu=${BINUTILS_VERSION}" \
+       "qemu-user=${QEMU_VERSION}" \
+       cmake ninja-build make ccache file python3 ca-certificates \
     && test "$(apt-get --version | head -n 1 | awk '{print $2}')" = "$APT_VERSION" \
-    && test "$(gcc-13 -dumpfullversion -dumpversion)" = "13.4.0" \
-    && test "$(g++-13 -dumpfullversion -dumpversion)" = "13.4.0" \
-    && test "$(aarch64-linux-gnu-gcc-13 -dumpfullversion -dumpversion)" = "13.4.0" \
-    && test "$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)" = "13.4.0" \
+    && test "$(dpkg-query -W -f='${Version}' gcc-13)" = "$HOST_GCC_PACKAGE_VERSION" \
+    && test "$(dpkg-query -W -f='${Version}' g++-13)" = "$HOST_GCC_PACKAGE_VERSION" \
+    && test "$(dpkg-query -W -f='${Version}' gcc-13-aarch64-linux-gnu)" = "$CROSS_GCC_VERSION" \
+    && test "$(dpkg-query -W -f='${Version}' g++-13-aarch64-linux-gnu)" = "$CROSS_GCC_VERSION" \
+    && test "$(dpkg-query -W -f='${Version}' libc6-dev-arm64-cross)" = "$CROSS_LIBC_VERSION" \
+    && test "$(dpkg-query -W -f='${Version}' linux-libc-dev-arm64-cross)" = "$CROSS_LINUX_HEADERS_VERSION" \
+    && test "$(dpkg-query -W -f='${Version}' binutils-aarch64-linux-gnu)" = "$BINUTILS_VERSION" \
+    && test "$(dpkg-query -W -f='${Version}' qemu-user)" = "$QEMU_VERSION" \
+    && test "$(gcc-13 -dumpfullversion -dumpversion)" = "13.5.0" \
+    && test "$(g++-13 -dumpfullversion -dumpversion)" = "13.5.0" \
+    && test "$(aarch64-linux-gnu-gcc-13 -dumpfullversion -dumpversion)" = "13.5.0" \
+    && test "$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)" = "13.5.0" \
     && test "$(aarch64-linux-gnu-g++-13 -dumpmachine)" = "aarch64-linux-gnu" \
+    && qemu-aarch64 --version | grep -F "11.1.2" \
     && test -s /usr/aarch64-linux-gnu/include/features.h \
-    && curl --fail --location --retry 3 \
-       "https://github.com/conan-io/conan/releases/download/${CONAN_VERSION}/conan-${CONAN_VERSION}-amd64.deb" \
-       --output /tmp/conan.deb \
-    && echo "${CONAN_DEB_SHA256}  /tmp/conan.deb" | sha256sum --check --status \
+    && python3 -c 'import hashlib,urllib.request; p="/tmp/conan.deb"; urllib.request.urlretrieve("https://github.com/conan-io/conan/releases/download/2.34.0/conan-2.34.0-amd64.deb",p); a=hashlib.sha256(open(p,"rb").read()).hexdigest(); e="94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1"; print("conan_deb_sha256="+a); assert a==e, "Conan DEB SHA-256 mismatch"' \
     && apt-get -o Acquire::Retries=0 install -y --no-install-recommends /tmp/conan.deb \
     && test "$(conan --version)" = "Conan version ${CONAN_VERSION}" \
     && rm -f /tmp/conan.deb \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/opt/conan-venv/bin:${PATH}" \
@@ -54,12 +63,12 @@ ENV PATH="/opt/conan-venv/bin:${PATH}" \
 WORKDIR /workspace
 
 LABEL org.opencontainers.image.title="CICD AArch64 GCC 13 cross toolchain" \
-      org.opencontainers.image.description="Candidate Ubuntu 26.04 LTS AArch64 cross compiler with a pinned sysroot identity and QEMU user-mode execution" \
-      org.opencontainers.image.base.digest="sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c" \
-      org.opencontainers.image.base.name="ubuntu:26.04" \
-      org.opencontainers.image.ubuntu.snapshot="20261109T000000Z" \
+      org.opencontainers.image.description="Candidate Debian Forky AArch64 cross compiler with pinned sysroot identity and QEMU user-mode execution" \
+      org.opencontainers.image.base.digest="sha256:27b88700aef98dd3dd0b32538f8e5d662a88237ec8fbf969254c8d3c93dfdab1" \
+      org.opencontainers.image.base.name="debian:forky-slim" \
+      org.opencontainers.image.debian.snapshot="20261108T000000Z" \
       org.opencontainers.image.target.triple="aarch64-linux-gnu" \
-      org.opencontainers.image.target.compiler.version="13.4.0" \
+      org.opencontainers.image.target.compiler.version="13.5.0" \
       org.opencontainers.image.target.sysroot="/usr/aarch64-linux-gnu" \
       org.opencontainers.image.conan.version="2.34.0" \
       org.opencontainers.image.conan.deb.sha256="94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1"
