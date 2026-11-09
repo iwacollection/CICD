@@ -85,12 +85,12 @@
     {
       "id": "cpp-aarch64-gcc13-cross",
       "language": "cpp",
-      "language_version": "13.4.0",
+      "language_version": "13.3.0",
       "build_tool": "gcc-cross",
-      "build_tool_version": "13.4.0-10ubuntu1cross1",
+      "build_tool_version": "13.3.0-16cross1",
       "toolchain_id": "cpp-aarch64-gcc13-cross",
       "status": "candidate",
-      "notes": "Linux AArch64 cross compiler, target triple aarch64-linux-gnu, GCC/G++ 13.4.0, Ubuntu Resolute cross sysroot, pinned APT snapshot, Conan 2.34.0 host/build profiles and QEMU user-mode execution. No target-device/HIL claim."
+      "notes": "Linux AArch64 cross compiler, target triple aarch64-linux-gnu, GCC/G++ 13.3.0, Ubuntu Resolute cross sysroot, pinned APT snapshot, Conan 2.34.0 host/build profiles and QEMU user-mode execution. No target-device/HIL claim."
     }
   ]
 }
