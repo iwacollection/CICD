@@ -10,8 +10,8 @@ fi
 cd "$(dirname "$0")/.."
 readonly TARGET_TRIPLE="aarch64-linux-gnu"
 readonly SYSROOT="/usr/aarch64-linux-gnu"
-readonly APT_SNAPSHOT="20261108T000000Z"
-readonly EXPECTED_COMPILER="13.3.0"
+readonly APT_SNAPSHOT="20261109T000000Z"
+readonly EXPECTED_COMPILER="13.4.0"
 readonly CONAN_VERSION="2.34.0"
 mkdir -p .ci-telemetry .ci-cache
 : > .ci-telemetry/stages.tsv
@@ -41,6 +41,7 @@ gcc_package="$(dpkg-query -W -f='${Version}' gcc-13-aarch64-linux-gnu)"
 libc_package="$(dpkg-query -W -f='${Version}' libc6-dev-arm64-cross)"
 linker_version="$(aarch64-linux-gnu-ld --version | head -n 1)"
 qemu_version="$(qemu-aarch64 --version | head -n 1)"
+test "$qemu_version" = "qemu-aarch64 version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.3)"
 host_compiler_version="$(g++-13 -dumpfullversion -dumpversion)"
 host_gcc_package="$(dpkg-query -W -f='${Version}' gcc-13)"
 host_gxx_package="$(dpkg-query -W -f='${Version}' g++-13)"
@@ -64,7 +65,9 @@ sysroot_digest="$(
 package_inventory="$(
   dpkg-query -W -f='${binary:Package}=${Version}\n' \
     apt gcc-13 g++-13 g++-13-aarch64-linux-gnu gcc-13-aarch64-linux-gnu \
-    libc6-dev-arm64-cross binutils-aarch64-linux-gnu qemu-user cmake ninja-build make ccache \
+    libc6-arm64-cross libc6-dev-arm64-cross linux-libc-dev-arm64-cross \
+    libgcc-13-dev-arm64-cross libstdc++-13-dev-arm64-cross libgcc-s1-arm64-cross \
+    libstdc++6-arm64-cross binutils-aarch64-linux-gnu qemu-user cmake ninja-build make ccache \
     | LC_ALL=C sort
 )"
 package_inventory_sha256="$(printf '%s\n' "$package_inventory" | sha256sum | awk '{print $1}')"
@@ -101,7 +104,7 @@ identity = {
     "linker": linker,
     "sysroot": {"path": sysroot, "sha256": sysroot_digest},
     "sdk": {
-        "version": "debian-trixie-20261108-gcc13-cross",
+        "version": "ubuntu-resolute-20261109-gcc13-cross",
         "apt_snapshot": snapshot,
         "package_inventory_sha256": package_digest,
         "sha256": sdk_digest,
@@ -210,6 +213,7 @@ run_timed configure \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$PWD/build/conan/conan_toolchain.cmake" \
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    -DCMAKE_SKIP_RPATH=ON \
     '-DCMAKE_CROSSCOMPILING_EMULATOR=qemu-aarch64;-L;/usr/aarch64-linux-gnu'
 
 run_timed compile_link \
@@ -218,10 +222,67 @@ run_timed compile_link \
 file build/arm64/aarch64-cross-demo | tee .ci-telemetry/elf-file.txt
 aarch64-linux-gnu-readelf -h build/arm64/aarch64-cross-demo > .ci-telemetry/elf-header.txt
 aarch64-linux-gnu-readelf -d build/arm64/aarch64-cross-demo > .ci-telemetry/elf-dynamic.txt
+aarch64-linux-gnu-readelf --version-info build/arm64/aarch64-cross-demo > .ci-telemetry/elf-version-info.txt
+aarch64-linux-gnu-readelf -A build/arm64/aarch64-cross-demo > .ci-telemetry/elf-attributes.txt
 grep -F "AArch64" .ci-telemetry/elf-header.txt
 grep -F "Machine:" .ci-telemetry/elf-header.txt
 grep -F "NEEDED" .ci-telemetry/elf-dynamic.txt
 grep -F "ARM aarch64" .ci-telemetry/elf-file.txt
+if grep -Eq '\\((RPATH|RUNPATH)\\)' .ci-telemetry/elf-dynamic.txt; then
+  echo "ERROR: target ELF embeds a build-host RPATH/RUNPATH; refusing non-portable artifact" >&2
+  exit 1
+fi
+grep -E '(GLIBC|GLIBCXX|CXXABI)_' .ci-telemetry/elf-version-info.txt
+
+
+sysroot_libc="$(find "$SYSROOT" -name libc.so.6 -print -quit)"
+sysroot_libstdcxx="$(find "$SYSROOT" -name libstdc++.so.6 -print -quit)"
+test -n "$sysroot_libc" && test -e "$sysroot_libc"
+test -n "$sysroot_libstdcxx" && test -e "$sysroot_libstdcxx"
+aarch64-linux-gnu-readelf --version-info "$sysroot_libc" > .ci-telemetry/sysroot-libc-version-info.txt
+aarch64-linux-gnu-readelf --version-info "$sysroot_libstdcxx" > .ci-telemetry/sysroot-libstdcxx-version-info.txt
+
+python3 - <<'PY'
+import json
+import pathlib
+import re
+
+pattern = re.compile(r"\b(?:GLIBCXX|GLIBC|CXXABI)_[0-9][A-Za-z0-9._]*\b")
+
+def section_names(path: str, marker: str) -> set[str]:
+    content = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+    if marker not in content:
+        return set()
+    content = content.split(marker, 1)[1]
+    if marker == "Version needs section" and "Version definition section" in content:
+        content = content.split("Version definition section", 1)[0]
+    return set(pattern.findall(content))
+
+required = section_names(".ci-telemetry/elf-version-info.txt", "Version needs section")
+available = (
+    section_names(".ci-telemetry/sysroot-libc-version-info.txt", "Version definition section")
+    | section_names(".ci-telemetry/sysroot-libstdcxx-version-info.txt", "Version definition section")
+)
+missing = sorted(required - available)
+if missing:
+    raise SystemExit("target ABI requires version symbols missing from its locked sysroot: " + ", ".join(missing))
+if not any(name.startswith("GLIBC_") for name in required):
+    raise SystemExit("ELF version requirements do not contain a GLIBC requirement; ABI evidence is incomplete")
+
+result = {
+    "required_version_symbols": sorted(required),
+    "available_version_symbols": sorted(available),
+    "missing_version_symbols": missing,
+    "sysroot_libc": str(pathlib.Path(".ci-telemetry/sysroot-libc-version-info.txt")),
+    "sysroot_libstdcxx": str(pathlib.Path(".ci-telemetry/sysroot-libstdcxx-version-info.txt")),
+    "rpath_policy": "no RPATH/RUNPATH entries",
+    "compatibility": "passed",
+}
+pathlib.Path(".ci-telemetry/abi-compatibility.json").write_text(
+    json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+)
+print(json.dumps(result, indent=2))
+PY
 
 run_timed test_qemu_ctest \
   ctest --test-dir build/arm64 --output-on-failure
@@ -272,7 +333,10 @@ evidence = {
         "file": pathlib.Path(".ci-telemetry/elf-file.txt").read_text(encoding="utf-8").strip(),
         "header": pathlib.Path(".ci-telemetry/elf-header.txt").read_text(encoding="utf-8").splitlines(),
         "dynamic": pathlib.Path(".ci-telemetry/elf-dynamic.txt").read_text(encoding="utf-8").splitlines(),
+        "version_info": pathlib.Path(".ci-telemetry/elf-version-info.txt").read_text(encoding="utf-8").splitlines(),
+        "architecture_attributes": pathlib.Path(".ci-telemetry/elf-attributes.txt").read_text(encoding="utf-8").splitlines(),
     },
+    "abi_compatibility": json.loads(pathlib.Path(".ci-telemetry/abi-compatibility.json").read_text(encoding="utf-8")),
     "timings": timings,
     "runtime_test": "passed under qemu-aarch64 user-mode emulation; no HIL claim",
 }
