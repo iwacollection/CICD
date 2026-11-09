@@ -69,6 +69,10 @@ class ConanDependencyContractTests(unittest.TestCase):
             select_download_source({"Local Cache": {"fmt": []}, "conancenter": {"zlib": []}}),
             "remote",
         )
+        self.assertEqual(
+            select_download_source({"Local Cache": {"fmt": []}, "conancenter": {}}),
+            "local-cache",
+        )
         with self.assertRaisesRegex(ValueError, "empty"):
             select_download_source({})
         with self.assertRaisesRegex(ValueError, "unrecognized"):
