@@ -5,7 +5,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Freeze the Ubuntu 26.04 archive. The minimal base lacks CA roots, so bootstrap
 # only ca-certificates with TLS peer verification disabled; APT still verifies
 # signed Release metadata and package hashes. All subsequent traffic uses TLS.
-RUN printf '%s\\n' 'APT::Snapshot "20261107T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+RUN echo 'APT::Snapshot "20261107T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
     && apt-get -o Acquire::https::Verify-Peer=false update \
     && apt-get -o Acquire::https::Verify-Peer=false install -y --no-install-recommends ca-certificates \
     && apt-get update \
