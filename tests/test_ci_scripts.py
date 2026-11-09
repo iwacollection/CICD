@@ -83,6 +83,19 @@ class CiPlatformTests(unittest.TestCase):
         errors = validate_catalog(data, self.toolchains)
         self.assertTrue(any("cache_key_files is required" in error for error in errors))
 
+    def test_project_scoped_cache_paths_are_inside_project_checkout(self) -> None:
+        for project in self.projects["projects"]:
+            project_path = project["path"].rstrip("/") + "/"
+            for target in project.get("targets", []):
+                if target.get("cache_scope", "project") != "project":
+                    continue
+                for cache_path in target.get("cache_paths", []):
+                    with self.subTest(project=project["name"], cache_path=cache_path):
+                        self.assertTrue(
+                            cache_path.startswith(project_path),
+                            f"{project['name']} project cache must live under {project['path']}: {cache_path}",
+                        )
+
     def test_promotion_source_requires_successful_main_push_build(self) -> None:
         run_id = "12345"
         repository = "iwacollection/CICD"
