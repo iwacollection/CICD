@@ -810,6 +810,7 @@ class CiPlatformTests(unittest.TestCase):
         destination: Path,
         *,
         expected_source_sha: str = "a" * 40,
+        expected_repository: str = "iwacollection/CICD",
         target_os: str = "linux",
     ) -> dict:
         return resolve_upstream_artifacts(
@@ -820,7 +821,7 @@ class CiPlatformTests(unittest.TestCase):
             arch="x86_64",
             destination=destination,
             expected_source_sha=expected_source_sha,
-            expected_repository="iwacollection/CICD",
+            expected_repository=expected_repository,
         )
 
     def test_upstream_resolver_fails_closed_when_artifact_is_missing(self) -> None:
@@ -839,6 +840,27 @@ class CiPlatformTests(unittest.TestCase):
                     root / "resolved",
                     expected_source_sha="b" * 40,
                 )
+
+    def test_upstream_resolver_fails_closed_on_repository_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._create_upstream_artifact_fixture(root)
+            with self.assertRaisesRegex(ValueError, "manifest source_repository mismatch"):
+                self._resolve_upstream_fixture(
+                    root,
+                    root / "resolved",
+                    expected_repository="untrusted/fork",
+                )
+
+    def test_upstream_resolver_rejects_non_v2_artifact_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _, manifest_path = self._create_upstream_artifact_fixture(root)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["schema_version"] = 1
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "DAG handoff requires Artifact Contract v2"):
+                self._resolve_upstream_fixture(root, root / "resolved")
 
     def test_upstream_resolver_fails_closed_on_target_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
