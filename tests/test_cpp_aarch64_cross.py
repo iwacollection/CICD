@@ -117,7 +117,6 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
         self.assertIn("aarch64-linux-gnu-readelf -A", script)
         self.assertIn("abi-compatibility.json", script)
         self.assertIn("Version (definition|needs) section", script)
-        self.assertIn("Version (definition|needs) section", script)
         self.assertIn("RPATH|RUNPATH", script)
         self.assertIn("CMAKE_SKIP_RPATH=ON", script)
         self.assertIn("qemu-aarch64 -L", script)
