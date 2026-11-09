@@ -2,6 +2,8 @@
 """Determine the smallest safe project set for a CI change."""
 from __future__ import annotations
 
+# Temporary A/B marker: force the same Full Lane fixture while measuring serialized security dependencies.
+
 import argparse
 import json
 import os
