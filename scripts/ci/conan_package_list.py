@@ -1,78 +1,46 @@
 #!/usr/bin/env python3
-"""Select only remote Conan package entries for an exact locked dependency graph."""
+"""Classify Conan package-list origins before invoking a remote download."""
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
-from typing import Any
 
-ALLOWED_ORIGINS = {"Local Cache", "conancenter"}
+LOCAL_CACHE_ORIGIN = "Local Cache"
 
 
-def prepare_download_list(
-    package_list_path: Path,
-    remote_list_path: Path,
-    result_path: Path,
-) -> str:
-    """Create a remote-only Conan list or an explicit local-cache skip result."""
-    try:
-        data: Any = json.loads(package_list_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot read Conan package list: {exc}") from exc
-
+def classify_package_list(data: object, remote: str) -> str:
     if not isinstance(data, dict) or not data:
-        raise ValueError("Conan package list is empty; refusing to report a successful dependency stage")
+        raise ValueError("Conan package list is empty; refusing to skip dependency resolution")
 
-    unexpected = set(data) - ALLOWED_ORIGINS
-    if unexpected:
-        raise ValueError(f"unexpected Conan package-list origins: {sorted(unexpected)}")
+    origins = set(data)
+    unexpected_origins = origins - {LOCAL_CACHE_ORIGIN, remote}
+    if unexpected_origins:
+        unexpected = ", ".join(sorted(str(origin) for origin in unexpected_origins))
+        raise ValueError(f"Conan package list contains unexpected origins: {unexpected}")
+    if origins == {LOCAL_CACHE_ORIGIN}:
+        return "local-cache-only"
+    if remote in origins:
+        return "remote-required"
 
-    remote_packages = data.get("conancenter")
-    if remote_packages:
-        remote_list_path.write_text(
-            json.dumps({"conancenter": remote_packages}, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        if result_path.exists():
-            result_path.unlink()
-        return "remote"
-
-    local_packages = data.get("Local Cache")
-    if local_packages:
-        if remote_list_path.exists():
-            remote_list_path.unlink()
-        result_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "source": "Local Cache",
-                    "remote_download_skipped": True,
-                    "reason": "the locked graph already exists in the local Conan cache",
-                    "downloaded_package_count": 0,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        return "local-cache"
-
-    raise ValueError("Conan package list contains no packages in Local Cache or conancenter")
+    raise ValueError(
+        f"Conan package list has no expected remote '{remote}' and is not local-cache-only"
+    )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, type=Path)
-    parser.add_argument("--remote-output", required=True, type=Path)
-    parser.add_argument("--result-output", required=True, type=Path)
+    parser.add_argument("--package-list", required=True)
+    parser.add_argument("--remote", required=True)
     args = parser.parse_args()
+
     try:
-        mode = prepare_download_list(args.input, args.remote_output, args.result_output)
-    except ValueError as exc:
-        parser.error(str(exc))
-    print(mode)
+        data = json.loads(Path(args.package_list).read_text(encoding="utf-8"))
+        print(classify_package_list(data, args.remote))
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 
