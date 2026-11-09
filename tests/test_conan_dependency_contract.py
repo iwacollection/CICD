@@ -37,6 +37,13 @@ class ConanDependencyContractTests(unittest.TestCase):
         errors = validate_catalog(projects, self.toolchains)
         self.assertTrue(any("dependency_lock_files must also be listed in cache_key_files" in e for e in errors))
 
+    def test_each_project_cache_fingerprint_pattern_matches_real_inputs(self) -> None:
+        for name in ("conan-format-lib", "conan-compression-lib", "conan-demo-app"):
+            project = next(p for p in self.catalog["projects"] if p["name"] == name)
+            target = project["targets"][0]
+            fingerprint = fingerprint_files(ROOT / project["path"], target["cache_key_files"])
+            self.assertTrue(fingerprint, name)
+
     def test_missing_lockfile_fails_fingerprint_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

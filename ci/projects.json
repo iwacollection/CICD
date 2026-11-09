@@ -364,7 +364,6 @@
             "conan.lock",
             "profiles/host",
             "profiles/build",
-            "include/**",
             "src/**"
           ],
           "build_parallelism": "auto",
