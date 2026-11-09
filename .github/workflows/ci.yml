@@ -482,8 +482,8 @@ jobs:
 
   security_level_0:
     name: Security L0
-    needs: [discover, level_0]
-    if: needs.discover.outputs.level_0_count != '0' && needs.level_0.result == 'success'
+    needs: discover
+    if: needs.discover.outputs.level_0_count != '0'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.level_0_matrix) }}
@@ -504,8 +504,8 @@ jobs:
 
   security_level_1:
     name: Security L1
-    needs: [discover, level_1]
-    if: needs.discover.outputs.level_1_count != '0' && needs.level_1.result == 'success'
+    needs: discover
+    if: needs.discover.outputs.level_1_count != '0'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.level_1_matrix) }}
@@ -526,8 +526,8 @@ jobs:
 
   security_level_2:
     name: Security L2
-    needs: [discover, level_2]
-    if: needs.discover.outputs.level_2_count != '0' && needs.level_2.result == 'success'
+    needs: discover
+    if: needs.discover.outputs.level_2_count != '0'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.level_2_matrix) }}
@@ -548,8 +548,8 @@ jobs:
 
   security_level_3:
     name: Security L3
-    needs: [discover, level_3]
-    if: needs.discover.outputs.level_3_count != '0' && needs.level_3.result == 'success'
+    needs: discover
+    if: needs.discover.outputs.level_3_count != '0'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.level_3_matrix) }}
@@ -570,8 +570,8 @@ jobs:
 
   security_level_4:
     name: Security L4
-    needs: [discover, level_4]
-    if: needs.discover.outputs.level_4_count != '0' && needs.level_4.result == 'success'
+    needs: discover
+    if: needs.discover.outputs.level_4_count != '0'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.level_4_matrix) }}
@@ -592,8 +592,8 @@ jobs:
 
   security_level_5:
     name: Security L5
-    needs: [discover, level_5]
-    if: needs.discover.outputs.level_5_count != '0' && needs.level_5.result == 'success'
+    needs: discover
+    if: needs.discover.outputs.level_5_count != '0'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.level_5_matrix) }}
@@ -614,8 +614,8 @@ jobs:
 
   security_level_6:
     name: Security L6
-    needs: [discover, level_6]
-    if: needs.discover.outputs.level_6_count != '0' && needs.level_6.result == 'success'
+    needs: discover
+    if: needs.discover.outputs.level_6_count != '0'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.level_6_matrix) }}
@@ -636,8 +636,8 @@ jobs:
 
   security_level_7:
     name: Security L7
-    needs: [discover, level_7]
-    if: needs.discover.outputs.level_7_count != '0' && needs.level_7.result == 'success'
+    needs: discover
+    if: needs.discover.outputs.level_7_count != '0'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.level_7_matrix) }}
