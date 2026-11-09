@@ -5,7 +5,8 @@ This fixture builds a Linux AArch64 executable on an x86_64 Linux host. It delib
 ## Pinned target contract
 
 - Target triple: `aarch64-linux-gnu`
-- Compiler: GCC/G++ 13.4.0 (`gcc-13-aarch64-linux-gnu`, `g++-13-aarch64-linux-gnu`)
+- Build-host compiler: native x86_64 GCC/G++ 13.4.0 (`gcc-13`, `g++-13`)
+- Target compiler: AArch64 GCC/G++ 13.4.0 (`gcc-13-aarch64-linux-gnu`, `g++-13-aarch64-linux-gnu`)
 - Target ABI: Linux AArch64, `armv8`, `libstdc++11`, C++17
 - Sysroot root: `/usr/aarch64-linux-gnu`
 - Ubuntu base image: pinned Ubuntu 26.04 image digest
@@ -18,16 +19,16 @@ The Candidate image is built on an amd64 runner and contains the cross compiler,
 
 ## Host versus target
 
-- `profiles/build` is x86_64. Conan build-context tools and build requirements run here.
+- `profiles/build` is x86_64 and explicitly selects native `/usr/bin/gcc-13` and `/usr/bin/g++-13`. Conan build-context tools and build requirements run here.
 - `profiles/host` is armv8. Conan host-context packages, fmt and application outputs are built for AArch64.
-- `tools.build:compiler_executables` selects the AArch64 GCC frontends.
+- `tools.build:compiler_executables` in the host profile selects the AArch64 GCC frontends; the separate build profile selects the native x86_64 GCC 13 binaries.
 - Both Ninja and GNU Make are installed: the top-level fixture uses Ninja, while some Conan package recipes still configure their own source builds with the `Unix Makefiles` generator.
 - `ci/aarch64-toolchain.cmake` configures CMake's Linux/AArch64 target and restricts system include/library lookup to the target triplet root.
 
 ## Identity and cache contract
 
 `ci/verify.sh --bootstrap` generates `ci/target-sdk.lock` from the actual compiler, linker, cross package inventory and sysroot file tree. The file records:
-- target triple and compiler version/package revisions
+- target triple, cross compiler version/package revisions, and native build-host compiler version/package revisions
 - linker identity
 - sysroot path and tree SHA-256
 - SDK APT snapshot, package inventory digest and combined SDK digest
