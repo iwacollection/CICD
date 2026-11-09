@@ -81,6 +81,16 @@
       "toolchain_id": "",
       "status": "planned",
       "notes": "Requires a dedicated Clang 18 image, linker/runtime compatibility tests and digest."
+    },
+    {
+      "id": "cpp-gcc13-conan234",
+      "language": "cpp",
+      "language_version": "13",
+      "build_tool": "conan",
+      "build_tool_version": "2.34.0",
+      "toolchain_id": "cpp-gcc13-conan234",
+      "status": "candidate",
+      "notes": "Candidate C++ dependency-management toolchain. Conan 2.34.0 is installed from the upstream release package with a checked SHA-256; not consumable by production projects until the image is published, scanned, attested and promoted."
     }
   ]
 }

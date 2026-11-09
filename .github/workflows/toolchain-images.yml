@@ -190,6 +190,15 @@ jobs:
             "ci-toolchain-verify:$GITHUB_SHA" \
             bash -euo pipefail -c "$COMMAND"
 
+      - name: Upload Conan-generated bootstrap lockfile
+        if: success() && matrix.toolchain == 'cpp-gcc13-conan234'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: conan-lock-bootstrap-${{ github.sha }}
+          path: ${{ matrix.verification_fixture }}/conan.lock
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Scan candidate vulnerabilities and licenses
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
         with:

@@ -1,0 +1,5 @@
+add_library(greeting STATIC src/greeting.cpp)
+add_library(project::greeting ALIAS greeting)
+target_include_directories(greeting PUBLIC \${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(greeting PUBLIC cxx_std_17)
+target_link_libraries(greeting PUBLIC project::core fmt::fmt)

@@ -165,6 +165,25 @@
       "verification_fixture": "examples/cpp-gcc12-service",
       "verification_command": "cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=g++-12 && cmake --build build && ctest --test-dir build --output-on-failure",
       "compiler_version": "12.5.0-9ubuntu1"
+    },
+    {
+      "id": "cpp-gcc13-conan234",
+      "status": "candidate",
+      "execution_mode": "container",
+      "description": "Candidate GCC 13 C++ build image with Conan 2.34.0 installed from an upstream release package verified by SHA-256; promotion requires the normal image SBOM, vulnerability, provenance and consumer gates.",
+      "image": "ghcr.io/iwacollection/cicd-toolchain-cpp-conan234",
+      "digest": "",
+      "dockerfile": "docker/toolchains/cpp/conan234/Dockerfile",
+      "context": "docker/toolchains/cpp/conan234",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "smoke_command": "gcc --version && g++ --version && cmake --version && ninja --version && ccache --version && conan --version && test \"$(conan --version)\" = \"Conan version 2.34.0\"",
+      "language": "cpp",
+      "compiler": "gcc-13/g++-13",
+      "conan_version": "2.34.0",
+      "verification_fixture": "examples/cpp-conan-multimodule",
+      "verification_command": "bash ./ci/verify.sh --bootstrap"
     }
   ]
 }
