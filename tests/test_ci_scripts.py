@@ -494,5 +494,28 @@ class CiPlatformTests(unittest.TestCase):
         self.assertEqual(result["projects"], [])
 
 
+    def test_cross_project_rename_impacts_both_source_and_destination_projects(self) -> None:
+        data = {
+            "projects": [
+                {"name": "app-a", "enabled": True, "path": "apps/a", "depends_on": [], "targets": []},
+                {"name": "app-b", "enabled": True, "path": "apps/b", "depends_on": [], "targets": []},
+            ]
+        }
+        # With git diff --no-renames, a move is represented as the old path
+        # being deleted and the new path being added. Both projects must be
+        # selected so neither side of the move is silently omitted.
+        result = analyze_impact(
+            data,
+            ["apps/a/src/moved.cpp", "apps/b/src/moved.cpp"],
+        )
+        self.assertEqual(result["lane"], "fast")
+        self.assertEqual(result["direct_projects"], ["app-a", "app-b"])
+        self.assertEqual(result["projects"], ["app-a", "app-b"])
+
+    def test_git_diff_change_detection_disables_rename_collapse(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertEqual(workflow.count("git diff --name-only --no-renames"), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
