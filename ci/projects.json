@@ -265,8 +265,8 @@
             "conan.lock"
           ],
           "cache_paths": [
-            ".cache/ccache",
-            ".ci-cache/conan-home"
+            "examples/conan-format-lib/.cache/ccache",
+            "examples/conan-format-lib/.ci-cache/conan-home"
           ],
           "cache_key_files": [
             "CMakeLists.txt",
@@ -309,8 +309,8 @@
             "conan.lock"
           ],
           "cache_paths": [
-            ".cache/ccache",
-            ".ci-cache/conan-home"
+            "examples/conan-compression-lib/.cache/ccache",
+            "examples/conan-compression-lib/.ci-cache/conan-home"
           ],
           "cache_key_files": [
             "CMakeLists.txt",
@@ -355,8 +355,8 @@
             "conan.lock"
           ],
           "cache_paths": [
-            ".cache/ccache",
-            ".ci-cache/conan-home"
+            "examples/conan-demo-app/.cache/ccache",
+            "examples/conan-demo-app/.ci-cache/conan-home"
           ],
           "cache_key_files": [
             "CMakeLists.txt",
