@@ -25,8 +25,8 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
         item = next(x for x in self.catalog["toolchains"] if x["id"] == "cpp-aarch64-gcc13-cross")
         self.assertEqual(item["status"], "candidate")
         self.assertEqual(item["target_triple"], "aarch64-linux-gnu")
-        self.assertEqual(item["compiler_version"], "13.3.0")
-        self.assertEqual(item["sdk_version"], "debian-trixie-20261108-gcc13-cross")
+        self.assertEqual(item["compiler_version"], "13.4.0")
+        self.assertEqual(item["sdk_version"], "ubuntu-resolute-20261109-gcc13-cross")
         matrix = build_publish_matrix(self.catalog, ROOT, include_planned=True)
         row = next(x for x in matrix["include"] if x["toolchain"] == "cpp-aarch64-gcc13-cross")
         self.assertEqual(row["verification_fixture"], "examples/cpp-aarch64-cross")
@@ -34,7 +34,7 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
     def test_version_registry_accepts_exact_cross_compiler_identity(self) -> None:
         self.assertEqual([], validate_versions(self.versions, self.catalog))
         item = next(x for x in self.versions["combinations"] if x["id"] == "cpp-aarch64-gcc13-cross")
-        self.assertEqual("13.3.0-16cross1", item["build_tool_version"])
+        self.assertEqual("13.4.0-10ubuntu1cross1", item["build_tool_version"])
         self.assertEqual("candidate", item["status"])
 
     def test_host_and_build_profiles_are_not_mixed(self) -> None:
@@ -113,6 +113,13 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
         self.assertIn('"build_host_compiler": {', script)
         self.assertIn("required Conan lockfile is missing", script)
         self.assertIn("aarch64-linux-gnu-readelf -h", script)
+        self.assertIn("aarch64-linux-gnu-readelf --version-info", script)
+        self.assertIn("aarch64-linux-gnu-readelf -A", script)
+        self.assertIn("abi-compatibility.json", script)
+        self.assertIn("Version needs section", script)
+        self.assertIn("Version definition section", script)
+        self.assertIn("RPATH|RUNPATH", script)
+        self.assertIn("CMAKE_SKIP_RPATH=ON", script)
         self.assertIn("qemu-aarch64 -L", script)
         self.assertIn('grep -F "AArch64"', script)
         self.assertIn("build-evidence.json", script)
