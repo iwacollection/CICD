@@ -34,6 +34,21 @@ The Candidate image is built on an amd64 runner and contains the cross compiler,
 
 A normal verification run refuses a missing or changed `target-sdk.lock`. The Conan `conan.lock`, both profiles, CMake toolchain file and target SDK lock are required cache-fingerprint inputs for a future DAG node. A different ABI, sysroot, SDK or dependency lock cannot be treated as the same target cache.
 
+## Target cache isolation
+
+\`ci/cache-key-files.json\` is the fixture's cache-fingerprint contract. The verifier requires every listed input to exist and hashes the relative path and content for:
+- Conan recipe and generated lockfile
+- Host and build profiles
+- CMake AArch64 toolchain definition
+- Actual target SDK/sysroot identity lock
+- CMake project and all public headers/source files
+
+The computed fingerprint is recorded in \`.ci-telemetry/cache-fingerprint.txt\` and copied into \`build/arm64/build-evidence.json\`. A missing input fails the build rather than falling back to a partial key.
+
+The disposable Conan package cache and ccache are separate directories. Their namespace contains the AArch64 target triple, exact GCC version, standard library ABI, C++ standard and target SDK digest. A change in sysroot/compiler/ABI gets a different namespace. Ccache also performs its own compiler/input hashing; the namespace is an additional safety boundary, not a replacement for ccache's key calculation.
+
+This fixture proves target-aware fingerprint calculation and local cache-directory isolation. It does not yet claim that GitHub Actions persistent cache restore/save is wired into the production DAG; that integration requires an Active immutable toolchain and the corresponding target project node.
+
 ## Verification
 
 The script performs Conan graph lock generation/install, CMake/Ninja configure and compile/link, ELF machine/dependency inspection, CTest using QEMU and a direct QEMU run. It creates a tar archive containing the AArch64 static library and executable and writes build evidence with timings and SHA-256.
