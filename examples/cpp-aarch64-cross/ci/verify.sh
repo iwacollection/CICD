@@ -248,33 +248,40 @@ import pathlib
 import re
 
 pattern = re.compile(r"\b(?:GLIBCXX|GLIBC|CXXABI)_[0-9][A-Za-z0-9._]*\b")
+heading = re.compile(r"^Version (definition|needs) section\b.*$", re.MULTILINE)
 
-def section_names(path: str, marker: str) -> set[str]:
+def section_names(path: str, wanted: str) -> set[str]:
     content = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
-    if marker not in content:
-        return set()
-    content = content.split(marker, 1)[1]
-    if marker == "Version needs section" and "Version definition section" in content:
-        content = content.split("Version definition section", 1)[0]
-    return set(pattern.findall(content))
+    matches = list(heading.finditer(content))
+    blocks = []
+    for index, match in enumerate(matches):
+        if match.group(1) != wanted:
+            continue
+        stop = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+        blocks.append(content[match.end():stop])
+    return set(pattern.findall("\n".join(blocks)))
 
-required = section_names(".ci-telemetry/elf-version-info.txt", "Version needs section")
-available = (
-    section_names(".ci-telemetry/sysroot-libc-version-info.txt", "Version definition section")
-    | section_names(".ci-telemetry/sysroot-libstdcxx-version-info.txt", "Version definition section")
-)
+required = section_names(".ci-telemetry/elf-version-info.txt", "needs")
+libc_definitions = section_names(".ci-telemetry/sysroot-libc-version-info.txt", "definition")
+libstdcxx_definitions = section_names(".ci-telemetry/sysroot-libstdcxx-version-info.txt", "definition")
+available = libc_definitions | libstdcxx_definitions
 missing = sorted(required - available)
-if missing:
-    raise SystemExit("target ABI requires version symbols missing from its locked sysroot: " + ", ".join(missing))
 if not any(name.startswith("GLIBC_") for name in required):
     raise SystemExit("ELF version requirements do not contain a GLIBC requirement; ABI evidence is incomplete")
+if any(name.startswith("GLIBC_") for name in required) and not any(name.startswith("GLIBC_") for name in libc_definitions):
+    raise SystemExit("target sysroot libc has no GLIBC version definitions")
+if any(name.startswith(("GLIBCXX_", "CXXABI_")) for name in required) and not any(
+    name.startswith(("GLIBCXX_", "CXXABI_")) for name in libstdcxx_definitions
+):
+    raise SystemExit("target sysroot libstdc++ has no matching C++ ABI version definitions")
+if missing:
+    raise SystemExit("target ABI requires version symbols missing from its locked sysroot: " + ", ".join(missing))
 
 result = {
     "required_version_symbols": sorted(required),
-    "available_version_symbols": sorted(available),
+    "libc_version_definitions": sorted(libc_definitions),
+    "libstdcxx_version_definitions": sorted(libstdcxx_definitions),
     "missing_version_symbols": missing,
-    "sysroot_libc": str(pathlib.Path(".ci-telemetry/sysroot-libc-version-info.txt")),
-    "sysroot_libstdcxx": str(pathlib.Path(".ci-telemetry/sysroot-libstdcxx-version-info.txt")),
     "rpath_policy": "no RPATH/RUNPATH entries",
     "compatibility": "passed",
 }
