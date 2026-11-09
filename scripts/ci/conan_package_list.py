@@ -12,9 +12,9 @@ def select_download_source(package_list: object) -> str:
     """Return remote when any locked package is absent locally; fail closed otherwise."""
     if not isinstance(package_list, dict) or not package_list:
         raise ValueError("Conan package list is empty")
-    if "conancenter" in package_list:
+    if package_list.get("conancenter"):
         return "remote"
-    if "Local Cache" in package_list:
+    if package_list.get("Local Cache"):
         return "local-cache"
     raise ValueError(f"Conan package list has unrecognized origins: {sorted(package_list)}")
 
