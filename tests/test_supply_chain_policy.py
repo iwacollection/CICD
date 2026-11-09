@@ -46,6 +46,17 @@ class SupplyChainPolicyTests(unittest.TestCase):
             )
             self.assertEqual(validate_dockerfile(dockerfile, self.policy), [])
 
+    def test_ubuntu_snapshot_arg_must_be_consumed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            dockerfile = Path(directory) / "Dockerfile"
+            dockerfile.write_text(
+                "FROM ubuntu:26.04@sha256:" + "b" * 64 + "\n"
+                "ARG APT_SNAPSHOT=20261109T000000Z\n"
+                "RUN apt-get update\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(any("must be consumed" in error for error in validate_dockerfile(dockerfile, self.policy)))
+
     def test_invalid_ubuntu_snapshot_arg_does_not_satisfy_apt_policy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             dockerfile = Path(directory) / "Dockerfile"
