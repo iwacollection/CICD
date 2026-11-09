@@ -10,8 +10,8 @@ fi
 cd "$(dirname "$0")/.."
 readonly TARGET_TRIPLE="aarch64-linux-gnu"
 readonly SYSROOT="/usr/aarch64-linux-gnu"
-readonly APT_SNAPSHOT="20261107T000000Z"
-readonly EXPECTED_COMPILER="13.4.0"
+readonly APT_SNAPSHOT="20261108T000000Z"
+readonly EXPECTED_COMPILER="13.3.0"
 readonly CONAN_VERSION="2.34.0"
 mkdir -p .ci-telemetry .ci-cache
 : > .ci-telemetry/stages.tsv
@@ -63,7 +63,7 @@ sysroot_digest="$(
 )"
 package_inventory="$(
   dpkg-query -W -f='${binary:Package}=${Version}\n' \
-    gcc-13 g++-13 g++-13-aarch64-linux-gnu gcc-13-aarch64-linux-gnu \
+    apt gcc-13 g++-13 g++-13-aarch64-linux-gnu gcc-13-aarch64-linux-gnu \
     libc6-dev-arm64-cross binutils-aarch64-linux-gnu qemu-user cmake ninja-build make ccache \
     | LC_ALL=C sort
 )"
@@ -101,7 +101,7 @@ identity = {
     "linker": linker,
     "sysroot": {"path": sysroot, "sha256": sysroot_digest},
     "sdk": {
-        "version": "ubuntu-resolute-20261107-gcc13-cross",
+        "version": "debian-trixie-20261108-gcc13-cross",
         "apt_snapshot": snapshot,
         "package_inventory_sha256": package_digest,
         "sha256": sdk_digest,
@@ -116,10 +116,10 @@ identity = {
 }
 lock_path = pathlib.Path("ci/target-sdk.lock")
 encoded = json.dumps(identity, indent=2, sort_keys=True) + "\n"
-if not lock_path.is_file():
-    if mode != "--bootstrap":
-        raise SystemExit("required ci/target-sdk.lock is missing; bootstrap is allowed only in Candidate verification")
+if mode == "--bootstrap":
     lock_path.write_text(encoded, encoding="utf-8")
+elif not lock_path.is_file():
+    raise SystemExit("required ci/target-sdk.lock is missing; bootstrap is allowed only in Candidate verification")
 else:
     expected = json.loads(lock_path.read_text(encoding="utf-8"))
     if expected != identity:
