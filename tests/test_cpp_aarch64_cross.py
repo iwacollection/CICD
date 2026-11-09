@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 
 import sys
 import tempfile
@@ -52,22 +53,34 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
         for value in ("target_triple", "sysroot_digest", "sdk_digest", "APT_SNAPSHOT"):
             self.assertIn(value, script)
 
-    def test_each_target_identity_input_changes_fingerprint(self) -> None:
+    def test_each_declared_cache_input_changes_the_real_manifest_fingerprint(self) -> None:
+        manifest_path = self.fixture / "ci" / "cache-key-files.json"
+        patterns = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertTrue({
+            "conan.lock", "profiles/host", "profiles/build",
+            "ci/aarch64-toolchain.cmake", "ci/target-sdk.lock",
+            "conanfile.txt", "CMakeLists.txt", "ci/cache-key-files.json",
+        }.issubset(set(patterns)))
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             inputs = {
+                "conanfile.txt": "[requires]\nfmt/11.0.2\n",
                 "conan.lock": '{"requires":["fmt/11.0.2"]}\n',
                 "profiles/host": "arch=armv8\ncompiler.cppstd=17\n",
                 "profiles/build": "arch=x86_64\n",
                 "ci/aarch64-toolchain.cmake": "set(CMAKE_SYSTEM_PROCESSOR aarch64)\n",
                 "ci/target-sdk.lock": '{"sysroot":{"sha256":"a"},"sdk":{"sha256":"b"}}\n',
+                "ci/cache-key-files.json": manifest_path.read_text(encoding="utf-8"),
+                "CMakeLists.txt": "project(cache_identity LANGUAGES CXX)\n",
+                "include/core.h": "#pragma once\n",
                 "src/main.cpp": "int main() { return 0; }\n",
             }
             for name, content in inputs.items():
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content, encoding="utf-8")
-            patterns = list(inputs)
+
             baseline = fingerprint_files(root, patterns)
             for name in inputs:
                 with self.subTest(input=name):
@@ -76,6 +89,17 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
                     path.write_text(original + "# identity-change\n", encoding="utf-8")
                     self.assertNotEqual(baseline, fingerprint_files(root, patterns), name)
                     path.write_text(original, encoding="utf-8")
+
+    def test_cache_directories_are_scoped_to_target_sdk_and_abi(self) -> None:
+        script = (self.fixture / "ci" / "verify.sh").read_text(encoding="utf-8")
+        self.assertIn('readonly CACHE_NAMESPACE=', script)
+        self.assertIn('export CCACHE_DIR="$PWD/.ci-cache/ccache/$CACHE_NAMESPACE"', script)
+        self.assertIn('export CONAN_HOME="$PWD/.ci-cache/conan/$CACHE_NAMESPACE"', script)
+        self.assertIn('TARGET_CXX_ABI="libstdc++11"', script)
+        self.assertIn('TARGET_CXX_STANDARD="17"', script)
+        self.assertIn("ci/cache-key-files.json", script)
+        self.assertIn("CMAKE_CXX_COMPILER_LAUNCHER=ccache", script)
+
 
     def test_verify_script_fails_closed_and_checks_elf_and_qemu(self) -> None:
         script = (self.fixture / "ci" / "verify.sh").read_text(encoding="utf-8")
