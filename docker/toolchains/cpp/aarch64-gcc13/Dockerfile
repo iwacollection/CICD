@@ -18,7 +18,7 @@ RUN rm -f /etc/apt/apt.conf.d/50snapshot \
        libc6-dev-arm64-cross="$CROSS_LIBC_VERSION" \
        binutils-aarch64-linux-gnu \
        qemu-user \
-       cmake ninja-build ccache file binutils \
+       cmake ninja-build make ccache file binutils \
        python3-venv \
     && test "$(aarch64-linux-gnu-gcc-13 -dumpfullversion -dumpversion)" = "13.4.0" \
     && test "$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)" = "13.4.0" \
