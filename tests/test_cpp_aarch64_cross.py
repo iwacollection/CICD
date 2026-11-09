@@ -125,6 +125,8 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
         self.assertIn("linux-libc-dev-arm64-cross", script)
         self.assertIn("debian-forky-20261108-gcc13-cross", script)
         self.assertIn("https://center2.conan.io", script)
+        self.assertIn('test "$qemu_package" = "1:11.1.3+ds-1"', script)
+        self.assertIn('grep -F "11.1.3" <<< "$qemu_version"', script)
 
 
 if __name__ == "__main__":
