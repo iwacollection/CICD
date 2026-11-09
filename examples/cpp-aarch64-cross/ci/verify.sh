@@ -196,6 +196,7 @@ run_timed configure \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$PWD/build/conan/conan_toolchain.cmake" \
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+    '-DCMAKE_CROSSCOMPILING_EMULATOR=qemu-aarch64;-L;/usr/aarch64-linux-gnu'
 
 run_timed compile_link \
   cmake --build build/arm64 --parallel "${CI_BUILD_JOBS:-2}"
