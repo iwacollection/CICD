@@ -54,6 +54,17 @@ class ConanDependencyContractTests(unittest.TestCase):
             self.assertIn("conan.lock", target["dependency_lock_files"])
             self.assertIn("conan.lock", target["cache_key_files"])
 
+    def test_conan_helpers_are_read_only_mounted_into_container_builds(self) -> None:
+        runner = (ROOT / "scripts" / "ci" / "run_build.py").read_text(encoding="utf-8")
+        self.assertIn("CI_CONAN_BUILD_HELPER=/ci-platform/conan_cmake_build.sh", runner)
+        self.assertIn("CI_CONAN_CTEST_HELPER=/ci-platform/conan_ctest.sh", runner)
+        self.assertIn('"cmake_build.sh", "conan_cmake_build.sh", "conan_ctest.sh"', runner)
+        for name in ("conan-format-lib", "conan-compression-lib", "conan-demo-app"):
+            project = next(p for p in self.catalog["projects"] if p["name"] == name)
+            self.assertEqual(project["targets"][0]["build_command"], 'bash "$CI_CONAN_BUILD_HELPER"')
+        app = next(p for p in self.catalog["projects"] if p["name"] == "conan-demo-app")
+        self.assertEqual(app["targets"][0]["test_command"], 'bash "$CI_CONAN_CTEST_HELPER"')
+
     def test_conan_build_uses_pinned_version_lock_and_generated_toolchain(self) -> None:
         script = (ROOT / "scripts" / "ci" / "conan_cmake_build.sh").read_text(encoding="utf-8")
         self.assertIn('CONAN_VERSION="2.34.0"', script)

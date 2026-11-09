@@ -253,7 +253,7 @@
           "runner_labels": [
             "ubuntu-latest"
           ],
-          "build_command": "bash ../../scripts/ci/conan_cmake_build.sh",
+          "build_command": "bash \"$CI_CONAN_BUILD_HELPER\"",
           "test_command": "test -s build/libconan-greeting.a && test -s .ci-telemetry/conan-build-timings.json",
           "fast_test_command": "test -s build/libconan-greeting.a && test -s .ci-telemetry/conan-build-timings.json",
           "artifact_paths": [
@@ -297,7 +297,7 @@
           "runner_labels": [
             "ubuntu-latest"
           ],
-          "build_command": "bash ../../scripts/ci/conan_cmake_build.sh",
+          "build_command": "bash \"$CI_CONAN_BUILD_HELPER\"",
           "test_command": "test -s build/libconan-compression.a && test -s .ci-telemetry/conan-build-timings.json",
           "fast_test_command": "test -s build/libconan-compression.a && test -s .ci-telemetry/conan-build-timings.json",
           "artifact_paths": [
@@ -344,9 +344,9 @@
           "runner_labels": [
             "ubuntu-latest"
           ],
-          "build_command": "bash ../../scripts/ci/conan_cmake_build.sh",
-          "test_command": "bash ../../scripts/ci/conan_ctest.sh",
-          "fast_test_command": "bash ../../scripts/ci/conan_ctest.sh",
+          "build_command": "bash \"$CI_CONAN_BUILD_HELPER\"",
+          "test_command": "bash \"$CI_CONAN_CTEST_HELPER\"",
+          "fast_test_command": "bash \"$CI_CONAN_CTEST_HELPER\"",
           "artifact_paths": [
             "build/conan-demo",
             "conan.lock"
