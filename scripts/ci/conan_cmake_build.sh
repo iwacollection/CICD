@@ -191,7 +191,6 @@ telemetry = {
     "dependency_download_ms": download_ms,
     "dependency_download_log_lines": sum("Downloading" in line for line in download_log.splitlines()),
     "dependency_local_install_generate_ms": install_ms,
-    "conan_downloaded_package_list_entries": sum(1 for _ in (root / ".ci-telemetry/conan-package-list.json").read_text(encoding="utf-8").splitlines() if ":" in _),
     "clean_configure_compile_total_ms": build_ms,
     "configure_generate_ms": first_cmake["configure_generate_ms"],
     "compile_link_ms": first_cmake["compile_link_ms"],
@@ -204,7 +203,7 @@ telemetry = {
     "ccache_warm_pass_misses": warm_misses,
     "ccache_warm_hit_delta": warm_hit_delta,
     "warm_cache_validation": "passed",
-    "notes": "Conan package installation duration includes fetches and any --build=missing work. Warm validation cleans the CMake/Ninja outputs but preserves the same ccache directory and requires at least one additional compiler-cache hit."
+    "notes": "dependency_download_ms measures the conan download --list remote package transfer stage. dependency_local_install_generate_ms runs conan install --no-remote and may include --build=missing source builds when a matching binary is not available. Warm validation cleans CMake/Ninja outputs but preserves ccache and requires at least one additional compiler-cache hit."
 }
 path = root / ".ci-telemetry/conan-build-timings.json"
 path.write_text(json.dumps(telemetry, indent=2) + "\n", encoding="utf-8")
