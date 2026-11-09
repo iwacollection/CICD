@@ -127,6 +127,8 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
         self.assertIn("https://center2.conan.io", script)
         self.assertIn('test "$qemu_package" = "1:11.1.3+ds-1"', script)
         self.assertIn('grep -F "11.1.3" <<< "$qemu_version"', script)
+        self.assertIn('readonly QEMU_ORIGIN="debian-sid-snapshot-20261108T000000Z"', script)
+        self.assertIn('"origin": qemu_origin', script)
 
 
 if __name__ == "__main__":
