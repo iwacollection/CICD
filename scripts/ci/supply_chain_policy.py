@@ -139,8 +139,16 @@ def validate_dockerfile(path: Path, policy: dict) -> list[str]:
             if ":latest" in line:
                 errors.append(f"{path}: latest tag is forbidden: {line}")
     if "apt-get" in text or re.search(r"\bapt\s+(?:install|update)\b", text):
-        if container.get("require_apt_snapshot", True) and not SNAPSHOT_RE.search(text):
+        snapshot_match = SNAPSHOT_RE.search(text)
+        if container.get("require_apt_snapshot", True) and not snapshot_match:
             errors.append(f"{path}: apt usage must be bound to an immutable Ubuntu or Debian Snapshot ID")
+        elif (
+            container.get("require_apt_snapshot", True)
+            and snapshot_match
+            and snapshot_match.group(2) is not None
+            and not re.search(r"\$APT_SNAPSHOT\b", text)
+        ):
+            errors.append(f"{path}: APT_SNAPSHOT must be consumed by the APT snapshot configuration")
     return errors
 
 
