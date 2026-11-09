@@ -237,6 +237,139 @@
           "cache_scope": "none"
         }
       ]
+    },
+    {
+      "name": "conan-format-lib",
+      "enabled": true,
+      "path": "examples/conan-format-lib",
+      "depends_on": [],
+      "targets": [
+        {
+          "enabled": true,
+          "soc": "generic",
+          "target_os": "linux",
+          "arch": "x86_64",
+          "toolchain": "gcc-host-v1",
+          "runner_labels": [
+            "ubuntu-latest"
+          ],
+          "build_command": "bash \"$CI_CONAN_BUILD_HELPER\"",
+          "test_command": "test -s build/libconan-greeting.a && test -s .ci-telemetry/conan-build-timings.json",
+          "fast_test_command": "test -s build/libconan-greeting.a && test -s .ci-telemetry/conan-build-timings.json",
+          "artifact_paths": [
+            "build/libconan-greeting.a",
+            "include/greeting.h",
+            "conan.lock"
+          ],
+          "dependency_lock_files": [
+            "conan.lock"
+          ],
+          "cache_paths": [
+            ".cache/ccache",
+            ".ci-cache/conan-home"
+          ],
+          "cache_key_files": [
+            "CMakeLists.txt",
+            "conanfile.txt",
+            "conan.lock",
+            "profiles/host",
+            "profiles/build",
+            "include/**",
+            "src/**"
+          ],
+          "build_parallelism": "auto",
+          "cache_scope": "project"
+        }
+      ]
+    },
+    {
+      "name": "conan-compression-lib",
+      "enabled": true,
+      "path": "examples/conan-compression-lib",
+      "depends_on": [],
+      "targets": [
+        {
+          "enabled": true,
+          "soc": "generic",
+          "target_os": "linux",
+          "arch": "x86_64",
+          "toolchain": "gcc-host-v1",
+          "runner_labels": [
+            "ubuntu-latest"
+          ],
+          "build_command": "bash \"$CI_CONAN_BUILD_HELPER\"",
+          "test_command": "test -s build/libconan-compression.a && test -s .ci-telemetry/conan-build-timings.json",
+          "fast_test_command": "test -s build/libconan-compression.a && test -s .ci-telemetry/conan-build-timings.json",
+          "artifact_paths": [
+            "build/libconan-compression.a",
+            "include/compression.h",
+            "conan.lock"
+          ],
+          "dependency_lock_files": [
+            "conan.lock"
+          ],
+          "cache_paths": [
+            ".cache/ccache",
+            ".ci-cache/conan-home"
+          ],
+          "cache_key_files": [
+            "CMakeLists.txt",
+            "conanfile.txt",
+            "conan.lock",
+            "profiles/host",
+            "profiles/build",
+            "include/**",
+            "src/**"
+          ],
+          "build_parallelism": "auto",
+          "cache_scope": "project"
+        }
+      ]
+    },
+    {
+      "name": "conan-demo-app",
+      "enabled": true,
+      "path": "examples/conan-demo-app",
+      "depends_on": [
+        "conan-format-lib",
+        "conan-compression-lib"
+      ],
+      "targets": [
+        {
+          "enabled": true,
+          "soc": "generic",
+          "target_os": "linux",
+          "arch": "x86_64",
+          "toolchain": "gcc-host-v1",
+          "runner_labels": [
+            "ubuntu-latest"
+          ],
+          "build_command": "bash \"$CI_CONAN_BUILD_HELPER\"",
+          "test_command": "bash \"$CI_CONAN_CTEST_HELPER\"",
+          "fast_test_command": "bash \"$CI_CONAN_CTEST_HELPER\"",
+          "artifact_paths": [
+            "build/conan-demo",
+            "conan.lock"
+          ],
+          "dependency_lock_files": [
+            "conan.lock"
+          ],
+          "cache_paths": [
+            ".cache/ccache",
+            ".ci-cache/conan-home"
+          ],
+          "cache_key_files": [
+            "CMakeLists.txt",
+            "conanfile.txt",
+            "conan.lock",
+            "profiles/host",
+            "profiles/build",
+            "src/**"
+          ],
+          "build_parallelism": "auto",
+          "cache_scope": "project"
+        }
+      ]
     }
   ]
 }

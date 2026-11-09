@@ -179,9 +179,15 @@ def _configure_build_environment(workdir: Path, requested_jobs: str) -> str:
     os.environ["CCACHE_STATSLOG"] = str(stats_log)
     os.environ.setdefault("CCACHE_MAXSIZE", "2G")
     os.environ["CI_BUILD_RESOURCE_PROFILE_JSON"] = json.dumps(resource_limits, sort_keys=True)
-    helper = Path(__file__).resolve().with_name("cmake_build.sh")
-    if helper.is_file():
-        os.environ["CI_CMAKE_BUILD_HELPER"] = str(helper)
+    helper_dir = Path(__file__).resolve().parent
+    for env_name, filename in (
+        ("CI_CMAKE_BUILD_HELPER", "cmake_build.sh"),
+        ("CI_CONAN_BUILD_HELPER", "conan_cmake_build.sh"),
+        ("CI_CONAN_CTEST_HELPER", "conan_ctest.sh"),
+    ):
+        helper = helper_dir / filename
+        if helper.is_file():
+            os.environ[env_name] = str(helper)
     return jobs
 
 
@@ -232,6 +238,8 @@ def _container_env_args(workdir: Path) -> list[str]:
         "-e", f"CCACHE_DIR={container_ccache_dir}",
         "-e", "CCACHE_STATSLOG=/workspace/.ci-telemetry/ccache.stats.log",
         "-e", "CI_CMAKE_BUILD_HELPER=/ci-platform/cmake_build.sh",
+        "-e", "CI_CONAN_BUILD_HELPER=/ci-platform/conan_cmake_build.sh",
+        "-e", "CI_CONAN_CTEST_HELPER=/ci-platform/conan_ctest.sh",
     ])
 
     upstream_root = os.environ.get("CI_UPSTREAM_ROOT", "")
@@ -286,9 +294,11 @@ def container_command(workdir: Path, command: str, image: str) -> list[str]:
         cache_dir = Path(os.environ["CCACHE_DIR"]).resolve()
         args.extend(["-v", f"{cache_dir}:/ccache"])
 
-    helper = Path(__file__).resolve().with_name("cmake_build.sh")
-    if helper.is_file():
-        args.extend(["-v", f"{helper}:/ci-platform/cmake_build.sh:ro"])
+    helper_dir = Path(__file__).resolve().parent
+    for filename in ("cmake_build.sh", "conan_cmake_build.sh", "conan_ctest.sh"):
+        helper = helper_dir / filename
+        if helper.is_file():
+            args.extend(["-v", f"{helper}:/ci-platform/{filename}:ro"])
 
     args.extend(_container_env_args(workdir))
     if hasattr(os, "getuid") and hasattr(os, "getgid"):

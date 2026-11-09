@@ -277,3 +277,52 @@ GitHub-hosted Runner 的缓存由 Actions 管理，不要假设可以登录宿�
 - 关闭缓存：仍能得到完整且可校验的制品。
 
 如果关闭缓存就无法构建，说明缓存已经变成隐式依赖，不能通过生产验收。
+
+
+
+## 11. C++ Conan 示例中的四类缓存与制品边界
+
+当前 conan-format-lib、conan-compression-lib 和 conan-demo-app 将四种容易混淆的对象分开管理：
+
+| 对象 | 仓库路径/形式 | 存放什么 | 下游能否直接当交付制品使用 |
+|---|---|---|---|
+| Conan dependency package cache | .ci-cache/conan-home | Conan 下载的第三方包及本地包缓存 | 不可以；它只是下载/安装加速层 |
+| Compiler cache | .cache/ccache | 由编译器参数、源文件内容等决定的对象文件缓存 | 不可以；命中不能替代构建和测试 |
+| DAG upstream artifact | 现有 Artifact Contract v2 | 已完成构建、测试和 Manifest/digest 校验的内部模块输出，例如两个静态库和头文件 | 可以作为同一 DAG 后续节点的已验证输入 |
+| Final release artifact | 发布流水线产生并受发布/签名策略约束的版本化包 | 要交付给部署、设备或用户的最终产物 | 是；必须经过受信任发布门禁 |
+
+数据流：
+
+Conan remote
+  -> .ci-cache/conan-home
+  -> CMakeDeps / CMakeToolchain
+  -> CMake configure + Ninja compile (uses .cache/ccache)
+  -> Build + CTest
+  -> Artifact Contract v2 (DAG module output)
+  -> downstream verified consumer
+  -> trusted release / signing gate
+  -> Final release artifact
+
+关键边界：
+
+- 删除 Conan package cache：下一次需要重新下载包，不能改变锁文件声明的版本和 recipe revision。
+- 删除 ccache：下一次需要重新编译，不能跳过构建或测试。
+- DAG artifact 是带 Manifest、来源身份和 digest 的模块输出，不是 cache；下游必须先验证再使用。
+- Final release artifact 是发布结果，不能把 Conan home 或 ccache 目录打包冒充交付件。
+
+### 11.1 当前 Conan CI 的可测指标
+
+.ci-telemetry/conan-build-timings.json 记录：
+
+- dependency_resolution_ms：Conan graph info 的依赖图解析窗口；
+- dependency_package_list_ms：根据解析后的 Conan graph 查询远端包列表的耗时；
+- dependency_download_ms：执行 conan download --list 的远端包下载窗口；Conan package cache 已命中时该值可能很低；
+- dependency_local_install_generate_ms：使用 --no-remote 在本地缓存完成包安装和 CMakeDeps/CMakeToolchain 生成；若缺少匹配的二进制包，--build=missing 仍可能在这个阶段编译依赖；
+- dependency_warm_cache_reuse_ms：随后再次执行 --no-remote --build=never 的本地 warm install；缺少本地二进制包时直接失败，不会回源或补编译；
+- dependency_cache_reuse_verified：warm install 成功，且 conan.lock、解析图、远端 package list、download result 四份 SHA256 文件前后完全一致时才为 true；
+- configure_generate_ms / compile_link_ms：CMake helper 分别测出的首次配置生成与编译/链接耗时；
+- warm_configure_generate_ms / warm_compile_link_ms：清理 build 输出、保留 ccache 后第二次配置和编译耗时；
+- test_ms：集成应用的 CTest 时间；
+- ccache_warm_hit_delta：热重建阶段相对首次构建新增的缓存命中数，必须至少为 1 才标记 warm-cache 验证通过。
+
+这里不把 Conan install 整体时间伪装成纯下载时间。若后续需要精确测量网络传输时间，应在依赖代理或下载器层补充 request/byte/timing 观测，并区分远端下载、缓存命中和生成器耗时。
