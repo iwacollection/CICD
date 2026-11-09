@@ -11,7 +11,7 @@ This fixture builds a Linux AArch64 executable on an x86_64 Linux host. It delib
 - Sysroot root: `/usr/aarch64-linux-gnu`
 - Ubuntu base image: pinned Ubuntu 26.04 image digest
 - APT snapshot: `20261107T000000Z`
-- Conan CLI: 2.34.0
+- Conan CLI: 2.34.0, installed from the upstream Linux AMD64 release `.deb` after verifying SHA-256 `94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1`
 - Third-party dependency: `fmt/11.0.2`
 - Runtime validation: `qemu-aarch64 -L /usr/aarch64-linux-gnu`
 
