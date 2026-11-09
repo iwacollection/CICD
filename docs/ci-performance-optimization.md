@@ -264,8 +264,9 @@ The first report should be read as an attribution tool: use run queue and Job qu
 3. 单个源文件变化：只向指定源文件追加注释，观察 Ninja 重编译范围及 ccache 结果；
 4. 公共头文件变化：只向指定头文件追加注释，观察依赖传播和重编译范围；
 5. 编译参数变化：使用独立构建目录并增加一个 C++ 编译宏，验证编译参数变化后的缓存键隔离；
-6. ccache 关闭对照：同一份变更后的源码在独立构建目录中设置 `CCACHE_DISABLE=1`；
-7. 可选第二项目：使用同一个临时缓存目录，实测同工具链跨项目是否真的复用对象缓存。
+6. 冷缓存对照：在相同的最终源码状态下，使用一个全新的空 ccache 目录重新构建；
+7. ccache 关闭对照：同一份最终源码在独立构建目录中设置 `CCACHE_DISABLE=1`；
+8. 可选第二项目：使用同一个临时缓存目录，实测同工具链跨项目是否真的复用对象缓存。
 
 示例（路径需要替换成实际项目中的 CMakeLists.txt、一个 .cpp 文件和一个被多个源文件包含的公共头文件）：
 
@@ -278,7 +279,7 @@ python3 scripts/ci/ccache_benchmark.py \
   --output-json ccache-benchmark-report.json
 ```
 
-如果要测量同一工具链缓存是否能跨项目复用，再增加：
+如果要测量同一工具链缓存是否能跨项目复用，将下面参数追加到上面的完整命令中：
 
 ```bash
   --secondary-source-dir /workspace/another-cpp-project
