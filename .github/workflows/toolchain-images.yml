@@ -194,7 +194,7 @@ jobs:
         if: success() && matrix.toolchain == 'cpp-aarch64-gcc13-cross'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: aarch64-cross-bootstrap-${{ github.sha }}
+          name: aarch64-cross-verification-${{ github.sha }}
           path: |
             ${{ matrix.verification_fixture }}/conan.lock
             ${{ matrix.verification_fixture }}/ci/target-sdk.lock
