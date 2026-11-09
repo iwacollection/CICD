@@ -96,6 +96,25 @@ class CiPlatformTests(unittest.TestCase):
                             f"{project['name']} project cache must live under {project['path']}: {cache_path}",
                         )
 
+    def test_dag_plan_maps_project_cache_paths_into_source_workspace(self) -> None:
+        for name in ("conan-format-lib", "conan-compression-lib", "conan-demo-app"):
+            project = next(p for p in self.projects["projects"] if p["name"] == name)
+            rendered = render_dag(self.projects, self.toolchains, {name}, "full")
+            targets = [
+                target
+                for level in rendered["levels"][: rendered["level_count"]]
+                for target in level["matrix"]["include"]
+                if target["project"] == name
+            ]
+            self.assertEqual(len(targets), 1, name)
+            expected = [
+                f"source/{project['path']}/.cache/ccache",
+                f"source/{project['path']}/.ci-cache/conan-home",
+            ]
+            with self.subTest(project=name):
+                self.assertEqual(targets[0]["cache_paths"].splitlines(), expected)
+
+
     def test_dag_cache_lifecycle_uses_stable_key_and_trusted_main_saves(self) -> None:
         node = (ROOT / ".github" / "workflows" / "dag-node.yml").read_text(encoding="utf-8")
         key_lines = [line for line in node.splitlines() if "key: dag-ci-v4-" in line]
@@ -104,6 +123,13 @@ class CiPlatformTests(unittest.TestCase):
             self.assertNotIn("github.run_id", line)
             self.assertNotIn("github.run_attempt", line)
             self.assertIn("inputs.project", line)
+
+        restore_line = next(
+            line.strip() for line in node.splitlines()
+            if line.strip().startswith("dag-ci-v4-")
+        )
+        for dimension in ("inputs.cache_scope", "inputs.project", "inputs.soc", "inputs.target_os", "inputs.arch", "inputs.toolchain_identity"):
+            self.assertIn(dimension, restore_line)
 
         self.assertIn("uses: actions/cache/restore@", node)
         self.assertIn("uses: actions/cache/save@", node)
