@@ -2,13 +2,13 @@
 
 ## 当前阶段的目标
 
-在现有不可变 GCC 工具链、依赖 DAG、ccache 和 Artifact Contract v2 之上，增加可重复的 C++ 第三方依赖解析。此阶段先验证 Linux x86_64 + GCC 13 + C++17，不宣称已经完成企业级远程依赖仓库或 ARM64 交叉编译。
+在现有不可变 GCC 工具链、依赖 DAG、ccache 和 Artifact Contract v2 之上，增加可重复的 C++ 第三方依赖解析。此阶段先验证 Ubuntu 26.04 LTS + Linux 7.0 headers + Linux x86_64 + GCC 13.4.0 + C++17，不宣称已经完成企业级远程依赖仓库或 ARM64 交叉编译。
 
 ## 样板工程
 
 `examples/cpp-conan-consumer` 包含两个内部库（`platform_core`、`platform_transport`）和一个最终应用。Transport 依赖 Conan 管理的 `fmt/11.0.2`，最终应用和 CTest 测试都经过 CMake/Ninja 编译。
 
-工具链作为独立 Candidate：`gcc13-conan234`。它基于已固定 digest 的 GCC 13 工具链镜像，增加 Python 虚拟环境和精确版本 Conan 2.34.0。Candidate 未发布或未通过晋级前，业务项目不能引用它作为 Active 工具链。
+工具链作为独立 Candidate：`gcc13-conan234`。它基于固定 digest 的 Ubuntu 26.04 LTS 镜像，使用固定 APT Snapshot `20261107T000000Z`，安装精确 GCC/G++ 13.4.0-10ubuntu1、CMake、Ninja、ccache 和精确版本 Conan 2.34.0。Candidate 未发布或未通过晋级前，业务项目不能引用它作为 Active 工具链。
 
 ## 锁文件生成与使用
 
@@ -45,4 +45,4 @@ bash ci/build.sh
 5. 重复运行复用 Conan 本地缓存，但锁定依赖图不发生变化。
 6. 缺少 lockfile 或依赖声明未进入 fingerprint 时测试失败。
 
-后续阶段再接入受认证的不可变 Conan 远程仓库、DAG cache contract、ARM64 cross profile / sysroot，以及 GCC/Clang ABI 矩阵。
+本阶段还要根据 Trivy 结果确认 Ubuntu 26.04 镜像没有继承 Ubuntu 24.04 GA 内核头文件的未修复 CVE。后续阶段再接入受认证的不可变 Conan 远程仓库、DAG cache contract、ARM64 cross profile / sysroot，以及 GCC/Clang ABI 矩阵。
