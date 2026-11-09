@@ -34,7 +34,7 @@ class Aarch64CrossToolchainTests(unittest.TestCase):
     def test_version_registry_accepts_exact_cross_compiler_identity(self) -> None:
         self.assertEqual([], validate_versions(self.versions, self.catalog))
         item = next(x for x in self.versions["combinations"] if x["id"] == "cpp-aarch64-gcc13-cross")
-        self.assertEqual("13.5.0-10ubuntu1cross1", item["build_tool_version"])
+        self.assertEqual("13.5.0-1cross1", item["build_tool_version"])
         self.assertEqual("candidate", item["status"])
 
     def test_host_and_build_profiles_are_not_mixed(self) -> None:
