@@ -90,7 +90,7 @@
       "build_tool_version": "13.5.0-1cross1",
       "toolchain_id": "cpp-aarch64-gcc13-cross",
       "status": "candidate",
-      "notes": "Candidate Debian Forky (testing) AArch64 cross compiler: native GCC/G++ 13.5.0, target GCC/G++ package 13.5.0-1cross1, cross glibc 2.43-3cross8, Linux UAPI headers 7.2.12-1, binutils 2.47.50.20261021-1 and QEMU 1:11.1.2+ds-3. Forky is not a released stable distribution; build-only Candidate. Exact package inventory, sysroot digest, ABI symbol compatibility, QEMU tests and security scan must pass before promotion."
+      "notes": "Candidate Debian Forky (testing) AArch64 cross compiler: native GCC/G++ 13.5.0, target GCC/G++ package 13.5.0-1cross1, cross glibc 2.43-3cross8, Linux UAPI headers 7.2.12-1, binutils 2.47.50.20261021-1 and static QEMU user-mode 1:11.1.3+ds-1 from the pinned Sid snapshot. Forky is not a released stable distribution; build-only Candidate. Exact package inventory, sysroot digest, ABI symbol compatibility, QEMU tests and security scan must pass before promotion."
     }
   ]
 }
