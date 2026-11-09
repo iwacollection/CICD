@@ -65,13 +65,47 @@ resolve_start="$(now_ns)"
 resolve_end="$(now_ns)"
 resolve_ms="$(elapsed_ms "$resolve_start" "$resolve_end")"
 
+# Build an exact package list from the locked graph, then time the remote
+# package download separately from Conan's local install/generator phase.
+list_start="$(now_ns)"
+"$CONAN" list \
+  --graph=.ci-telemetry/conan-graph.json \
+  --remote=conancenter \
+  --format=json \
+  --out-file=.ci-telemetry/conan-package-list.json \
+  > .ci-telemetry/conan-list.log
+list_end="$(now_ns)"
+package_list_ms="$(elapsed_ms "$list_start" "$list_end")"
+
+python3 - .ci-telemetry/conan-package-list.json <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+if not isinstance(data, dict) or not data:
+    raise SystemExit("Conan package list is empty; refusing to report a successful download stage")
+print(f"conan_package_list_origins={','.join(data.keys())}")
+PY
+
+download_start="$(now_ns)"
+"$CONAN" download \
+  --list=.ci-telemetry/conan-package-list.json \
+  --remote=conancenter \
+  --format=json \
+  --out-file=.ci-telemetry/conan-download-result.json \
+  2>&1 | tee .ci-telemetry/conan-download.log
+download_end="$(now_ns)"
+download_ms="$(elapsed_ms "$download_start" "$download_end")"
+
 install_start="$(now_ns)"
 "$CONAN" install . \
   --output-folder=build/conan \
   --profile:host="$CONAN_PROFILE_HOST" \
   --profile:build="$CONAN_PROFILE_BUILD" \
   --lockfile="$LOCK_FILE" \
-  --remote=conancenter \
+  --no-remote \
   --build=missing \
   2>&1 | tee .ci-telemetry/conan-install.log
 install_end="$(now_ns)"
@@ -111,20 +145,24 @@ warm_ms="$(elapsed_ms "$warm_start" "$warm_end")"
 cp .ci-telemetry/cmake-build.json .ci-telemetry/cmake-warm-pass.json
 ccache --show-stats > .ci-telemetry/ccache-warm-pass.txt
 
-python3 - "$resolve_ms" "$install_ms" "$build_ms" "$warm_ms" "$CONAN_VERSION" "$LOCK_FILE" <<'PY'
+python3 - "$resolve_ms" "$package_list_ms" "$download_ms" "$install_ms" "$build_ms" "$warm_ms" "$CONAN_VERSION" "$LOCK_FILE" <<'PY'
 import hashlib
 import json
 import pathlib
 import re
 import sys
 
-resolve_ms, install_ms, build_ms, warm_ms = map(int, sys.argv[1:5])
-version, lock_path = sys.argv[5:7]
+resolve_ms, package_list_ms, download_ms, install_ms, build_ms, warm_ms = map(int, sys.argv[1:7])
+version, lock_path = sys.argv[7:9]
 root = pathlib.Path(".")
 lock_sha = hashlib.sha256((root / lock_path).read_bytes()).hexdigest()
 graph_path = root / ".ci-telemetry/conan-graph.json"
 graph_sha = hashlib.sha256(graph_path.read_bytes()).hexdigest()
+download_log = (root / ".ci-telemetry/conan-download.log").read_text(errors="replace")
 install_log = (root / ".ci-telemetry/conan-install.log").read_text(errors="replace")
+download_result = json.loads((root / ".ci-telemetry/conan-download-result.json").read_text(encoding="utf-8"))
+if not isinstance(download_result, dict):
+    raise SystemExit("Conan download result is not a JSON object")
 first_cmake = json.loads((root / ".ci-telemetry/cmake-first-pass.json").read_text(encoding="utf-8"))
 warm_cmake = json.loads((root / ".ci-telemetry/cmake-warm-pass.json").read_text(encoding="utf-8"))
 
@@ -149,8 +187,11 @@ telemetry = {
     "lockfile_sha256": lock_sha,
     "resolved_graph_sha256": graph_sha,
     "dependency_resolution_ms": resolve_ms,
-    "dependency_install_fetch_build_ms": install_ms,
-    "conan_download_log_lines": sum("Downloading" in line for line in install_log.splitlines()),
+    "dependency_package_list_ms": package_list_ms,
+    "dependency_download_ms": download_ms,
+    "dependency_download_log_lines": sum("Downloading" in line for line in download_log.splitlines()),
+    "dependency_local_install_generate_ms": install_ms,
+    "conan_downloaded_package_list_entries": sum(1 for _ in (root / ".ci-telemetry/conan-package-list.json").read_text(encoding="utf-8").splitlines() if ":" in _),
     "clean_configure_compile_total_ms": build_ms,
     "configure_generate_ms": first_cmake["configure_generate_ms"],
     "compile_link_ms": first_cmake["compile_link_ms"],
