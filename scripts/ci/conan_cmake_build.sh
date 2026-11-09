@@ -90,6 +90,7 @@ bash "$CI_CMAKE_BUILD_HELPER" \
   --define "CMAKE_TOOLCHAIN_FILE=$PWD/build/conan/conan_toolchain.cmake"
 build_end="$(now_ns)"
 build_ms="$(elapsed_ms "$build_start" "$build_end")"
+cp .ci-telemetry/cmake-build.json .ci-telemetry/cmake-first-pass.json
 ccache --show-stats > .ci-telemetry/ccache-first-pass.txt
 
 # Remove CMake/Ninja outputs, but deliberately preserve the same ccache directory.
@@ -107,6 +108,7 @@ bash "$CI_CMAKE_BUILD_HELPER" \
   --define "CMAKE_TOOLCHAIN_FILE=$PWD/build/conan/conan_toolchain.cmake"
 warm_end="$(now_ns)"
 warm_ms="$(elapsed_ms "$warm_start" "$warm_end")"
+cp .ci-telemetry/cmake-build.json .ci-telemetry/cmake-warm-pass.json
 ccache --show-stats > .ci-telemetry/ccache-warm-pass.txt
 
 python3 - "$resolve_ms" "$install_ms" "$build_ms" "$warm_ms" "$CONAN_VERSION" "$LOCK_FILE" <<'PY'
@@ -123,6 +125,8 @@ lock_sha = hashlib.sha256((root / lock_path).read_bytes()).hexdigest()
 graph_path = root / ".ci-telemetry/conan-graph.json"
 graph_sha = hashlib.sha256(graph_path.read_bytes()).hexdigest()
 install_log = (root / ".ci-telemetry/conan-install.log").read_text(errors="replace")
+first_cmake = json.loads((root / ".ci-telemetry/cmake-first-pass.json").read_text(encoding="utf-8"))
+warm_cmake = json.loads((root / ".ci-telemetry/cmake-warm-pass.json").read_text(encoding="utf-8"))
 
 def parse_ccache_stats(path: str) -> tuple[int, int]:
     data = (root / path).read_text(errors="replace")
@@ -148,7 +152,11 @@ telemetry = {
     "dependency_install_fetch_build_ms": install_ms,
     "conan_download_log_lines": sum("Downloading" in line for line in install_log.splitlines()),
     "clean_configure_compile_total_ms": build_ms,
+    "configure_generate_ms": first_cmake["configure_generate_ms"],
+    "compile_link_ms": first_cmake["compile_link_ms"],
     "warm_clean_rebuild_total_ms": warm_ms,
+    "warm_configure_generate_ms": warm_cmake["configure_generate_ms"],
+    "warm_compile_link_ms": warm_cmake["compile_link_ms"],
     "ccache_first_pass_hits": first_hits,
     "ccache_first_pass_misses": first_misses,
     "ccache_warm_pass_hits": warm_hits,

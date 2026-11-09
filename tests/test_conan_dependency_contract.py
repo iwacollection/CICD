@@ -44,6 +44,16 @@ class ConanDependencyContractTests(unittest.TestCase):
             fingerprint = fingerprint_files(ROOT / project["path"], target["cache_key_files"])
             self.assertTrue(fingerprint, name)
 
+    def test_lockfile_content_change_changes_cache_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lockfile = root / "conan.lock"
+            lockfile.write_text('{"requires":["fmt/11.0.2"]}\\n', encoding="utf-8")
+            before = fingerprint_files(root, ["conan.lock"])
+            lockfile.write_text('{"requires":["fmt/11.0.3"]}\\n', encoding="utf-8")
+            after = fingerprint_files(root, ["conan.lock"])
+            self.assertNotEqual(before, after)
+
     def test_missing_lockfile_fails_fingerprint_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
