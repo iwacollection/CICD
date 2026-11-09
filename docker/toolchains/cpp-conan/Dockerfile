@@ -3,7 +3,7 @@ FROM ghcr.io/iwacollection/cicd-toolchain-gcc-host@sha256:3caf311bd69a8faf218417
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Re-declare the same immutable Ubuntu archive snapshot used by the pinned base.
-RUN printf '%s\\n' 'APT::Snapshot "20260828T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
+RUN echo 'APT::Snapshot "20260828T000000Z";' > /etc/apt/apt.conf.d/50snapshot \
     && apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-venv \
     && python3 -m venv /opt/conan-venv \
