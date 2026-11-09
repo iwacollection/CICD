@@ -5,6 +5,8 @@ ARG APT_SNAPSHOT=20261107T000000Z
 ARG CROSS_GCC_VERSION=13.4.0-10ubuntu1cross1
 ARG HOST_GCC_PACKAGE_VERSION=13.4.0-10ubuntu1
 ARG CROSS_LIBC_VERSION=2.43-2ubuntu2cross1
+ARG CONAN_VERSION=2.34.0
+ARG CONAN_DEB_SHA256=94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1
 
 # Bootstrap TLS trust from ordinary archive metadata, then bind the cross
 # toolchain and its transitive packages to one immutable Ubuntu snapshot.
@@ -21,17 +23,20 @@ RUN rm -f /etc/apt/apt.conf.d/50snapshot \
        libc6-dev-arm64-cross="$CROSS_LIBC_VERSION" \
        binutils-aarch64-linux-gnu \
        qemu-user \
-       cmake ninja-build make ccache file binutils \
-       python3-venv \
+       cmake ninja-build make ccache file binutils curl python3 \
     && test "$(gcc-13 -dumpfullversion -dumpversion)" = "13.4.0" \
     && test "$(g++-13 -dumpfullversion -dumpversion)" = "13.4.0" \
     && test "$(aarch64-linux-gnu-gcc-13 -dumpfullversion -dumpversion)" = "13.4.0" \
     && test "$(aarch64-linux-gnu-g++-13 -dumpfullversion -dumpversion)" = "13.4.0" \
     && test "$(aarch64-linux-gnu-g++-13 -dumpmachine)" = "aarch64-linux-gnu" \
     && test -s /usr/aarch64-linux-gnu/include/features.h \
-    && python3 -m venv /opt/conan-venv \
-    && /opt/conan-venv/bin/pip install --disable-pip-version-check --no-cache-dir "conan==2.34.0" \
-    && /opt/conan-venv/bin/conan --version | grep -Fx "Conan version 2.34.0" \
+    && curl --fail --location --retry 3 \
+       "https://github.com/conan-io/conan/releases/download/${CONAN_VERSION}/conan-${CONAN_VERSION}-amd64.deb" \
+       --output /tmp/conan.deb \
+    && echo "${CONAN_DEB_SHA256}  /tmp/conan.deb" | sha256sum --check --status \
+    && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=60 install -y --no-install-recommends /tmp/conan.deb \
+    && test "$(conan --version)" = "Conan version ${CONAN_VERSION}" \
+    && rm -f /tmp/conan.deb \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/opt/conan-venv/bin:${PATH}" \
@@ -46,4 +51,6 @@ LABEL org.opencontainers.image.title="CICD AArch64 GCC 13 cross toolchain" \
       org.opencontainers.image.ubuntu.snapshot="20261107T000000Z" \
       org.opencontainers.image.target.triple="aarch64-linux-gnu" \
       org.opencontainers.image.target.compiler.version="13.4.0" \
-      org.opencontainers.image.target.sysroot="/usr/aarch64-linux-gnu"
+      org.opencontainers.image.target.sysroot="/usr/aarch64-linux-gnu" \
+      org.opencontainers.image.conan.version="2.34.0" \
+      org.opencontainers.image.conan.deb.sha256="94d34280e3915535bd73ac9e6896b11a5d0dea31b6c04f8c1c1acf9bf61013a1"
