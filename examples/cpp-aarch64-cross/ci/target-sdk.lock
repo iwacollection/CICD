@@ -1,28 +1,10 @@
 {
-  "build_host_compiler": {
-    "family": "GCC",
-    "gcc_package": "13.4.0-10ubuntu1",
-    "gxx_package": "13.4.0-10ubuntu1",
-    "version": "13.4.0"
-  },
-  "compiler": {
-    "family": "GCC",
-    "gcc_package": "13.4.0-10ubuntu1cross1",
-    "gxx_package": "13.4.0-10ubuntu1cross1",
-    "version": "13.4.0"
-  },
-  "emulator": "qemu-aarch64 version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.3)",
-  "linker": "GNU ld (GNU Binutils for Ubuntu) 2.46",
   "schema_version": 1,
+  "status": "bootstrap-required",
+  "target_triple": "aarch64-linux-gnu",
   "sdk": {
-    "apt_snapshot": "20261107T000000Z",
-    "package_inventory_sha256": "850c65a36fdb4cf0494d29e7ff8c116cd87ffa924ff0d2454249deaf2231fb8f",
-    "sha256": "d8fe7e829865eee8e980a4592942ba8eb5f17d8907ab663f07a54132f4db20e1",
-    "version": "ubuntu-resolute-20261107-gcc13-cross"
+    "version": "debian-forky-20261108-gcc13-cross",
+    "apt_snapshot": "20261108T000000Z"
   },
-  "sysroot": {
-    "path": "/usr/aarch64-linux-gnu",
-    "sha256": "ca6c71a87093b3306ea07e5a9a70d03c103ce45c51c84d7212896674bde78e12"
-  },
-  "target_triple": "aarch64-linux-gnu"
+  "reason": "Not a verified SDK lock. Generate the actual toolchain, sysroot and package digests with ci/verify.sh --bootstrap inside the pinned image, then commit that generated identity."
 }
