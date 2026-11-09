@@ -73,6 +73,7 @@ sdk_digest="$(
     "$TARGET_TRIPLE" "$EXPECTED_COMPILER" "$compiler_package" "$gcc_package" \
     "$libc_package" "$host_compiler_version" "$host_gcc_package" "$host_gxx_package" \
     "$linker_version" "$sysroot_digest" "$package_inventory_sha256" "$APT_SNAPSHOT" \
+    | sha256sum | awk '{print $1}'
 )"
 
 python3 - "$mode" "$TARGET_TRIPLE" "$EXPECTED_COMPILER" "$compiler_package" "$gcc_package" \
