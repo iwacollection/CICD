@@ -190,6 +190,19 @@ jobs:
             "ci-toolchain-verify:$GITHUB_SHA" \
             bash -euo pipefail -c "$COMMAND"
 
+      - name: Upload AArch64 sysroot and Conan lock evidence
+        if: success() && matrix.toolchain == 'cpp-aarch64-gcc13-cross'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aarch64-cross-bootstrap-${{ github.sha }}
+          path: |
+            ${{ matrix.verification_fixture }}/conan.lock
+            ${{ matrix.verification_fixture }}/ci/target-sdk.lock
+            ${{ matrix.verification_fixture }}/build/arm64/build-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
       - name: Scan candidate vulnerabilities and licenses
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
         with:
