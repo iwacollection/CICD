@@ -87,7 +87,7 @@ def _ninja_words(value: str) -> list[str]:
     index = 0
     while index < len(value):
         char = value[index]
-        if char == "$" and index + 1 < len(value):
+        if char == "$" and index + 1 < len(value) and value[index + 1] in {" ", "$", ":", "|"}:
             current.append(value[index + 1])
             index += 2
         elif char.isspace():
@@ -103,6 +103,20 @@ def _ninja_words(value: str) -> list[str]:
     return words
 
 
+def _ninja_rule_separator(value: str) -> int:
+    for index, char in enumerate(value):
+        if char != ":":
+            continue
+        dollars = 0
+        cursor = index - 1
+        while cursor >= 0 and value[cursor] == "$":
+            dollars += 1
+            cursor -= 1
+        if dollars % 2 == 0:
+            return index
+    return -1
+
+
 def _ninja_rule_map(build_dir: Path) -> dict[str, str]:
     mapping: dict[str, str] = {}
     build_file = build_dir / "build.ninja"
@@ -111,11 +125,13 @@ def _ninja_rule_map(build_dir: Path) -> dict[str, str]:
     for line in build_file.read_text(encoding="utf-8", errors="replace").splitlines():
         if not line.startswith("build "):
             continue
-        left, separator, right = line.partition(":")
-        if not separator:
+        body = line[6:]
+        separator = _ninja_rule_separator(body)
+        if separator < 0:
             continue
+        left, right = body[:separator], body[separator + 1:]
         rule = right.strip().split(maxsplit=1)[0] if right.strip() else ""
-        outputs = _ninja_words(left[6:].split("|", 1)[0])
+        outputs = _ninja_words(left.split("|", 1)[0])
         for output in outputs:
             mapping[output] = rule
     return mapping
@@ -255,8 +271,6 @@ def _isolated_ccache_environment(
     env.update({
         "CCACHE_DIR": str(cache_dir),
         "CCACHE_CONFIGPATH": str(config_path),
-        "CCACHE_REMOTE_STORAGE": "",
-        "CCACHE_REMOTE_ONLY": "false",
         "CCACHE_MAXSIZE": max_size,
     })
     return env, config_path
