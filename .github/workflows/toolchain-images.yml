@@ -190,6 +190,14 @@ jobs:
             "ci-toolchain-verify:$GITHUB_SHA" \
             bash -euo pipefail -c "$COMMAND"
 
+      - name: Upload generated C++ Conan lockfile for initial review
+        if: success() && matrix.toolchain == 'gcc13-conan234' && hashFiles('examples/cpp-conan-consumer/conan.lock') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cpp-conan-lock-bootstrap-${{ github.sha }}
+          path: examples/cpp-conan-consumer/conan.lock
+          if-no-files-found: error
+
       - name: Scan candidate vulnerabilities and licenses
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
         with:

@@ -165,6 +165,29 @@
       "verification_fixture": "examples/cpp-gcc12-service",
       "verification_command": "cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=g++-12 && cmake --build build && ctest --test-dir build --output-on-failure",
       "compiler_version": "12.5.0-9ubuntu1"
+    },
+    {
+      "id": "gcc13-conan234",
+      "status": "candidate",
+      "execution_mode": "container",
+      "description": "Ubuntu 26.04 LTS C++ build environment with exact GCC/G++ 13.4.0 and Conan 2.34.0; Linux 7.0 HWE headers are sourced from a pinned 2026-11-07 APT snapshot.",
+      "image": "ghcr.io/iwacollection/cicd-toolchain-gcc13-conan",
+      "digest": "",
+      "dockerfile": "docker/toolchains/cpp-conan/Dockerfile",
+      "context": "docker/toolchains/cpp-conan",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "smoke_command": "bash /usr/local/bin/cpp-conan-smoke",
+      "compiler": "gcc-13/g++-13",
+      "language": "cpp",
+      "verification_fixture": "examples/cpp-conan-consumer",
+      "verification_command": "bash ci/build.sh",
+      "compiler_version": "13.4.0-10ubuntu1",
+      "base_os": "Ubuntu 26.04 LTS",
+      "apt_snapshot": "20261107T000000Z",
+      "base_image": "docker.io/library/ubuntu:26.04",
+      "base_digest": "sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b"
     }
   ]
 }

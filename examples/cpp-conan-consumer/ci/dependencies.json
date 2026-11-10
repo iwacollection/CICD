@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "package_manager": "conan",
+  "package_manager_version": "2.34.0",
+  "lockfile": "conan.lock",
+  "profile": "profiles/gcc13-linux-x86_64",
+  "host_target": "Linux/x86_64",
+  "compiler": "gcc-13",
+  "language_standard": "17",
+  "direct_dependencies": ["fmt/11.0.2"],
+  "fingerprint_files": [
+    "conanfile.py",
+    "conan.lock",
+    "profiles/gcc13-linux-x86_64",
+    "CMakeLists.txt",
+    "libs/core/CMakeLists.txt",
+    "libs/transport/CMakeLists.txt",
+    "ci/dependencies.json"
+  ]
+}
