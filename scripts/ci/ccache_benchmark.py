@@ -307,16 +307,43 @@ def _cache_stats(cache_dir: Path, stats_log: Path, env: dict[str, str]) -> dict[
 
 
 def _split_cxx_flags(extra_args: list[str] | None, changed_flags: str = "") -> tuple[str, list[str]]:
-    """Merge caller-supplied CMAKE_CXX_FLAGS with the benchmark variant."""
+    """Merge CMAKE_CXX_FLAGS and reject caller overrides of the ccache launcher."""
     baseline: list[str] = []
     passthrough: list[str] = []
-    for arg in extra_args or []:
-        match = re.match(r"^-DCMAKE_CXX_FLAGS(?::[^=]+)?=(.*)$", arg)
-        if match:
-            if match.group(1).strip():
-                baseline.append(match.group(1).strip())
-        else:
+    args = extra_args or []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        definition: str | None = None
+        consumed = 1
+        if arg == "-D" and index + 1 < len(args):
+            definition = args[index + 1]
+            consumed = 2
+        elif arg.startswith("-D"):
+            definition = arg[2:]
+
+        if definition is None:
             passthrough.append(arg)
+            index += 1
+            continue
+
+        launcher = re.match(
+            r"^(CMAKE_(?:C|CXX)_COMPILER_LAUNCHER)(?::[^=]+)?=",
+            definition,
+        )
+        if launcher:
+            raise ValueError(
+                f"{launcher.group(1)} is controlled by the benchmark and cannot be overridden"
+            )
+
+        flags = re.match(r"^CMAKE_CXX_FLAGS(?::[^=]+)?=(.*)$", definition)
+        if flags:
+            if flags.group(1).strip():
+                baseline.append(flags.group(1).strip())
+        else:
+            passthrough.extend(args[index:index + consumed])
+        index += consumed
+
     combined = " ".join([*baseline, changed_flags.strip()] if changed_flags.strip() else baseline)
     return combined, passthrough
 
