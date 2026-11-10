@@ -279,12 +279,24 @@ jobs:
         if: inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
         run: python3 source/scripts/ci/ci_metrics.py start --file "$RUNNER_TEMP/ci-stage-metrics.json" --stage upstream_artifact_download
 
-      - name: Download previous DAG level artifacts
+      - name: Build direct upstream artifact pattern
+        id: upstream_pattern
+        if: inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
+        shell: bash
+        env:
+          CI_DEPENDS_ON: ${{ inputs.depends_on_json }}
+        run: |
+          set -euo pipefail
+          pattern="$(python3 .ci-platform/scripts/ci/upstream_artifact_pattern.py --dependencies-json "$CI_DEPENDS_ON")"
+          echo "pattern=$pattern" >> "$GITHUB_OUTPUT"
+          echo "Direct upstream artifact filter: $pattern" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Download declared upstream DAG artifacts
         id: upstream_download
         if: inputs.depends_on_json != '[]' && steps.trust.outputs.hardware_pr != 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: dag-*
+          pattern: ${{ steps.upstream_pattern.outputs.pattern }}
           path: upstream-artifacts
           merge-multiple: false
 
