@@ -109,6 +109,10 @@ def collect_build_telemetry(
         cmake = json.loads((telemetry_dir / "cmake-build.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         cmake = {}
+    try:
+        conan = json.loads((telemetry_dir / "conan-build-timings.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        conan = {}
     return {
         "schema_version": 1,
         "build_exit_code": int(build_exit_code),
@@ -116,6 +120,7 @@ def collect_build_telemetry(
         "resources": resource_profile or {},
         "ccache": parse_ccache_stats(build_stats, global_stats),
         "cmake_ninja": cmake,
+        "conan": conan,
     }
 
 
