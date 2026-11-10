@@ -233,6 +233,68 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(result["files_in_cache"], 120)
         self.assertEqual(result["cache_size_gib"], 0.3)
 
+    def test_missing_build_local_ccache_stats_are_unavailable_not_zero(self) -> None:
+        from compile_telemetry import parse_ccache_stats
+        from ci_metrics import _build_telemetry_summary, format_aggregate_summary
+
+        global_stats = (
+            "Cache size (GB): 0.3 / 5.0 (6.0%)\\n"
+            "Files: 120\\n"
+            "Cleanups: 3\\n"
+        )
+        parsed = parse_ccache_stats("", global_stats)
+        self.assertFalse(parsed["available"])
+        self.assertFalse(parsed["build_stats_available"])
+        self.assertTrue(parsed["global_available"])
+        self.assertIsNone(parsed["hits"])
+        self.assertIsNone(parsed["misses"])
+        self.assertEqual(parsed["cache_size_gib"], 0.3)
+        self.assertEqual(parsed["cleanup_events"], 3)
+        self.assertEqual(parsed["cleanup_events_scope"], "global_snapshot")
+
+        summary = _build_telemetry_summary([{
+            "build_telemetry": [{
+                "phase": "build",
+                "ccache": parsed,
+                "resources": {"effective_jobs": 4},
+                "cmake_ninja": {},
+            }],
+        }])
+        self.assertEqual(summary["ccache"]["samples"], 0)
+        self.assertIsNone(summary["ccache"]["hits"])
+        self.assertIsNone(summary["ccache"]["misses"])
+        self.assertIsNone(summary["ccache"]["hit_rate_percent"])
+        self.assertEqual(summary["ccache"]["global_samples"], 1)
+        self.assertEqual(summary["ccache"]["max_cache_size_gib"], 0.3)
+        self.assertEqual(summary["ccache"]["max_files_in_cache"], 120)
+        self.assertEqual(summary["ccache"]["global_cleanup_snapshot_max"], 3)
+        self.assertIsNone(summary["resources"]["cpu_throttled_usec_total"])
+        self.assertIsNone(summary["resources"]["oom_kill_events_total"])
+        self.assertIsNone(summary["resources"]["io_read_bytes_total"])
+        self.assertIsNone(summary["resources"]["io_write_bytes_total"])
+        self.assertIsNone(summary["resources"]["io_pressure_some_usec_total"])
+
+        report = {
+            "job_count": 1,
+            "job_kind_summary": {},
+            "stage_summary": {},
+            "build_telemetry_summary": summary,
+            "jobs": [],
+        }
+        rendered = format_aggregate_summary(report)
+        self.assertIn("build-local hit/miss stats unavailable", rendered)
+        self.assertIn("0.30 GiB / 120 files", rendered)
+        self.assertIn("CPU throttled n/a us", rendered)
+        self.assertIn("read n/a bytes / write n/a bytes", rendered)
+        self.assertNotIn("0 hits / 0 misses", rendered)
+
+        empty = parse_ccache_stats("", "")
+        self.assertFalse(empty["available"])
+        self.assertFalse(empty["global_available"])
+        self.assertIsNone(empty["hits"])
+        self.assertIsNone(empty["misses"])
+        self.assertIsNone(empty["cleanup_events"])
+
     def test_resource_telemetry_calculates_cpu_memory_io_and_psi_deltas(self) -> None:
         before = {
             "cpu_stat": {"usage_usec": 1000, "throttled_usec": 200, "nr_throttled": 2},
