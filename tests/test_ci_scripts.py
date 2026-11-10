@@ -34,6 +34,7 @@ from validate_promotion_source import (  # noqa: E402
     validate_run_metadata,
 )
 from verify_artifact import validate_manifest_identity  # noqa: E402
+from upstream_artifact_pattern import build_pattern as build_upstream_artifact_pattern  # noqa: E402
 
 
 class CiPlatformTests(unittest.TestCase):
@@ -823,6 +824,27 @@ class CiPlatformTests(unittest.TestCase):
             expected_source_sha=expected_source_sha,
             expected_repository=expected_repository,
         )
+
+    def test_upstream_artifact_pattern_selects_only_declared_direct_dependencies(self) -> None:
+        self.assertEqual(
+            build_upstream_artifact_pattern(["hello-service"]),
+            "dag-hello-service-*",
+        )
+        self.assertEqual(
+            build_upstream_artifact_pattern(["conan-format-lib", "conan-compression-lib"]),
+            "dag-{conan-compression-lib,conan-format-lib}-*",
+        )
+        with self.assertRaisesRegex(ValueError, "non-empty"):
+            build_upstream_artifact_pattern([])
+        with self.assertRaisesRegex(ValueError, "duplicates"):
+            build_upstream_artifact_pattern(["hello-service", "hello-service"])
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            build_upstream_artifact_pattern(["service api", "service-api"])
+
+        node = (ROOT / ".github" / "workflows" / "dag-node.yml").read_text(encoding="utf-8")
+        self.assertIn("upstream_artifact_pattern.py", node)
+        self.assertIn("pattern: ${{ steps.upstream_pattern.outputs.pattern }}", node)
+        self.assertNotIn("pattern: dag-*", node)
 
     def test_upstream_resolver_fails_closed_when_artifact_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
