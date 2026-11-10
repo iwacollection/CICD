@@ -80,6 +80,29 @@ def _compiler_identity(build_dir: Path) -> dict[str, Any]:
     return identity
 
 
+def _ninja_words(value: str) -> list[str]:
+    """Split Ninja path words while decoding escaped spaces and dollar signs."""
+    words: list[str] = []
+    current: list[str] = []
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if char == "$" and index + 1 < len(value):
+            current.append(value[index + 1])
+            index += 2
+        elif char.isspace():
+            if current:
+                words.append("".join(current))
+                current = []
+            index += 1
+        else:
+            current.append(char)
+            index += 1
+    if current:
+        words.append("".join(current))
+    return words
+
+
 def _ninja_rule_map(build_dir: Path) -> dict[str, str]:
     mapping: dict[str, str] = {}
     build_file = build_dir / "build.ninja"
@@ -92,7 +115,7 @@ def _ninja_rule_map(build_dir: Path) -> dict[str, str]:
         if not separator:
             continue
         rule = right.strip().split(maxsplit=1)[0] if right.strip() else ""
-        outputs = left[6:].split("|", 1)[0].split()
+        outputs = _ninja_words(left[6:].split("|", 1)[0])
         for output in outputs:
             mapping[output] = rule
     return mapping
@@ -217,6 +240,28 @@ def _pending_ninja_actions(build_dir: Path, env: dict[str, str]) -> int | None:
     return sum(1 for line in proc.stdout.splitlines() if re.match(r"^\s*\[\d+/\d+\]", line))
 
 
+def _isolated_ccache_environment(
+    base_env: dict[str, str],
+    root: Path,
+    cache_dir: Path,
+    max_size: str,
+) -> tuple[dict[str, str], Path]:
+    """Use a private config and disable inherited ccache remote storage."""
+    config_path = root / "ccache.conf"
+    config_path.write_text("remote_storage =\nremote_only = false\n", encoding="utf-8")
+    env = base_env.copy()
+    for key in ("CCACHE_REMOTE_STORAGE", "CCACHE_REMOTE_ONLY"):
+        env.pop(key, None)
+    env.update({
+        "CCACHE_DIR": str(cache_dir),
+        "CCACHE_CONFIGPATH": str(config_path),
+        "CCACHE_REMOTE_STORAGE": "",
+        "CCACHE_REMOTE_ONLY": "false",
+        "CCACHE_MAXSIZE": max_size,
+    })
+    return env, config_path
+
+
 def _cache_stats(cache_dir: Path, stats_log: Path, env: dict[str, str]) -> dict[str, Any]:
     phase_env = env.copy()
     phase_env["CCACHE_DIR"] = str(cache_dir)
@@ -237,7 +282,29 @@ def _cache_stats(cache_dir: Path, stats_log: Path, env: dict[str, str]) -> dict[
         stderr=subprocess.STDOUT,
         check=False,
     )
-    return parse_ccache_stats(log.stdout if log.returncode == 0 else "", global_stats.stdout if global_stats.returncode == 0 else "")
+    if log.returncode != 0 or not log.stdout.strip():
+        return {
+            "available": False,
+            "reason": "per-phase ccache --show-log-stats is unavailable or empty",
+            "hits": None,
+            "misses": None,
+        }
+    return parse_ccache_stats(log.stdout, global_stats.stdout if global_stats.returncode == 0 else "")
+
+
+def _split_cxx_flags(extra_args: list[str] | None, changed_flags: str = "") -> tuple[str, list[str]]:
+    """Merge caller-supplied CMAKE_CXX_FLAGS with the benchmark variant."""
+    baseline: list[str] = []
+    passthrough: list[str] = []
+    for arg in extra_args or []:
+        match = re.match(r"^-DCMAKE_CXX_FLAGS(?::[^=]+)?=(.*)$", arg)
+        if match:
+            if match.group(1).strip():
+                baseline.append(match.group(1).strip())
+        else:
+            passthrough.append(arg)
+    combined = " ".join([*baseline, changed_flags.strip()] if changed_flags.strip() else baseline)
+    return combined, passthrough
 
 
 def _configure(
@@ -248,15 +315,16 @@ def _configure(
     compiler_flags: str = "",
     extra_args: list[str] | None = None,
 ) -> dict[str, Any]:
+    effective_cxx_flags, passthrough_args = _split_cxx_flags(extra_args, compiler_flags)
     command = [
         "cmake", "-S", str(source_dir), "-B", str(build_dir), "-G", "Ninja",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
         "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
     ]
-    if compiler_flags:
-        command.append(f"-DCMAKE_CXX_FLAGS={compiler_flags}")
-    command.extend(extra_args or [])
+    if effective_cxx_flags:
+        command.append(f"-DCMAKE_CXX_FLAGS={effective_cxx_flags}")
+    command.extend(passthrough_args)
     code, elapsed, output = _run(command, cwd=source_dir, env=env)
     result = {"exit_code": code, "duration_ms": elapsed, "output_tail": output}
     if code != 0:
@@ -331,9 +399,10 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         cache_dir.mkdir()
         jobs = str(args.build_jobs)
         base_env = os.environ.copy()
+        base_env, ccache_config = _isolated_ccache_environment(
+            base_env, root, cache_dir, args.cache_max_size
+        )
         base_env.update({
-            "CCACHE_DIR": str(cache_dir),
-            "CCACHE_MAXSIZE": args.cache_max_size,
             "CCACHE_BASEDIR": str(root),
             "CI_BUILD_JOBS": jobs,
             "CMAKE_BUILD_PARALLEL_LEVEL": jobs,
@@ -345,6 +414,8 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                 "header_file": str(relative_header),
                 "build_jobs": args.build_jobs,
                 "cache_max_size": args.cache_max_size,
+                "ccache_config": str(ccache_config),
+                "ccache_remote_storage_disabled": True,
             }, indent=2) + "\n",
             encoding="utf-8",
         )
@@ -444,6 +515,8 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             "shared_header_file": str(relative_header),
             "build_jobs": args.build_jobs,
             "cache_max_size": args.cache_max_size,
+            "ccache_config": str(ccache_config),
+            "ccache_remote_storage_disabled": True,
             "changed_cxx_flags": args.changed_cxx_flags,
             "warm_runs": args.warm_runs,
             "test_parallelism": args.test_parallelism,
