@@ -228,6 +228,8 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
     phase_values: dict[str, list[float]] = {}
     conan_phase_values: dict[str, list[float]] = {}
     conan_phase_fields = (
+        "tool_preflight_ms",
+        "conan_venv_setup_ms",
         "dependency_resolution_ms",
         "dependency_package_list_ms",
         "dependency_download_ms",
