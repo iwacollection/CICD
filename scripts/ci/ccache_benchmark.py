@@ -57,6 +57,26 @@ def _copy_ignore(directory: str, names: list[str]) -> set[str]:
     return {name for name in names if name in IGNORE_DIRS or name.startswith("cmake-build-")}
 
 
+def _comparison_context(toolchain_identity: str | None, runner_class: str | None) -> dict[str, Any]:
+    identity = (toolchain_identity or "").strip()
+    runner = (runner_class or "").strip()
+    immutable_identity = bool(re.search(r"sha256:[0-9a-f]{64}(?:\\b|$)", identity, re.IGNORECASE))
+    reasons: list[str] = []
+    if not identity:
+        reasons.append("toolchain identity was not supplied")
+    elif not immutable_identity:
+        reasons.append("toolchain identity does not contain an immutable sha256 digest")
+    if not runner:
+        reasons.append("runner class was not supplied")
+    return {
+        "toolchain_identity": identity or None,
+        "immutable_toolchain_identity": immutable_identity,
+        "runner_class": runner or None,
+        "comparable": not reasons,
+        "reasons": reasons,
+    }
+
+
 def _effective_changed_cxx_flags(value: str | None) -> str:
     return (value or DEFAULT_CHANGED_CXX_FLAGS).strip() or DEFAULT_CHANGED_CXX_FLAGS
 
@@ -573,7 +593,9 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             "warm_runs": args.warm_runs,
             "test_parallelism": args.test_parallelism,
             "compiler_identity": compiler_identity,
+            "comparison_context": _comparison_context(args.toolchain_identity, args.runner_class),
             "runner": {
+                "class": args.runner_class or None,
                 "os": os.environ.get("RUNNER_OS") or os.name,
                 "arch": os.environ.get("RUNNER_ARCH") or None,
                 "name": os.environ.get("RUNNER_NAME") or None,
@@ -595,7 +617,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                 "cold_cache_control": "Same final source state as the cache-disabled control, with a fresh empty ccache directory.",
                 "cache_disabled_control": "Same final source state as the cold-cache control, with ccache disabled; compare timings, not just hit rate.",
                 "secondary_project_shared_cache": "Optional second project uses the same isolated cache; observed hits, not assumptions, determine reuse.",
-                "limits": "This is a single-run experiment. Repeat on the same runner/toolchain and use representative production sources before claiming performance gains.",
+                "limits": "This is a single-run experiment. A comparable result requires comparison_context.comparable=true, the same runner class and immutable toolchain digest across runs, and representative production sources before claiming performance gains.",
             },
         }
 
@@ -609,6 +631,8 @@ def main() -> int:
     parser.add_argument("--build-jobs", type=int, default=max(1, os.cpu_count() or 1))
     parser.add_argument("--cache-max-size", default="2G")
     parser.add_argument("--changed-cxx-flags", default=DEFAULT_CHANGED_CXX_FLAGS, help="C++ flags that change generated code in the compiler-flag isolation scenario")
+    parser.add_argument("--toolchain-identity", default=os.environ.get("CI_TOOLCHAIN_IDENTITY", ""), help="Immutable toolchain image identity, including sha256:<64 hex> digest")
+    parser.add_argument("--runner-class", default=os.environ.get("CI_RUNNER_CLASS", ""), help="Stable runner class label used for repeatable comparisons")
     parser.add_argument("--warm-runs", type=int, default=3, help="Number of repeated warm no-op builds")
     parser.add_argument("--test-parallelism", type=int, default=1, help="CTest parallelism; default 1 records a serial baseline")
     parser.add_argument("--cmake-arg", action="append", default=[], help="Extra CMake configure argument; may be repeated")
