@@ -273,3 +273,68 @@ The separate `CI End-to-End Observability` workflow runs after a `Build Matrix` 
 
 The first report should be read as an attribution tool: use run queue and Job queue to identify scheduling delays, Job runtime to identify slow DAG nodes, and stage timings to identify the work inside the slow Job. This separates GitHub scheduling, dependency topology, Runner execution, and the actual build/security stages instead of collapsing them into one undifferentiated duration.
 
+
+
+## 10. P1 DAG artifact transfer fan-out (2026-11-10)
+
+### DAG and critical-path comparison
+
+The project graph and Build/Security split were deliberately kept unchanged. The current example graph is:
+
+```text
+L0: hello-lib ───────────────┐
+    conan-format-lib ──┐    │
+    conan-compression-lib ──┴─> L1: conan-demo-app
+                         └────> L1: hello-cpp
+                                  |
+                                  v
+                            L2: hello-service
+                                  |
+                                  v
+                            L3: hello-release
+```
+
+Before this change, every consumer used the broad `dag-*` download pattern and received every DAG artifact already published by earlier levels. After this change, `upstream_artifact_pattern.py` builds a minimatch pattern from the declared direct `depends_on_json` entries. One dependency produces one exact project prefix; multiple dependencies use brace expansion. `resolve_upstream_artifacts.py` remains the authoritative verifier and still checks repository, source SHA, target, Artifact Contract v2 identity, digest and bundle contents. The pattern is a transfer filter, not a trust boundary.
+
+Evidence:
+- Before: [main Build Matrix #42807377361](https://github.com/iwacollection/CICD/actions/runs/42807377361), main SHA `44c582dbb0c954ea865420302bcc7ef21cde54c0`.
+- After: [PR Build Matrix #42808770144](https://github.com/iwacollection/CICD/actions/runs/42808770144), PR head `c04f19fa628226a5b5904acbb0b18fdfaa0ea5d7`.
+- Both runs exercised the same seven DAG projects on `ubuntu-latest` with the same declared toolchain identities. The event differs (main push vs pull request), so end-to-end timing is reported separately and is not attributed to the filter.
+
+### Artifact transfer by consumer
+
+Artifact sizes below are the GitHub artifact archive sizes for the corresponding run. The PR run's archive metadata is a few bytes larger because its source commit identity differs.
+
+| Consumer | Direct dependencies | Before downloads / bytes | After downloads / bytes |
+|---|---:|---:|---:|
+| hello-cpp | 1 | 1 / 4,125 B | 1 / 4,128 B |
+| conan-demo-app | 2 | 3 / 16,131 B | 2 / 12,012 B |
+| hello-service | 1 | 5 / 146,881 B | 1 / 6,614 B |
+| hello-release | 1 | 6 / 150,849 B | 1 / 3,971 B |
+| **Total** | **5** | **15 / 317,986 B** | **5 / 26,725 B** |
+
+The filter removed 10 unrelated artifact downloads and approximately 291,306 B (91.6%) of repeated archive payload in this fixture run. The multi-dependency case was exercised by `conan-demo-app` and downloaded exactly two artifacts; the single-dependency cases downloaded exactly one each. The Build Matrix logs for #42808770144 report 1, 2, 1 and 1 downloaded artifacts respectively.
+
+### Time, job count and critical path are separate
+
+| Measurement | Before #42807377361 | After #42808770144 | Interpretation |
+|---|---:|---:|---|
+| Active GitHub jobs | 21 | 19 | PR event skips main-only attestation and regression-monitor jobs; DAG topology itself remains 7 Build + 7 Security jobs |
+| End-to-end workflow elapsed | 217 s | 224 s | No wall-clock improvement observed; event/runner variance means this is not a causal comparison |
+| Instrumented workflow span | 155.65 s | 161.86 s | No improvement claim |
+| L0-to-L3 level-barrier span | 149 s | 157 s | Dependency graph and level barriers are unchanged |
+| Upstream download stage median | 0.825 s | 1.090 s | Small fixture payloads are dominated by action/runner overhead; fewer bytes did not reduce this stage's measured time |
+| Upstream identity-resolution median | 0.157 s | 0.163 s | Unchanged within run variance |
+| Artifact package / verify median | 0.144 / 0.133 s | 0.143 / 0.132 s | Unchanged |
+| Artifact upload median | 1.080 s | 1.330 s | Not affected by the download filter |
+
+The direct filter is therefore retained as a measured transfer-volume reduction, not advertised as an end-to-end build-speedup. With these small fixtures the download action's startup overhead dominates; larger real artifacts are needed to determine whether this also lowers wall-clock time.
+
+The existing artifact-only `hello-service` and `hello-release` nodes already use the hosted runner and do not enter the `toolchain_image_pull` stage. The current mainline run records only two toolchain-image-pull stages across seven build nodes. A historical pre-host-runner baseline (#42335949203) spent 10 s and 4 s pulling compiler images in those two artifact-only nodes; the later host-runner path skips those pulls.
+
+### Security and remaining topology boundary
+
+- PR #94's failure-injection tests for missing, mismatched and corrupted upstream artifacts are merged in [main commit 44c582d](https://github.com/iwacollection/CICD/commit/44c582dbb0c954ea865420302bcc7ef21cde54c0).
+- The after run #42808770144 passed all seven detached Security jobs, the detached security evidence barrier and Build gate. The mainline run #42807377361 additionally passed trusted artifact attestation/signature and the performance regression monitor.
+- The filter does not bypass Artifact Contract verification and does not alter SBOM, Trivy, permissions, failure-closed behavior or the final gate.
+- No Build/Security jobs were merged. The current GitHub Actions matrix still has a level barrier: every node in level N waits for all jobs in level N-1, even when its direct dependencies have finished. This filter does not shorten that critical path. Removing the barrier requires a statically generated per-project job graph or a dedicated DAG executor; a matrix item cannot supply a dynamic `needs` list. That architectural change is intentionally outside this artifact-transfer PR.
