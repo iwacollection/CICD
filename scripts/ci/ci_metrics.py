@@ -219,11 +219,43 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
     compile_reports = [item for item in build_reports if item.get("phase", "build") == "build"]
     cache_reports = [
         report.get("ccache", {}) for report in compile_reports
-        if isinstance(report.get("ccache"), dict) and report.get("ccache", {}).get("available")
+        if isinstance(report.get("ccache"), dict)
+        and report.get("ccache", {}).get("available") is True
+        and isinstance(report.get("ccache", {}).get("hits"), (int, float))
+        and isinstance(report.get("ccache", {}).get("misses"), (int, float))
     ]
-    hits = sum(int(item.get("hits") or 0) for item in cache_reports)
-    misses = sum(int(item.get("misses") or 0) for item in cache_reports)
-    total = hits + misses
+    global_cache_reports = [
+        report.get("ccache", {}) for report in build_reports
+        if isinstance(report.get("ccache"), dict)
+        and (
+            report.get("ccache", {}).get("global_available") is True
+            or isinstance(report.get("ccache", {}).get("cache_size_gib"), (int, float))
+            or isinstance(report.get("ccache", {}).get("files_in_cache"), (int, float))
+            or report.get("ccache", {}).get("cleanup_events_scope") == "global_snapshot"
+        )
+    ]
+    hits = sum(int(item["hits"]) for item in cache_reports) if cache_reports else None
+    misses = sum(int(item["misses"]) for item in cache_reports) if cache_reports else None
+    total = hits + misses if isinstance(hits, (int, float)) and isinstance(misses, (int, float)) else 0
+    build_cleanup_values = [
+        int(item["cleanup_events"]) for item in compile_reports
+        if isinstance(item.get("ccache"), dict)
+        and item.get("ccache", {}).get("cleanup_events_scope", "build") == "build"
+        and isinstance(item.get("ccache", {}).get("cleanup_events"), (int, float))
+    ]
+    global_cleanup_values = [
+        int(item["cleanup_events"]) for item in global_cache_reports
+        if item.get("cleanup_events_scope") == "global_snapshot"
+        and isinstance(item.get("cleanup_events"), (int, float))
+    ]
+    cache_size_values = [
+        float(item["cache_size_gib"]) for item in global_cache_reports
+        if isinstance(item.get("cache_size_gib"), (int, float))
+    ]
+    cache_file_values = [
+        int(item["files_in_cache"]) for item in global_cache_reports
+        if isinstance(item.get("files_in_cache"), (int, float))
+    ]
 
     phase_values: dict[str, list[float]] = {}
     conan_phase_values: dict[str, list[float]] = {}
@@ -241,12 +273,12 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
     )
     ninja_values: dict[str, list[float]] = {}
     effective_jobs_values: list[float] = []
-    cpu_throttled_usec_total = 0
-    oom_kill_events_total = 0
+    cpu_throttled_values: list[int] = []
+    oom_kill_values: list[int] = []
     memory_peak_values: list[int] = []
-    io_read_bytes_total = 0
-    io_write_bytes_total = 0
-    io_pressure_some_usec_total = 0
+    io_read_values: list[int] = []
+    io_write_values: list[int] = []
+    io_pressure_some_values: list[int] = []
     no_op_successes = 0
     for item in build_reports:
         resources = item.get("resources", {})
@@ -260,17 +292,27 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
                 mem_delta = delta.get("memory_events", {})
                 io_delta = delta.get("io", {})
                 if isinstance(cpu_delta, dict):
-                    cpu_throttled_usec_total += int(cpu_delta.get("throttled_usec") or 0)
+                    value = cpu_delta.get("throttled_usec")
+                    if isinstance(value, (int, float)):
+                        cpu_throttled_values.append(int(value))
                 if isinstance(mem_delta, dict):
-                    oom_kill_events_total += int(mem_delta.get("oom_kill") or 0)
+                    value = mem_delta.get("oom_kill")
+                    if isinstance(value, (int, float)):
+                        oom_kill_values.append(int(value))
                 if isinstance(io_delta, dict):
-                    io_read_bytes_total += int(io_delta.get("rbytes") or 0)
-                    io_write_bytes_total += int(io_delta.get("wbytes") or 0)
+                    value = io_delta.get("rbytes")
+                    if isinstance(value, (int, float)):
+                        io_read_values.append(int(value))
+                    value = io_delta.get("wbytes")
+                    if isinstance(value, (int, float)):
+                        io_write_values.append(int(value))
                 pressure = delta.get("pressure_total_usec", {})
                 if isinstance(pressure, dict):
                     io_pressure = pressure.get("io", {})
                     if isinstance(io_pressure, dict):
-                        io_pressure_some_usec_total += int(io_pressure.get("some") or 0)
+                        value = io_pressure.get("some")
+                        if isinstance(value, (int, float)):
+                            io_pressure_some_values.append(int(value))
             after = resources.get("after", {})
             memory_peak = after.get("memory_peak_bytes") if isinstance(after, dict) else None
             if isinstance(memory_peak, (int, float)):
@@ -308,13 +350,14 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "compile_invocations": len(compile_reports),
         "ccache": {
             "samples": len(cache_reports),
+            "global_samples": len(global_cache_reports),
             "hits": hits,
             "misses": misses,
             "hit_rate_percent": round(hits / total * 100.0, 2) if total else None,
-            "cleanup_events_total": sum(int(item.get("cleanup_events") or 0) for item in cache_reports if item.get("cleanup_events_scope", "build") == "build"),
-            "global_cleanup_snapshot_max": max((int(item.get("cleanup_events") or 0) for item in cache_reports if item.get("cleanup_events_scope") == "global_snapshot"), default=0),
-            "max_cache_size_gib": max((float(item.get("cache_size_gib") or 0) for item in cache_reports), default=0),
-            "max_files_in_cache": max((int(item.get("files_in_cache") or 0) for item in cache_reports), default=0),
+            "cleanup_events_total": sum(build_cleanup_values) if build_cleanup_values else None,
+            "global_cleanup_snapshot_max": max(global_cleanup_values) if global_cleanup_values else None,
+            "max_cache_size_gib": max(cache_size_values) if cache_size_values else None,
+            "max_files_in_cache": max(cache_file_values) if cache_file_values else None,
         },
         "cmake_phases": {
             name: {
@@ -346,12 +389,12 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
             "samples": len(effective_jobs_values),
             "effective_jobs_median": round(statistics.median(effective_jobs_values), 2) if effective_jobs_values else None,
             "effective_jobs_max": max(effective_jobs_values) if effective_jobs_values else None,
-            "cpu_throttled_usec_total": cpu_throttled_usec_total,
+            "cpu_throttled_usec_total": sum(cpu_throttled_values) if cpu_throttled_values else None,
             "memory_peak_bytes_max": max(memory_peak_values) if memory_peak_values else None,
-            "oom_kill_events_total": oom_kill_events_total,
-            "io_read_bytes_total": io_read_bytes_total,
-            "io_write_bytes_total": io_write_bytes_total,
-            "io_pressure_some_usec_total": io_pressure_some_usec_total,
+            "oom_kill_events_total": sum(oom_kill_values) if oom_kill_values else None,
+            "io_read_bytes_total": sum(io_read_values) if io_read_values else None,
+            "io_write_bytes_total": sum(io_write_values) if io_write_values else None,
+            "io_pressure_some_usec_total": sum(io_pressure_some_values) if io_pressure_some_values else None,
         },
         "incremental_noop_successes": no_op_successes,
     }
@@ -497,18 +540,34 @@ def format_aggregate_summary(value: dict[str, Any]) -> str:
     build_telemetry = value.get("build_telemetry_summary", {})
     ccache = build_telemetry.get("ccache", {})
     lines.extend(["", "## Compiler cache / CMake / Ninja telemetry", ""])
+    rate = ccache.get("hit_rate_percent")
+    rate_text = f"{rate:.1f}%" if isinstance(rate, (int, float)) else "n/a"
+    hits_text = str(ccache["hits"]) if isinstance(ccache.get("hits"), (int, float)) else "n/a"
+    misses_text = str(ccache["misses"]) if isinstance(ccache.get("misses"), (int, float)) else "n/a"
+    build_cleanup = ccache.get("cleanup_events_total")
+    build_cleanup_text = str(build_cleanup) if isinstance(build_cleanup, (int, float)) else "n/a"
+    global_cleanup = ccache.get("global_cleanup_snapshot_max")
+    global_cleanup_text = str(global_cleanup) if isinstance(global_cleanup, (int, float)) else "n/a"
+    cache_size = ccache.get("max_cache_size_gib")
+    cache_size_text = f"{cache_size:.2f}" if isinstance(cache_size, (int, float)) else "n/a"
+    cache_files = ccache.get("max_files_in_cache")
+    cache_files_text = str(cache_files) if isinstance(cache_files, (int, float)) else "n/a"
     if ccache.get("samples", 0):
-        rate = ccache.get("hit_rate_percent")
-        rate_text = f"{rate:.1f}%" if isinstance(rate, (int, float)) else "n/a"
         lines.append(
-            f"- ccache: {ccache.get('hits', 0)} hits / {ccache.get('misses', 0)} misses "
-            f"({rate_text}); per-build cleanup events: {ccache.get('cleanup_events_total', 0)}; "
-            f"global cleanup snapshot max: {ccache.get('global_cleanup_snapshot_max', 0)}; "
-            f"largest observed cache: {ccache.get('max_cache_size_gib', 0):.2f} GiB / "
-            f"{ccache.get('max_files_in_cache', 0)} files"
+            f"- ccache: {hits_text} hits / {misses_text} misses ({rate_text}); "
+            f"per-build cleanup events: {build_cleanup_text}; "
+            f"global cleanup snapshot max: {global_cleanup_text}; "
+            f"largest observed cache: {cache_size_text} GiB / {cache_files_text} files"
         )
     else:
-        lines.append("- ccache: no build-local stats available")
+        lines.append("- ccache: build-local hit/miss stats unavailable")
+        if ccache.get("global_samples", 0):
+            lines.append(
+                f"- ccache global snapshot: largest observed cache {cache_size_text} GiB / "
+                f"{cache_files_text} files; cleanup events max: {global_cleanup_text}"
+            )
+        else:
+            lines.append("- ccache global cache snapshot unavailable")
     for phase, item in build_telemetry.get("cmake_phases", {}).items():
         lines.append(
             f"- CMake {phase}: {item['count']} samples; median {item['median_ms'] / 1000:.2f}s; "
@@ -521,17 +580,29 @@ def format_aggregate_summary(value: dict[str, Any]) -> str:
         )
     resources = build_telemetry.get("resources", {})
     if resources.get("samples", 0):
+        cpu_throttled = resources.get("cpu_throttled_usec_total")
+        cpu_throttled_text = str(cpu_throttled) if isinstance(cpu_throttled, (int, float)) else "n/a"
+        memory_peak = resources.get("memory_peak_bytes_max")
+        memory_peak_text = str(memory_peak) if isinstance(memory_peak, (int, float)) else "n/a"
+        oom_kills = resources.get("oom_kill_events_total")
+        oom_kills_text = str(oom_kills) if isinstance(oom_kills, (int, float)) else "n/a"
+        io_read = resources.get("io_read_bytes_total")
+        io_read_text = str(io_read) if isinstance(io_read, (int, float)) else "n/a"
+        io_write = resources.get("io_write_bytes_total")
+        io_write_text = str(io_write) if isinstance(io_write, (int, float)) else "n/a"
+        io_pressure = resources.get("io_pressure_some_usec_total")
+        io_pressure_text = str(io_pressure) if isinstance(io_pressure, (int, float)) else "n/a"
         lines.append(
-            f"- Resource-aware jobs: median {resources.get('effective_jobs_median')} / "
-            f"max {resources.get('effective_jobs_max')}; CPU throttled {resources.get('cpu_throttled_usec_total', 0)} us; "
-            f"memory peak {resources.get('memory_peak_bytes_max') or 'n/a'} bytes; "
-            f"OOM kills {resources.get('oom_kill_events_total', 0)}"
+            f"- Resource-aware jobs: median {resources.get('effective_jobs_median') or 'n/a'} / "
+            f"max {resources.get('effective_jobs_max') or 'n/a'}; CPU throttled {cpu_throttled_text} us; "
+            f"memory peak {memory_peak_text} bytes; OOM kills {oom_kills_text}"
         )
         lines.append(
-            f"- Block I/O: read {resources.get('io_read_bytes_total', 0)} bytes / "
-            f"write {resources.get('io_write_bytes_total', 0)} bytes; "
-            f"I/O PSI some {resources.get('io_pressure_some_usec_total', 0)} us"
+            f"- Block I/O: read {io_read_text} bytes / write {io_write_text} bytes; "
+            f"I/O PSI some {io_pressure_text} us"
         )
+    else:
+        lines.append("- Resource telemetry unavailable")
     ninja = build_telemetry.get("ninja", {})
     if ninja:
         for field in ("graph_nodes", "graph_edges", "target_count", "executed_edges", "object_compile_edges", "pending_actions_after_build"):
