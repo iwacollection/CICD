@@ -4,6 +4,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
@@ -11,11 +13,15 @@ sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 from ccache_benchmark import (  # noqa: E402
     DEFAULT_CHANGED_CXX_FLAGS,
     REQUIRED_TOOLS,
+    _cache_stats,
     _cmake_cache_value,
     _copy_ignore,
     _effective_changed_cxx_flags,
     _inside,
+    _isolated_ccache_environment,
     _ninja_phase_metrics,
+    _ninja_rule_map,
+    _split_cxx_flags,
 )
 
 
@@ -87,6 +93,56 @@ class CcacheBenchmarkTests(unittest.TestCase):
             self.assertEqual(metrics["link_edge_work_ms"], 20)
             self.assertEqual(metrics["compile_window_ms"], 25)
             self.assertEqual(metrics["link_window_ms"], 20)
+
+    def test_ccache_remote_storage_is_disabled_with_a_private_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "cache"
+            cache.mkdir()
+            env, config = _isolated_ccache_environment(
+                {"CCACHE_REMOTE_STORAGE": "redis://cache", "CCACHE_REMOTE_ONLY": "true"},
+                root,
+                cache,
+                "3G",
+            )
+            self.assertEqual(env["CCACHE_CONFIGPATH"], str(config))
+            self.assertEqual(env["CCACHE_REMOTE_STORAGE"], "")
+            self.assertEqual(env["CCACHE_REMOTE_ONLY"], "false")
+            self.assertIn("remote_storage =", config.read_text(encoding="utf-8"))
+            self.assertIn("remote_only = false", config.read_text(encoding="utf-8"))
+
+    def test_missing_per_phase_ccache_stats_are_reported_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "cache"
+            cache.mkdir()
+            stats_log = root / "stats.log"
+            results = [
+                SimpleNamespace(returncode=1, stdout="unknown option --show-log-stats"),
+                SimpleNamespace(returncode=0, stdout="Hits: 10\\nMisses: 1\\n"),
+            ]
+            with patch("ccache_benchmark.subprocess.run", side_effect=results):
+                stats = _cache_stats(cache, stats_log, {"CCACHE_DIR": str(cache)})
+        self.assertFalse(stats["available"])
+        self.assertIsNone(stats["hits"])
+        self.assertIsNone(stats["misses"])
+
+    def test_custom_cmake_cxx_flags_are_merged_with_changed_variant(self) -> None:
+        flags, passthrough = _split_cxx_flags(
+            ["-DCMAKE_CXX_FLAGS:STRING=-O2 -g", "-DCMAKE_BUILD_TYPE=RelWithDebInfo"],
+            "-fno-omit-frame-pointer",
+        )
+        self.assertEqual(flags, "-O2 -g -fno-omit-frame-pointer")
+        self.assertEqual(passthrough, ["-DCMAKE_BUILD_TYPE=RelWithDebInfo"])
+
+    def test_ninja_rule_map_unescapes_output_paths_with_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "build.ninja").write_text(
+                "build app$ binary: CXX_EXECUTABLE_LINKER__app_Release\\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(_ninja_rule_map(build)["app binary"], "CXX_EXECUTABLE_LINKER__app_Release")
 
     def test_benchmark_copy_omits_build_and_cache_directories(self) -> None:
         ignored = _copy_ignore(
