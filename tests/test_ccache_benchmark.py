@@ -136,6 +136,28 @@ class CcacheBenchmarkTests(unittest.TestCase):
         self.assertEqual(flags, "-O2 -g -fno-omit-frame-pointer")
         self.assertEqual(passthrough, ["-DCMAKE_BUILD_TYPE=RelWithDebInfo"])
 
+    def test_split_cmake_definition_merges_cxx_flags_and_preserves_other_options(self) -> None:
+        flags, passthrough = _split_cxx_flags(
+            ["-D", "CMAKE_CXX_FLAGS:STRING=-O2 -g", "-D", "CMAKE_BUILD_TYPE=RelWithDebInfo"],
+            "-fno-omit-frame-pointer",
+        )
+        self.assertEqual(flags, "-O2 -g -fno-omit-frame-pointer")
+        self.assertEqual(
+            passthrough,
+            ["-D", "CMAKE_BUILD_TYPE=RelWithDebInfo"],
+        )
+
+    def test_benchmark_rejects_caller_overrides_of_compiler_launchers(self) -> None:
+        for args in (
+            ["-DCMAKE_CXX_COMPILER_LAUNCHER="],
+            ["-D", "CMAKE_CXX_COMPILER_LAUNCHER:STRING=sccache"],
+            ["-DCMAKE_C_COMPILER_LAUNCHER=custom-launcher"],
+            ["-D", "CMAKE_C_COMPILER_LAUNCHER:FILEPATH="],
+        ):
+            with self.subTest(args=args):
+                with self.assertRaisesRegex(ValueError, "controlled by the benchmark"):
+                    _split_cxx_flags(args, "-fno-omit-frame-pointer")
+
     def test_ninja_rule_map_unescapes_output_paths_with_spaces(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
