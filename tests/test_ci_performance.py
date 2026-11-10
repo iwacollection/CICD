@@ -345,6 +345,15 @@ class CiPerformanceTests(unittest.TestCase):
                               "object_compile_edges": 1, "pending_actions_after_build": 0,
                               "incremental_noop": True},
                 },
+                "conan": {
+                    "dependency_resolution_ms": 1000,
+                    "dependency_package_list_ms": 200,
+                    "dependency_download_ms": 5000,
+                    "dependency_local_install_generate_ms": 7000,
+                    "dependency_warm_cache_reuse_ms": 300,
+                    "clean_configure_compile_total_ms": 1200,
+                    "warm_clean_rebuild_total_ms": 1500,
+                },
             }), encoding="utf-8")
             test_telemetry = telemetry_dir / "build-telemetry-test.json"
             test_telemetry.write_text(json.dumps({
@@ -353,6 +362,7 @@ class CiPerformanceTests(unittest.TestCase):
                 "ccache": {"available": True, "hits": 0, "misses": 0},
                 "resources": {"effective_jobs": 2, "delta": {"cpu": {"throttled_usec": 10}}},
                 "cmake_ninja": {},
+                "conan": {"test_ms": 250},
             }), encoding="utf-8")
             self.assertTrue(attach_build_telemetry(working, telemetry_dir))
             finalize_metrics(working, output)
@@ -364,6 +374,9 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(summary["build_telemetry_invocations"], 2)
         self.assertEqual(summary["ccache"]["cleanup_events_total"], 1)
         self.assertEqual(summary["cmake_phases"]["configure_generate_ms"]["median_ms"], 1200)
+        self.assertEqual(summary["conan_phases"]["dependency_download_ms"]["median_ms"], 5000)
+        self.assertEqual(summary["conan_phases"]["dependency_local_install_generate_ms"]["median_ms"], 7000)
+        self.assertEqual(summary["conan_phases"]["test_ms"]["median_ms"], 250)
         self.assertEqual(summary["ninja"]["graph_nodes"]["median"], 12)
         self.assertEqual(summary["incremental_noop_successes"], 1)
         self.assertEqual(summary["resources"]["effective_jobs_median"], 2)
@@ -371,6 +384,30 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(summary["resources"]["memory_peak_bytes_max"], 4096)
         self.assertEqual(summary["resources"]["io_read_bytes_total"], 1000)
         self.assertEqual(summary["resources"]["io_pressure_some_usec_total"], 2500)
+
+    def test_build_telemetry_reads_conan_phase_timings(self) -> None:
+        from compile_telemetry import collect_build_telemetry
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            telemetry_dir = root / ".ci-telemetry"
+            telemetry_dir.mkdir()
+            (telemetry_dir / "conan-build-timings.json").write_text(
+                json.dumps({
+                    "schema_version": 1,
+                    "dependency_resolution_ms": 1234,
+                    "dependency_download_ms": 5678,
+                }),
+                encoding="utf-8",
+            )
+            telemetry = collect_build_telemetry(
+                root,
+                build_exit_code=0,
+                build_duration_ms=9000,
+            )
+
+        self.assertEqual(telemetry["conan"]["dependency_resolution_ms"], 1234)
+        self.assertEqual(telemetry["conan"]["dependency_download_ms"], 5678)
 
     def test_parallel_trivy_generates_both_outputs_and_overlaps_stage_runtime(self) -> None:
         from parallel_trivy import run_parallel

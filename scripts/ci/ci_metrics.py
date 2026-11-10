@@ -226,6 +226,17 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
     total = hits + misses
 
     phase_values: dict[str, list[float]] = {}
+    conan_phase_values: dict[str, list[float]] = {}
+    conan_phase_fields = (
+        "dependency_resolution_ms",
+        "dependency_package_list_ms",
+        "dependency_download_ms",
+        "dependency_local_install_generate_ms",
+        "dependency_warm_cache_reuse_ms",
+        "clean_configure_compile_total_ms",
+        "warm_clean_rebuild_total_ms",
+        "test_ms",
+    )
     ninja_values: dict[str, list[float]] = {}
     effective_jobs_values: list[float] = []
     cpu_throttled_usec_total = 0
@@ -262,6 +273,17 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
             memory_peak = after.get("memory_peak_bytes") if isinstance(after, dict) else None
             if isinstance(memory_peak, (int, float)):
                 memory_peak_values.append(int(memory_peak))
+
+        conan = item.get("conan", {})
+        if isinstance(conan, dict):
+            phase_name = item.get("phase", "build")
+            fields = ("test_ms",) if phase_name == "test" else tuple(
+                field for field in conan_phase_fields if field != "test_ms"
+            )
+            for field in fields:
+                duration = conan.get(field)
+                if isinstance(duration, (int, float)):
+                    conan_phase_values.setdefault(field, []).append(float(duration))
 
         cmake_ninja = item.get("cmake_ninja", {})
         if not isinstance(cmake_ninja, dict):
@@ -300,6 +322,15 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
                 "max_ms": round(max(values), 2),
             }
             for name, values in sorted(phase_values.items())
+        },
+        "conan_phases": {
+            name: {
+                "count": len(values),
+                "median_ms": round(statistics.median(values), 2),
+                "p95_ms": _percentile(values, 0.95),
+                "max_ms": round(max(values), 2),
+            }
+            for name, values in sorted(conan_phase_values.items())
         },
         "ninja": {
             name: {
@@ -479,6 +510,11 @@ def format_aggregate_summary(value: dict[str, Any]) -> str:
     for phase, item in build_telemetry.get("cmake_phases", {}).items():
         lines.append(
             f"- CMake {phase}: {item['count']} samples; median {item['median_ms'] / 1000:.2f}s; "
+            f"P95 {item['p95_ms'] / 1000:.2f}s; max {item['max_ms'] / 1000:.2f}s"
+        )
+    for phase, item in build_telemetry.get("conan_phases", {}).items():
+        lines.append(
+            f"- Conan {phase}: {item['count']} samples; median {item['median_ms'] / 1000:.2f}s; "
             f"P95 {item['p95_ms'] / 1000:.2f}s; max {item['max_ms'] / 1000:.2f}s"
         )
     resources = build_telemetry.get("resources", {})
