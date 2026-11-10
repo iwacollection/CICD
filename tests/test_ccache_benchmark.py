@@ -15,6 +15,7 @@ from ccache_benchmark import (  # noqa: E402
     REQUIRED_TOOLS,
     _cache_stats,
     _cmake_cache_value,
+    _comparison_context,
     _copy_ignore,
     _effective_changed_cxx_flags,
     _inside,
@@ -68,6 +69,23 @@ class CcacheBenchmarkTests(unittest.TestCase):
     def test_selected_compiler_is_discovered_by_cmake_not_a_hard_coded_cxx_binary(self) -> None:
         self.assertEqual(REQUIRED_TOOLS, ("cmake", "ninja", "ccache"))
         self.assertNotIn("c++", REQUIRED_TOOLS)
+
+    def test_comparison_context_requires_runner_class_and_immutable_toolchain_digest(self) -> None:
+        digest = "a" * 64
+        valid = _comparison_context(f"ghcr.io/example/toolchain@sha256:{digest}", "ubuntu-latest")
+        self.assertTrue(valid["comparable"])
+        self.assertTrue(valid["immutable_toolchain_identity"])
+        self.assertEqual(valid["runner_class"], "ubuntu-latest")
+        self.assertEqual(valid["reasons"], [])
+
+        mutable = _comparison_context("host:gcc-host-v1", "ubuntu-latest")
+        self.assertFalse(mutable["comparable"])
+        self.assertFalse(mutable["immutable_toolchain_identity"])
+        self.assertIn("immutable sha256 digest", mutable["reasons"][0])
+
+        missing_runner = _comparison_context(f"sha256:{digest}", "")
+        self.assertFalse(missing_runner["comparable"])
+        self.assertIn("runner class was not supplied", missing_runner["reasons"])
 
     def test_changed_flag_affects_generated_code_and_can_be_overridden(self) -> None:
         self.assertEqual(DEFAULT_CHANGED_CXX_FLAGS, "-fno-omit-frame-pointer")
