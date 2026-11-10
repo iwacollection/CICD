@@ -282,16 +282,17 @@ The first report should be read as an attribution tool: use run queue and Job qu
 The project graph and Build/Security split were deliberately kept unchanged. The current example graph is:
 
 ```text
-L0: hello-lib ───────────────┐
-    conan-format-lib ──┐    │
-    conan-compression-lib ──┴─> L1: conan-demo-app
-                         └────> L1: hello-cpp
-                                  |
-                                  v
-                            L2: hello-service
-                                  |
-                                  v
-                            L3: hello-release
+L0 hello-lib --------------------------> L1 hello-cpp
+                                           |
+                                           v
+                                       L2 hello-service
+                                           |
+                                           v
+                                       L3 hello-release
+
+L0 conan-format-lib -------\
+                             +-----------> L1 conan-demo-app
+L0 conan-compression-lib --/
 ```
 
 Before this change, every consumer used the broad `dag-*` download pattern and received every DAG artifact already published by earlier levels. After this change, `upstream_artifact_pattern.py` builds a minimatch pattern from the declared direct `depends_on_json` entries. One dependency produces one exact project prefix; multiple dependencies use brace expansion. `resolve_upstream_artifacts.py` remains the authoritative verifier and still checks repository, source SHA, target, Artifact Contract v2 identity, digest and bundle contents. The pattern is a transfer filter, not a trust boundary.
@@ -330,7 +331,7 @@ The filter removed 10 unrelated artifact downloads and approximately 291,306 B (
 
 The direct filter is therefore retained as a measured transfer-volume reduction, not advertised as an end-to-end build-speedup. With these small fixtures the download action's startup overhead dominates; larger real artifacts are needed to determine whether this also lowers wall-clock time.
 
-The existing artifact-only `hello-service` and `hello-release` nodes already use the hosted runner and do not enter the `toolchain_image_pull` stage. The current mainline run records only two toolchain-image-pull stages across seven build nodes. A historical pre-host-runner baseline (#42335949203) spent 10 s and 4 s pulling compiler images in those two artifact-only nodes; the later host-runner path skips those pulls.
+The existing artifact-only `hello-service` and `hello-release` nodes already use the hosted runner and do not enter the `toolchain_image_pull` stage. The current mainline run records only two toolchain-image-pull stages across seven build nodes. A historical pre-host-runner baseline [#42335949203](https://github.com/iwacollection/CICD/actions/runs/42335949203) spent 9.4 s in the hello-service image pull and 4.2 s in hello-release (measured from the step log timestamps). After [PR #61](https://github.com/iwacollection/CICD/pull/61), the corresponding nodes in run [#42509727332](https://github.com/iwacollection/CICD/actions/runs/42509727332) skipped the compiler image pull; the current mainline run continues to show no pull stage for either host-runner node.
 
 ### Security and remaining topology boundary
 
