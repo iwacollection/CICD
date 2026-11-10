@@ -238,7 +238,7 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
     misses = sum(int(item["misses"]) for item in cache_reports) if cache_reports else None
     total = hits + misses if isinstance(hits, (int, float)) and isinstance(misses, (int, float)) else 0
     build_cleanup_values = [
-        int(item["cleanup_events"]) for item in compile_reports
+        int(item["ccache"]["cleanup_events"]) for item in compile_reports
         if isinstance(item.get("ccache"), dict)
         and item.get("ccache", {}).get("cleanup_events_scope", "build") == "build"
         and isinstance(item.get("ccache", {}).get("cleanup_events"), (int, float))
