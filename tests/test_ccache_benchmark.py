@@ -57,9 +57,9 @@ class CcacheBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
             (build / "CMakeCache.txt").write_text(
-                "CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/clang++\\n"
-                "CMAKE_CXX_COMPILER_ID:STRING=Clang\\n"
-                "CMAKE_CXX_COMPILER_VERSION:STRING=19.1.0\\n",
+                "CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/clang++\n"
+                "CMAKE_CXX_COMPILER_ID:STRING=Clang\n"
+                "CMAKE_CXX_COMPILER_VERSION:STRING=19.1.0\n",
                 encoding="utf-8",
             )
             self.assertEqual(_cmake_cache_value(build, "CMAKE_CXX_COMPILER"), "/usr/bin/clang++")
@@ -70,8 +70,8 @@ class CcacheBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
             (build / "build.ninja").write_text(
-                "build CMakeFiles/app.dir/main.cpp.o: CXX_COMPILER__app_Release\\n"
-                "build app: CXX_EXECUTABLE_LINKER__app_Release\\n",
+                "build CMakeFiles/app.dir/main.cpp.o: CXX_COMPILER__app_Release\n"
+                "build app: CXX_EXECUTABLE_LINKER__app_Release\n",
                 encoding="utf-8",
             )
             before = set()
