@@ -50,6 +50,21 @@ class CcacheBenchmarkTests(unittest.TestCase):
             finally:
                 outside.unlink(missing_ok=True)
 
+    def test_benchmark_rejects_selected_inputs_inside_ignored_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in (
+                Path("build/generated.cpp"),
+                Path(".cache/generated.h"),
+                Path("cmake-build-release/generated.cpp"),
+            ):
+                candidate = root / relative
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                candidate.write_text("int generated() { return 0; }\\n", encoding="utf-8")
+                with self.subTest(path=str(relative)):
+                    with self.assertRaisesRegex(ValueError, "excluded from the source copy"):
+                        _inside(root, relative)
+
     def test_selected_compiler_is_discovered_by_cmake_not_a_hard_coded_cxx_binary(self) -> None:
         self.assertEqual(REQUIRED_TOOLS, ("cmake", "ninja", "ccache"))
         self.assertNotIn("c++", REQUIRED_TOOLS)
