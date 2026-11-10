@@ -339,3 +339,12 @@ The existing artifact-only `hello-service` and `hello-release` nodes already use
 - The after run #42808770144 passed all seven detached Security jobs, the detached security evidence barrier and Build gate. The mainline run #42807377361 additionally passed trusted artifact attestation/signature and the performance regression monitor.
 - The filter does not bypass Artifact Contract verification and does not alter SBOM, Trivy, permissions, failure-closed behavior or the final gate.
 - No Build/Security jobs were merged. The current GitHub Actions matrix still has a level barrier: every node in level N waits for all jobs in level N-1, even when its direct dependencies have finished. This filter does not shorten that critical path. Removing the barrier requires a statically generated per-project job graph or a dedicated DAG executor; a matrix item cannot supply a dynamic `needs` list. That architectural change is intentionally outside this artifact-transfer PR.
+
+
+## 11. P2 C++ benchmark harness hardening
+
+The opt-in `scripts/ci/ccache_benchmark.py` experiment now records the compiler selected by CMake (including `CXX` or `-DCMAKE_CXX_COMPILER` overrides) rather than requiring a hard-coded `c++` executable on PATH. Its compiler-flag isolation case defaults to `-fno-omit-frame-pointer`, a code-generation-affecting GCC/Clang option, instead of an unused preprocessor macro; the report marks cache invalidation as unverified if ccache statistics are unavailable and fails the scenario if statistics are available but show no miss.
+
+The harness repeats warm no-op builds (three by default), replays the original source contents to observe a real ccache reuse opportunity, records CTest separately with serial execution by default, and classifies Ninja log edges into compile/link/other groups. Edge-work sums and per-kind time windows are separate from build wall-clock time; windows can overlap and must not be added. The report includes the compiler path/ID/version and runner metadata. CMake configure, total build wall-clock, CTest wall-clock, Ninja edge work/windows and ccache counters are separate measurements.
+
+This is still an experiment harness, not evidence of production build speedup. The repository contains only small C++ smoke fixtures, and the benchmark input must be a real representative CMake project before Issue #73 can pass its cold/warm sample and performance acceptance criteria. The selected project, immutable toolchain identity and same runner class must be supplied and retained with the benchmark report.
