@@ -61,7 +61,7 @@ class CcacheBenchmarkTests(unittest.TestCase):
             ):
                 candidate = root / relative
                 candidate.parent.mkdir(parents=True, exist_ok=True)
-                candidate.write_text("int generated() { return 0; }\\n", encoding="utf-8")
+                candidate.write_text("int generated() { return 0; }\n", encoding="utf-8")
                 with self.subTest(path=str(relative)):
                     with self.assertRaisesRegex(ValueError, "excluded from the source copy"):
                         _inside(root, relative)
