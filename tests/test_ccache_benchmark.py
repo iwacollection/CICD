@@ -120,7 +120,7 @@ class CcacheBenchmarkTests(unittest.TestCase):
             stats_log = root / "stats.log"
             results = [
                 SimpleNamespace(returncode=1, stdout="unknown option --show-log-stats"),
-                SimpleNamespace(returncode=0, stdout="Hits: 10\\nMisses: 1\\n"),
+                SimpleNamespace(returncode=0, stdout="Hits: 10\nMisses: 1\n"),
             ]
             with patch("ccache_benchmark.subprocess.run", side_effect=results):
                 stats = _cache_stats(cache, stats_log, {"CCACHE_DIR": str(cache)})
@@ -140,8 +140,8 @@ class CcacheBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
             (build / "build.ninja").write_text(
-                "build app$ binary: CXX_EXECUTABLE_LINKER__app_Release\\n"
-                "build dollar$name: CXX_STATIC_LIBRARY_LINKER__lib_Release\\n",
+                "build app$ binary: CXX_EXECUTABLE_LINKER__app_Release\n"
+                "build dollar$name: CXX_STATIC_LIBRARY_LINKER__lib_Release\n",
                 encoding="utf-8",
             )
             rules = _ninja_rule_map(build)
