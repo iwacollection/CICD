@@ -214,7 +214,7 @@ def _pending_ninja_actions(build_dir: Path, env: dict[str, str]) -> int | None:
     )
     if proc.returncode != 0:
         return None
-    return sum(1 for line in proc.stdout.splitlines() if re.match(r"^\s*\\[\d+/\d+\\]", line))
+    return sum(1 for line in proc.stdout.splitlines() if re.match(r"^\s*\[\d+/\d+\]", line))
 
 
 def _cache_stats(cache_dir: Path, stats_log: Path, env: dict[str, str]) -> dict[str, Any]:
