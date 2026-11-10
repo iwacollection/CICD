@@ -38,25 +38,22 @@ def _first_float(text: str, labels: tuple[str, ...]) -> float | None:
 
 
 def parse_ccache_stats(build_stats: str, global_stats: str) -> dict[str, Any]:
-    direct = _counter(build_stats, ("cache hit direct", "cache hits direct", "direct"))
-    preprocessed = _counter(build_stats, ("cache hit preprocessed", "cache hits preprocessed", "preprocessed"))
-    hits = _counter(build_stats, ("hits",))
-    if direct is None and preprocessed is None and hits is None:
-        direct = 0
-        preprocessed = 0
-        hits = 0
-    else:
-        direct = direct or 0
-        preprocessed = preprocessed or 0
-        hits = hits if hits is not None else direct + preprocessed
+    build_stats_available = bool(build_stats.strip())
+    global_available = bool(global_stats.strip())
 
-    misses = _counter(build_stats, ("cache miss", "cache misses", "misses"))
-    uncacheable = _counter(build_stats, ("uncacheable calls", "uncacheable"))
-    cacheable_calls = _counter(build_stats, ("cacheable calls",))
-    build_cleanups = _counter(build_stats, ("cleanups", "cleanup"))
-    global_cleanups = _counter(global_stats, ("cleanups", "cleanup"))
-    files = _counter(global_stats, ("files in cache", "files"))
-    size_gb = _first_float(global_stats, ("cache size gb", "cache size gib"))
+    direct = _counter(build_stats, ("cache hit direct", "cache hits direct", "direct")) if build_stats_available else None
+    preprocessed = _counter(build_stats, ("cache hit preprocessed", "cache hits preprocessed", "preprocessed")) if build_stats_available else None
+    hits = _counter(build_stats, ("hits",)) if build_stats_available else None
+    if hits is None and direct is not None and preprocessed is not None:
+        hits = direct + preprocessed
+
+    misses = _counter(build_stats, ("cache miss", "cache misses", "misses")) if build_stats_available else None
+    uncacheable = _counter(build_stats, ("uncacheable calls", "uncacheable")) if build_stats_available else None
+    cacheable_calls = _counter(build_stats, ("cacheable calls",)) if build_stats_available else None
+    build_cleanups = _counter(build_stats, ("cleanups", "cleanup")) if build_stats_available else None
+    global_cleanups = _counter(global_stats, ("cleanups", "cleanup")) if global_available else None
+    files = _counter(global_stats, ("files in cache", "files")) if global_available else None
+    size_gb = _first_float(global_stats, ("cache size gb", "cache size gib")) if global_available else None
     limit_gb = None
     size_line = next(
         (line for line in global_stats.splitlines() if "cache size" in line.lower() and ":" in line),
@@ -67,25 +64,33 @@ def parse_ccache_stats(build_stats: str, global_stats: str) -> dict[str, Any]:
         if len(numbers) > 1:
             limit_gb = float(numbers[1])
 
-    misses = misses or 0
-    hits = hits or 0
-    calls = hits + misses
+    calls = hits + misses if hits is not None and misses is not None else None
     hit_rate = round(hits / calls * 100.0, 2) if calls else None
+    cleanup_events = build_cleanups if build_cleanups is not None else global_cleanups
+    cleanup_scope = (
+        "build" if build_cleanups is not None
+        else "global_snapshot" if global_cleanups is not None
+        else "unavailable"
+    )
     return {
-        "available": bool(build_stats.strip() or global_stats.strip()),
+        # "available" means the build-local hit/miss counters are complete.
+        # A global snapshot alone must never be interpreted as zero build calls.
+        "available": hits is not None and misses is not None,
+        "build_stats_available": build_stats_available,
+        "global_available": global_available,
         "cacheable_calls": cacheable_calls,
         "hits": hits,
         "hits_direct": direct,
         "hits_preprocessed": preprocessed,
         "misses": misses,
-        "uncacheable_calls": uncacheable or 0,
+        "uncacheable_calls": uncacheable,
         "hit_rate_percent": hit_rate,
         "cache_size_gib": size_gb,
         "cache_limit_gib": limit_gb,
         "files_in_cache": files,
         # ccache exposes cleanup runs, not an exact per-object eviction count.
-        "cleanup_events": (build_cleanups if build_cleanups is not None else (global_cleanups or 0)),
-        "cleanup_events_scope": "build" if build_cleanups is not None else "global_snapshot",
+        "cleanup_events": cleanup_events,
+        "cleanup_events_scope": cleanup_scope,
     }
 
 
