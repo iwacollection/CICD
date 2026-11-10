@@ -60,7 +60,7 @@ def _copy_ignore(directory: str, names: list[str]) -> set[str]:
 def _comparison_context(toolchain_identity: str | None, runner_class: str | None) -> dict[str, Any]:
     identity = (toolchain_identity or "").strip()
     runner = (runner_class or "").strip()
-    immutable_identity = bool(re.search(r"sha256:[0-9a-f]{64}(?:\\b|$)", identity, re.IGNORECASE))
+    immutable_identity = bool(re.search(r"sha256:[0-9a-f]{64}(?:\b|$)", identity, re.IGNORECASE))
     reasons: list[str] = []
     if not identity:
         reasons.append("toolchain identity was not supplied")
