@@ -568,16 +568,24 @@ def format_aggregate_summary(value: dict[str, Any]) -> str:
             )
         else:
             lines.append("- ccache global cache snapshot unavailable")
-    for phase, item in build_telemetry.get("cmake_phases", {}).items():
-        lines.append(
-            f"- CMake {phase}: {item['count']} samples; median {item['median_ms'] / 1000:.2f}s; "
-            f"P95 {item['p95_ms'] / 1000:.2f}s; max {item['max_ms'] / 1000:.2f}s"
-        )
-    for phase, item in build_telemetry.get("conan_phases", {}).items():
-        lines.append(
-            f"- Conan {phase}: {item['count']} samples; median {item['median_ms'] / 1000:.2f}s; "
-            f"P95 {item['p95_ms'] / 1000:.2f}s; max {item['max_ms'] / 1000:.2f}s"
-        )
+    cmake_phases = build_telemetry.get("cmake_phases", {})
+    if cmake_phases:
+        for phase, item in cmake_phases.items():
+            lines.append(
+                f"- CMake {phase}: {item['count']} samples; median {item['median_ms'] / 1000:.2f}s; "
+                f"P95 {item['p95_ms'] / 1000:.2f}s; max {item['max_ms'] / 1000:.2f}s"
+            )
+    else:
+        lines.append("- CMake phase telemetry unavailable")
+    conan_phases = build_telemetry.get("conan_phases", {})
+    if conan_phases:
+        for phase, item in conan_phases.items():
+            lines.append(
+                f"- Conan {phase}: {item['count']} samples; median {item['median_ms'] / 1000:.2f}s; "
+                f"P95 {item['p95_ms'] / 1000:.2f}s; max {item['max_ms'] / 1000:.2f}s"
+            )
+    else:
+        lines.append("- Conan phase telemetry: no samples recorded")
     resources = build_telemetry.get("resources", {})
     if resources.get("samples", 0):
         cpu_throttled = resources.get("cpu_throttled_usec_total")
@@ -613,6 +621,8 @@ def format_aggregate_summary(value: dict[str, Any]) -> str:
             f"- Incremental dry-run confirmed no pending work: "
             f"{build_telemetry.get('incremental_noop_successes', 0)} build(s)"
         )
+    else:
+        lines.append("- Ninja graph/edge telemetry unavailable")
     lines.extend(["", "## Per-job breakdown", ""])
     lines.append("| Kind | Project | Target | Instrumented duration | Run/job |")
     lines.append("|---|---|---|---:|---|")
