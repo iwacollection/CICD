@@ -10,7 +10,12 @@ import sys
 from pathlib import Path
 
 DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}(?:\s|$)")
-SNAPSHOT_RE = re.compile(r"""(?:APT::Snapshot|--snapshot)[=\s\\\"']+([0-9]{8}T[0-9]{6}Z)|snapshot\.debian\.org/archive/(?:debian|debian-security)/([0-9]{8}T[0-9]{6}Z)""")
+SNAPSHOT_RE = re.compile(
+    r"""(?:APT::Snapshot|--snapshot)[=\s\\\"']+([0-9]{8}T[0-9]{6}Z)"""
+    r"""|(?:^|\n)\s*ARG\s+APT_SNAPSHOT\s*=\s*["']?([0-9]{8}T[0-9]{6}Z)"""
+    r"""|snapshot\.debian\.org/archive/(?:debian|debian-security)/([0-9]{8}T[0-9]{6}Z)""",
+    re.MULTILINE,
+)
 VALID_SEVERITIES = {"UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
 
 
@@ -134,8 +139,16 @@ def validate_dockerfile(path: Path, policy: dict) -> list[str]:
             if ":latest" in line:
                 errors.append(f"{path}: latest tag is forbidden: {line}")
     if "apt-get" in text or re.search(r"\bapt\s+(?:install|update)\b", text):
-        if container.get("require_apt_snapshot", True) and not SNAPSHOT_RE.search(text):
+        snapshot_match = SNAPSHOT_RE.search(text)
+        if container.get("require_apt_snapshot", True) and not snapshot_match:
             errors.append(f"{path}: apt usage must be bound to an immutable Ubuntu or Debian Snapshot ID")
+        elif (
+            container.get("require_apt_snapshot", True)
+            and snapshot_match
+            and snapshot_match.group(2) is not None
+            and not re.search(r"\$APT_SNAPSHOT\b", text)
+        ):
+            errors.append(f"{path}: APT_SNAPSHOT must be consumed by the APT snapshot configuration")
     return errors
 
 

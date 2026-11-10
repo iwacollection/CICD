@@ -1,0 +1,12 @@
+[
+  "conanfile.txt",
+  "conan.lock",
+  "profiles/host",
+  "profiles/build",
+  "ci/aarch64-toolchain.cmake",
+  "ci/target-sdk.lock",
+  "ci/cache-key-files.json",
+  "CMakeLists.txt",
+  "include/**",
+  "src/**"
+]

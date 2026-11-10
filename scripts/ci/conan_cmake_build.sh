@@ -50,6 +50,14 @@ mkdir -p "$CONAN_HOME"
 CONAN="$VENV_DIR/bin/conan"
 "$CONAN" --version | grep -Fx "Conan version ${CONAN_VERSION}"
 
+# A fresh isolated CONAN_HOME has no implicit Conan Center remote.
+if "$CONAN" remote list | grep -qE '^conancenter:'; then
+  "$CONAN" remote update conancenter --url=https://center2.conan.io
+else
+  "$CONAN" remote add conancenter https://center2.conan.io
+fi
+"$CONAN" remote list | grep -F "https://center2.conan.io"
+
 now_ns() { date +%s%N; }
 elapsed_ms() { echo $(( ( $2 - $1 ) / 1000000 )); }
 
