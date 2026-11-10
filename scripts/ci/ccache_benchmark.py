@@ -106,7 +106,7 @@ def _ninja_log_snapshot(build_dir: Path) -> set[tuple[int, int, str, str]]:
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         if not line or line.startswith("#"):
             continue
-        fields = line.split("\\t")
+        fields = line.split("\t")
         if len(fields) < 5:
             continue
         try:
@@ -156,7 +156,7 @@ def _ctest_phase(build_dir: Path, env: dict[str, str], parallelism: int) -> dict
     )
     if listing.returncode != 0:
         return {"name": "test", "exit_code": listing.returncode, "status": "failed", "reason": "ctest -N failed", "output_tail": listing.stdout[-12000:]}
-    match = re.search(r"Total Tests:\\s*(\\d+)", listing.stdout)
+    match = re.search(r"Total Tests:\s*(\d+)", listing.stdout)
     count = int(match.group(1)) if match else 0
     if count == 0:
         return {"name": "test", "exit_code": 0, "status": "skipped", "test_count": 0, "reason": "no registered CTest tests", "duration_ms": 0.0}
@@ -214,7 +214,7 @@ def _pending_ninja_actions(build_dir: Path, env: dict[str, str]) -> int | None:
     )
     if proc.returncode != 0:
         return None
-    return sum(1 for line in proc.stdout.splitlines() if re.match(r"^\\s*\\[\\d+/\\d+\\]", line))
+    return sum(1 for line in proc.stdout.splitlines() if re.match(r"^\s*\\[\d+/\d+\\]", line))
 
 
 def _cache_stats(cache_dir: Path, stats_log: Path, env: dict[str, str]) -> dict[str, Any]:
@@ -386,6 +386,13 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         else:
             flag_phase["compiler_flag_cache_validation"] = "unavailable"
 
+        replay_phase = next(phase for phase in phases if phase["name"] == "source_cache_replay")
+        replay_stats = replay_phase.get("ccache") or {}
+        if replay_stats.get("available"):
+            replay_phase["cache_replay_validation"] = "passed" if replay_stats.get("hits", 0) > 0 else "failed"
+        else:
+            replay_phase["cache_replay_validation"] = "unavailable"
+
         # Compare ccache-on and ccache-off from the exact same final source state.
         cold_control_cache = root / "ccache-cold-control"
         cold_control_cache.mkdir()
@@ -419,6 +426,8 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         failed = [phase["name"] for phase in phases if phase.get("exit_code") != 0]
         if flag_phase.get("compiler_flag_cache_validation") == "failed":
             failed.append("compiler_flags_changed_cache_invalidation")
+        if replay_phase.get("cache_replay_validation") == "failed":
+            failed.append("source_cache_replay")
         warm_noop_valid = all(
             phase.get("exit_code") == 0
             and phase.get("ninja", {}).get("total_edges") == 0
