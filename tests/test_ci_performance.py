@@ -346,6 +346,8 @@ class CiPerformanceTests(unittest.TestCase):
                               "incremental_noop": True},
                 },
                 "conan": {
+                    "tool_preflight_ms": 80000,
+                    "conan_venv_setup_ms": 5000,
                     "dependency_resolution_ms": 1000,
                     "dependency_package_list_ms": 200,
                     "dependency_download_ms": 5000,
@@ -374,6 +376,8 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(summary["build_telemetry_invocations"], 2)
         self.assertEqual(summary["ccache"]["cleanup_events_total"], 1)
         self.assertEqual(summary["cmake_phases"]["configure_generate_ms"]["median_ms"], 1200)
+        self.assertEqual(summary["conan_phases"]["tool_preflight_ms"]["median_ms"], 80000)
+        self.assertEqual(summary["conan_phases"]["conan_venv_setup_ms"]["median_ms"], 5000)
         self.assertEqual(summary["conan_phases"]["dependency_download_ms"]["median_ms"], 5000)
         self.assertEqual(summary["conan_phases"]["dependency_local_install_generate_ms"]["median_ms"], 7000)
         self.assertEqual(summary["conan_phases"]["test_ms"]["median_ms"], 250)
