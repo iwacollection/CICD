@@ -34,9 +34,20 @@ IGNORE_DIRS = {
 def _inside(root: Path, candidate: Path) -> Path:
     resolved = (root / candidate).resolve()
     try:
-        resolved.relative_to(root.resolve())
+        relative = resolved.relative_to(root.resolve())
     except ValueError as exc:
         raise ValueError(f"path must stay inside source directory: {candidate}") from exc
+    excluded = next(
+        (
+            part for part in relative.parts[:-1]
+            if part in IGNORE_DIRS or part.startswith("cmake-build-")
+        ),
+        None,
+    )
+    if excluded:
+        raise ValueError(
+            f"benchmark input is inside a directory excluded from the source copy ({excluded}): {candidate}"
+        )
     if not resolved.is_file():
         raise ValueError(f"benchmark input file does not exist: {candidate}")
     return resolved
