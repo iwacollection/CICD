@@ -8,6 +8,10 @@ readonly LOCK_FILE="conan.lock"
 readonly CONAN_PROFILE_HOST="profiles/host"
 readonly CONAN_PROFILE_BUILD="profiles/build"
 
+now_ns() { date +%s%N; }
+elapsed_ms() { echo $(( ( $2 - $1 ) / 1000000 )); }
+
+tool_preflight_start="$(now_ns)"
 if [[ ! -s "$LOCK_FILE" ]]; then
   echo "ERROR: required Conan lockfile is missing: $LOCK_FILE" >&2
   exit 2
@@ -32,6 +36,9 @@ for tool in ninja ccache; do
     exit 2
   fi
 done
+tool_preflight_end="$(now_ns)"
+tool_preflight_ms="$(elapsed_ms "$tool_preflight_start" "$tool_preflight_end")"
+
 for input in conanfile.txt "$CONAN_PROFILE_HOST" "$CONAN_PROFILE_BUILD"; do
   if [[ ! -s "$input" ]]; then
     echo "ERROR: required Conan input is missing or empty: $input" >&2
@@ -39,19 +46,19 @@ for input in conanfile.txt "$CONAN_PROFILE_HOST" "$CONAN_PROFILE_BUILD"; do
   fi
 done
 
+conan_venv_setup_start="$(now_ns)"
 mkdir -p .ci-tools .ci-cache .ci-telemetry
 if [[ ! -x "$VENV_DIR/bin/conan" ]]; then
   python3 -m venv "$VENV_DIR"
   "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check "conan==${CONAN_VERSION}"
 fi
+conan_venv_setup_end="$(now_ns)"
+conan_venv_setup_ms="$(elapsed_ms "$conan_venv_setup_start" "$conan_venv_setup_end")"
 
 export CONAN_HOME="$PWD/.ci-cache/conan-home"
 mkdir -p "$CONAN_HOME"
 CONAN="$VENV_DIR/bin/conan"
 "$CONAN" --version | grep -Fx "Conan version ${CONAN_VERSION}"
-
-now_ns() { date +%s%N; }
-elapsed_ms() { echo $(( ( $2 - $1 ) / 1000000 )); }
 
 resolve_start="$(now_ns)"
 "$CONAN" graph info . \
@@ -189,15 +196,15 @@ warm_ms="$(elapsed_ms "$warm_start" "$warm_end")"
 cp .ci-telemetry/cmake-build.json .ci-telemetry/cmake-warm-pass.json
 ccache --show-stats > .ci-telemetry/ccache-warm-pass.txt
 
-python3 - "$resolve_ms" "$package_list_ms" "$download_ms" "$install_ms" "$warm_install_ms" "$build_ms" "$warm_ms" "$download_status" "$CONAN_VERSION" "$LOCK_FILE" <<'PY'
+python3 - "$tool_preflight_ms" "$conan_venv_setup_ms" "$resolve_ms" "$package_list_ms" "$download_ms" "$install_ms" "$warm_install_ms" "$build_ms" "$warm_ms" "$download_status" "$CONAN_VERSION" "$LOCK_FILE" <<'PY'
 import hashlib
 import json
 import pathlib
 import re
 import sys
 
-resolve_ms, package_list_ms, download_ms, install_ms, warm_install_ms, build_ms, warm_ms = map(int, sys.argv[1:8])
-download_status, version, lock_path = sys.argv[8:11]
+tool_preflight_ms, conan_venv_setup_ms, resolve_ms, package_list_ms, download_ms, install_ms, warm_install_ms, build_ms, warm_ms = map(int, sys.argv[1:10])
+download_status, version, lock_path = sys.argv[10:13]
 root = pathlib.Path(".")
 lock_sha = hashlib.sha256((root / lock_path).read_bytes()).hexdigest()
 graph_path = root / ".ci-telemetry/conan-graph.json"
@@ -232,6 +239,8 @@ telemetry = {
     "lockfile": lock_path,
     "lockfile_sha256": lock_sha,
     "resolved_graph_sha256": graph_sha,
+    "tool_preflight_ms": tool_preflight_ms,
+    "conan_venv_setup_ms": conan_venv_setup_ms,
     "dependency_resolution_ms": resolve_ms,
     "dependency_package_list_ms": package_list_ms,
     "dependency_download_ms": download_ms,

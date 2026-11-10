@@ -122,6 +122,8 @@ class ConanDependencyContractTests(unittest.TestCase):
         self.assertIn("--build=missing", script)
         self.assertIn("ninja-build", script)
         self.assertIn("missing_packages+=(ccache)", script)
+        self.assertIn("tool_preflight_ms", script)
+        self.assertIn("conan_venv_setup_ms", script)
         self.assertIn("dependency_resolution_ms", script)
         self.assertIn("dependency_download_ms", script)
         self.assertIn("dependency_download_status", script)
