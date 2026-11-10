@@ -238,9 +238,9 @@ class CiPerformanceTests(unittest.TestCase):
         from ci_metrics import _build_telemetry_summary, format_aggregate_summary
 
         global_stats = (
-            "Cache size (GB): 0.3 / 5.0 (6.0%)\\n"
-            "Files: 120\\n"
-            "Cleanups: 3\\n"
+            "Cache size (GB): 0.3 / 5.0 (6.0%)\n"
+            "Files: 120\n"
+            "Cleanups: 3\n"
         )
         parsed = parse_ccache_stats("", global_stats)
         self.assertFalse(parsed["available"])
