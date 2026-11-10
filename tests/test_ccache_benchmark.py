@@ -21,6 +21,7 @@ from ccache_benchmark import (  # noqa: E402
     _isolated_ccache_environment,
     _ninja_phase_metrics,
     _ninja_rule_map,
+    _ninja_rule_separator,
     _split_cxx_flags,
 )
 
@@ -106,8 +107,8 @@ class CcacheBenchmarkTests(unittest.TestCase):
                 "3G",
             )
             self.assertEqual(env["CCACHE_CONFIGPATH"], str(config))
-            self.assertEqual(env["CCACHE_REMOTE_STORAGE"], "")
-            self.assertEqual(env["CCACHE_REMOTE_ONLY"], "false")
+            self.assertNotIn("CCACHE_REMOTE_STORAGE", env)
+            self.assertNotIn("CCACHE_REMOTE_ONLY", env)
             self.assertIn("remote_storage =", config.read_text(encoding="utf-8"))
             self.assertIn("remote_only = false", config.read_text(encoding="utf-8"))
 
@@ -139,10 +140,14 @@ class CcacheBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
             (build / "build.ninja").write_text(
-                "build app$ binary: CXX_EXECUTABLE_LINKER__app_Release\\n",
+                "build app$ binary: CXX_EXECUTABLE_LINKER__app_Release\\n"
+                "build dollar$name: CXX_STATIC_LIBRARY_LINKER__lib_Release\\n",
                 encoding="utf-8",
             )
-            self.assertEqual(_ninja_rule_map(build)["app binary"], "CXX_EXECUTABLE_LINKER__app_Release")
+            rules = _ninja_rule_map(build)
+            self.assertEqual(rules["app binary"], "CXX_EXECUTABLE_LINKER__app_Release")
+            self.assertEqual(rules["dollar$name"], "CXX_STATIC_LIBRARY_LINKER__lib_Release")
+            self.assertEqual(_ninja_rule_separator("app$ name: CXX_LINKER"), 9)
 
     def test_benchmark_copy_omits_build_and_cache_directories(self) -> None:
         ignored = _copy_ignore(
