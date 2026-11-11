@@ -13,8 +13,10 @@ sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 from ccache_benchmark import (  # noqa: E402
     DEFAULT_CHANGED_CXX_FLAGS,
     REQUIRED_TOOLS,
+    _append_marker,
     _cache_stats,
     _cmake_cache_value,
+    _ctest_phase,
     _comparison_context,
     _copy_ignore,
     _effective_changed_cxx_flags,
@@ -190,6 +192,48 @@ class CcacheBenchmarkTests(unittest.TestCase):
             with self.subTest(args=args):
                 with self.assertRaisesRegex(ValueError, "controlled by the benchmark"):
                     _split_cxx_flags(args, "-fno-omit-frame-pointer")
+
+    def test_benchmark_rejects_cmake_arguments_that_override_isolated_paths(self) -> None:
+        for args in (
+            ["-B", "/tmp/outside-build"],
+            ["-B/tmp/outside-build"],
+            ["-S", "/tmp/outside-source"],
+            ["-G", "Unix Makefiles"],
+            ["--preset=untrusted-preset"],
+            ["--build=/tmp/outside-build"],
+        ):
+            with self.subTest(args=args):
+                with self.assertRaisesRegex(ValueError, "controlled by the benchmark"):
+                    _split_cxx_flags(args, "-fno-omit-frame-pointer")
+
+    def test_ctest_uses_build_directory_as_cwd_for_older_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            listing = SimpleNamespace(returncode=0, stdout="Total Tests: 1\\n")
+            with (
+                patch("ccache_benchmark.shutil.which", return_value="/usr/bin/ctest"),
+                patch("ccache_benchmark.subprocess.run", return_value=listing) as listing_run,
+                patch("ccache_benchmark._run", return_value=(0, 12.5, "100% tests passed")) as test_run,
+            ):
+                result = _ctest_phase(build, {}, 1)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(listing_run.call_args.args[0], ["ctest", "-N"])
+        self.assertEqual(listing_run.call_args.kwargs["cwd"], build)
+        self.assertEqual(
+            test_run.call_args.args[0],
+            ["ctest", "--output-on-failure", "--parallel", "1"],
+        )
+        self.assertEqual(test_run.call_args.kwargs["cwd"], build)
+
+    def test_source_and_header_markers_are_valid_c_and_cpp_comments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            header = Path(directory) / "shared.h"
+            header.write_text("#pragma once\\n", encoding="utf-8")
+            _append_marker(header, "ccache benchmark shared-header change")
+            content = header.read_text(encoding="utf-8")
+        self.assertIn("/* ccache benchmark shared-header change */", content)
+        self.assertNotIn("// ccache benchmark", content)
 
     def test_ninja_rule_map_unescapes_output_paths_with_spaces(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
