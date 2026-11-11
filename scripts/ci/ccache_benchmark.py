@@ -217,7 +217,8 @@ def _ctest_phase(build_dir: Path, env: dict[str, str], parallelism: int) -> dict
     if shutil.which("ctest") is None:
         return {"name": "test", "exit_code": 0, "status": "skipped", "reason": "ctest is unavailable", "duration_ms": 0.0}
     listing = subprocess.run(
-        ["ctest", "--test-dir", str(build_dir), "-N"],
+        ["ctest", "-N"],
+        cwd=build_dir,
         env=env,
         text=True,
         stdout=subprocess.PIPE,
@@ -231,7 +232,7 @@ def _ctest_phase(build_dir: Path, env: dict[str, str], parallelism: int) -> dict
     if count == 0:
         return {"name": "test", "exit_code": 0, "status": "skipped", "test_count": 0, "reason": "no registered CTest tests", "duration_ms": 0.0}
     code, elapsed, output = _run(
-        ["ctest", "--test-dir", str(build_dir), "--output-on-failure", "--parallel", str(parallelism)],
+        ["ctest", "--output-on-failure", "--parallel", str(parallelism)],
         cwd=build_dir,
         env=env,
     )
@@ -338,13 +339,20 @@ def _cache_stats(cache_dir: Path, stats_log: Path, env: dict[str, str]) -> dict[
 
 
 def _split_cxx_flags(extra_args: list[str] | None, changed_flags: str = "") -> tuple[str, list[str]]:
-    """Merge CMAKE_CXX_FLAGS and reject caller overrides of the ccache launcher."""
+    """Merge CMAKE_CXX_FLAGS and reject options that can escape benchmark isolation."""
     baseline: list[str] = []
     passthrough: list[str] = []
     args = extra_args or []
     index = 0
     while index < len(args):
         arg = args[index]
+        controlled = (
+            arg in {"-S", "-B", "-G", "--source", "--build", "--generator", "--preset", "--workflow"}
+            or arg.startswith(("-S", "-B", "-G"))
+            or arg.startswith(("--source=", "--build=", "--generator=", "--preset=", "--workflow="))
+        )
+        if controlled:
+            raise ValueError(f"{arg} is controlled by the benchmark to preserve source/build isolation")
         definition: str | None = None
         consumed = 1
         if arg == "-D" and index + 1 < len(args):
@@ -442,8 +450,9 @@ def _build_phase(
 
 
 def _append_marker(path: Path, marker: str) -> None:
+    # Block comments are valid in both C90 and C++ headers.
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(f"\n// {marker}\n")
+        handle.write(f"\n/* {marker} */\n")
 
 
 def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
