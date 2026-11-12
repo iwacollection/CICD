@@ -238,6 +238,21 @@ class CcacheBenchmarkTests(unittest.TestCase):
             ["-D", "CMAKE_BUILD_TYPE=RelWithDebInfo"],
         )
 
+    def test_benchmark_rejects_cmake_cache_unset_of_compiler_launchers(self) -> None:
+        for args in (
+            ["-U", "CMAKE_CXX_COMPILER_LAUNCHER"],
+            ["-UCMAKE_C_COMPILER_LAUNCHER"],
+            ["-U", "CMAKE_*_COMPILER_LAUNCHER"],
+            ["-U", "*COMPILER_LAUNCHER"],
+        ):
+            with self.subTest(args=args):
+                with self.assertRaisesRegex(ValueError, "controlled by the benchmark"):
+                    _split_cxx_flags(args)
+
+        flags, passthrough = _split_cxx_flags(["-U", "CMAKE_BUILD_TYPE"])
+        self.assertEqual(flags, "")
+        self.assertEqual(passthrough, ["-U", "CMAKE_BUILD_TYPE"])
+
     def test_benchmark_rejects_caller_overrides_of_compiler_launchers(self) -> None:
         for args in (
             ["-DCMAKE_CXX_COMPILER_LAUNCHER="],
