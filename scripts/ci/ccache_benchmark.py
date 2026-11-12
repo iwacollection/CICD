@@ -102,12 +102,9 @@ def _compiler_command(value: str) -> list[str]:
     if Path(value).is_file():
         return [value]
     if ";" in value:
-        return [
-            token
-            for part in value.split(";")
-            for token in shlex.split(part.strip())
-            if token
-        ]
+        # CMake cache lists use semicolons as argument boundaries. Preserve
+        # each list element exactly instead of shell-splitting its contents.
+        return [part.strip() for part in value.split(";") if part.strip()]
     return shlex.split(value)
 
 
