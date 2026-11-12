@@ -18,6 +18,8 @@ from ccache_benchmark import (  # noqa: E402
     _cmake_cache_value,
     _ctest_phase,
     _comparison_context,
+    _compiler_command,
+    _compiler_identity,
     _copy_ignore,
     _effective_changed_cxx_flags,
     _inside,
@@ -25,6 +27,7 @@ from ccache_benchmark import (  # noqa: E402
     _ninja_phase_metrics,
     _ninja_rule_map,
     _ninja_rule_separator,
+    _selected_input_compile_validation,
     _split_cxx_flags,
 )
 
@@ -107,6 +110,59 @@ class CcacheBenchmarkTests(unittest.TestCase):
             self.assertEqual(_cmake_cache_value(build, "CMAKE_CXX_COMPILER"), "/usr/bin/clang++")
             self.assertEqual(_cmake_cache_value(build, "CMAKE_CXX_COMPILER_ID"), "Clang")
             self.assertEqual(_cmake_cache_value(build, "CMAKE_CXX_COMPILER_VERSION"), "19.1.0")
+
+    def test_compiler_command_supports_toolchain_arguments(self) -> None:
+        self.assertEqual(
+            _compiler_command("/usr/bin/ccache;/usr/bin/clang++ --target=x86_64-linux-gnu"),
+            ["/usr/bin/ccache", "/usr/bin/clang++ --target=x86_64-linux-gnu"],
+        )
+        self.assertEqual(_compiler_command("ccache clang++ --target=aarch64"), [
+            "ccache", "clang++", "--target=aarch64"
+        ])
+
+    def test_compiler_version_probe_handles_list_valued_cmake_compiler(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "CMakeCache.txt").write_text(
+                "CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/ccache;/usr/bin/clang++ --target=x86_64-linux-gnu\\n"
+                "CMAKE_CXX_COMPILER_ID:STRING=Clang\\n"
+                "CMAKE_CXX_COMPILER_VERSION:STRING=19.1.0\\n",
+                encoding="utf-8",
+            )
+            result = SimpleNamespace(returncode=0, stdout="clang version 19.1.0\\n")
+            with patch("ccache_benchmark.subprocess.run", return_value=result) as run:
+                identity = _compiler_identity(build)
+        self.assertEqual(identity["version_line"], "clang version 19.1.0")
+        self.assertNotIn("version_probe_error", identity)
+        self.assertEqual(
+            run.call_args.args[0],
+            ["/usr/bin/ccache", "/usr/bin/clang++", "--target=x86_64-linux-gnu", "--version"],
+        )
+
+    def test_compiler_version_probe_failure_is_non_fatal_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "CMakeCache.txt").write_text(
+                "CMAKE_CXX_COMPILER:FILEPATH=/missing/compiler\\n",
+                encoding="utf-8",
+            )
+            with patch("ccache_benchmark.subprocess.run", side_effect=FileNotFoundError("compiler wrapper")):
+                identity = _compiler_identity(build)
+        self.assertIn("FileNotFoundError", identity["version_probe_error"])
+
+    def test_selected_inputs_must_trigger_compile_edges(self) -> None:
+        self.assertEqual(
+            _selected_input_compile_validation({"ninja": {"compile_edges": 2}}),
+            {"status": "passed", "compile_edges": 2},
+        )
+        self.assertEqual(
+            _selected_input_compile_validation({"ninja": {"compile_edges": 0}}),
+            {"status": "failed", "compile_edges": 0},
+        )
+        self.assertEqual(
+            _selected_input_compile_validation({"ninja": {}}),
+            {"status": "failed", "compile_edges": None},
+        )
 
     def test_ninja_log_edges_are_separated_into_compile_and_link_work(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
