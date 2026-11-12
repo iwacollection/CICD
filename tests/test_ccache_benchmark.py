@@ -114,7 +114,7 @@ class CcacheBenchmarkTests(unittest.TestCase):
     def test_compiler_command_supports_toolchain_arguments(self) -> None:
         self.assertEqual(
             _compiler_command("/usr/bin/ccache;/usr/bin/clang++;--target=x86_64-linux-gnu"),
-            ["/usr/bin/ccache", "/usr/bin/clang++ --target=x86_64-linux-gnu"],
+            ["/usr/bin/ccache", "/usr/bin/clang++", "--target=x86_64-linux-gnu"],
         )
         self.assertEqual(_compiler_command("ccache clang++ --target=aarch64"), [
             "ccache", "clang++", "--target=aarch64"
@@ -124,7 +124,7 @@ class CcacheBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
             (build / "CMakeCache.txt").write_text(
-                "CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/ccache;/usr/bin/clang++ --target=x86_64-linux-gnu\n"
+                "CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/ccache;/usr/bin/clang++;--target=x86_64-linux-gnu\n"
                 "CMAKE_CXX_COMPILER_ID:STRING=Clang\n"
                 "CMAKE_CXX_COMPILER_VERSION:STRING=19.1.0\n",
                 encoding="utf-8",
