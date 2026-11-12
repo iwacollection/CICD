@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -92,6 +93,19 @@ def _cmake_cache_value(build_dir: Path, key: str) -> str | None:
     return None
 
 
+def _compiler_command(value: str) -> list[str]:
+    """Parse CMake's compiler command, including list-valued toolchain entries."""
+    value = value.strip()
+    if not value:
+        return []
+    # Preserve a compiler executable whose literal path contains spaces.
+    if Path(value).is_file():
+        return [value]
+    if ";" in value:
+        return [part.strip() for part in value.split(";") if part.strip()]
+    return shlex.split(value)
+
+
 def _compiler_identity(build_dir: Path) -> dict[str, Any]:
     compiler = _cmake_cache_value(build_dir, "CMAKE_CXX_COMPILER")
     identity = {
@@ -100,15 +114,38 @@ def _compiler_identity(build_dir: Path) -> dict[str, Any]:
         "version": _cmake_cache_value(build_dir, "CMAKE_CXX_COMPILER_VERSION"),
     }
     if compiler:
-        version = subprocess.run(
-            [compiler, "--version"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
-        identity["version_line"] = version.stdout.splitlines()[0] if version.stdout.splitlines() else None
+        command = _compiler_command(compiler)
+        if not command:
+            identity["version_probe_error"] = "CMAKE_CXX_COMPILER is empty after parsing"
+        else:
+            try:
+                version = subprocess.run(
+                    [*command, "--version"],
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                )
+                lines = version.stdout.splitlines()
+                if lines:
+                    identity["version_line"] = lines[0]
+                if version.returncode != 0:
+                    identity["version_probe_error"] = f"compiler version probe exited {version.returncode}"
+            except OSError as exc:
+                # Version metadata is supplemental; a valid CMake build must not
+                # fail only because a wrapper cannot be probed independently.
+                identity["version_probe_error"] = f"{type(exc).__name__}: {exc}"
     return identity
+
+
+def _selected_input_compile_validation(phase: dict[str, Any]) -> dict[str, Any]:
+    ninja = phase.get("ninja")
+    compile_edges = ninja.get("compile_edges") if isinstance(ninja, dict) else None
+    valid = isinstance(compile_edges, int) and not isinstance(compile_edges, bool) and compile_edges > 0
+    return {
+        "status": "passed" if valid else "failed",
+        "compile_edges": compile_edges,
+    }
 
 
 def _ninja_words(value: str) -> list[str]:
@@ -514,12 +551,18 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
 
         original_source = source_file.read_bytes()
         _append_marker(source_file, "ccache benchmark source-only change")
-        phases.append(_build_phase("source_incremental", project, primary_build, cache_dir, base_env))
+        source_incremental = _build_phase("source_incremental", project, primary_build, cache_dir, base_env)
+        source_incremental["selected_input_validation"] = _selected_input_compile_validation(source_incremental)
+        phases.append(source_incremental)
         source_file.write_bytes(original_source)
-        phases.append(_build_phase("source_cache_replay", project, primary_build, cache_dir, base_env))
+        source_replay = _build_phase("source_cache_replay", project, primary_build, cache_dir, base_env)
+        source_replay["selected_input_validation"] = _selected_input_compile_validation(source_replay)
+        phases.append(source_replay)
 
         _append_marker(header_file, "ccache benchmark shared-header change")
-        phases.append(_build_phase("header_incremental", project, primary_build, cache_dir, base_env))
+        header_incremental = _build_phase("header_incremental", project, primary_build, cache_dir, base_env)
+        header_incremental["selected_input_validation"] = _selected_input_compile_validation(header_incremental)
+        phases.append(header_incremental)
 
         changed_flags = root / "build-changed-flags"
         changed_configure = _configure(
@@ -580,6 +623,10 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             failed.append("compiler_flags_changed_cache_invalidation")
         if replay_phase.get("cache_replay_validation") == "failed":
             failed.append("source_cache_replay")
+        for phase_name in ("source_incremental", "source_cache_replay", "header_incremental"):
+            phase = next(item for item in phases if item["name"] == phase_name)
+            if phase.get("selected_input_validation", {}).get("status") != "passed":
+                failed.append(f"{phase_name}_selected_input_compile_validation")
         warm_noop_valid = all(
             phase.get("exit_code") == 0
             and phase.get("ninja", {}).get("total_edges") == 0
