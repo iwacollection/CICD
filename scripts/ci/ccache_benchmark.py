@@ -7,6 +7,7 @@ never edits the caller's source tree.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import re
@@ -392,6 +393,24 @@ def _split_cxx_flags(extra_args: list[str] | None, changed_flags: str = "") -> t
         )
         if controlled:
             raise ValueError(f"{arg} is controlled by the benchmark to preserve source/build isolation")
+        unset_pattern: str | None = None
+        unset_consumed = 1
+        if arg == "-U":
+            if index + 1 >= len(args):
+                raise ValueError("-U requires a cache-entry glob")
+            unset_pattern = args[index + 1]
+            unset_consumed = 2
+        elif arg.startswith("-U") and len(arg) > 2:
+            unset_pattern = arg[2:]
+
+        if unset_pattern is not None:
+            controlled_names = ("CMAKE_C_COMPILER_LAUNCHER", "CMAKE_CXX_COMPILER_LAUNCHER")
+            if any(fnmatch.fnmatchcase(name, unset_pattern) for name in controlled_names):
+                raise ValueError("CMAKE compiler launchers are controlled by the benchmark and cannot be unset")
+            passthrough.extend(args[index:index + unset_consumed])
+            index += unset_consumed
+            continue
+
         definition: str | None = None
         consumed = 1
         if arg == "-D" and index + 1 < len(args):
