@@ -248,7 +248,22 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
     io_write_bytes_total = 0
     io_pressure_some_usec_total = 0
     no_op_successes = 0
+    availability_counts = {
+        name: {"available": 0, "unavailable": 0, "unreported": 0}
+        for name in ("ccache", "cmake_ninja", "conan")
+    }
     for item in build_reports:
+        availability = item.get("telemetry_availability", {})
+        if not isinstance(availability, dict):
+            availability = {}
+        for name, counts in availability_counts.items():
+            record = availability.get(name)
+            status = record.get("status") if isinstance(record, dict) else None
+            if status in {"available", "unavailable"}:
+                counts[status] += 1
+            else:
+                counts["unreported"] += 1
+
         resources = item.get("resources", {})
         if isinstance(resources, dict):
             effective_jobs = resources.get("effective_jobs")
@@ -308,14 +323,33 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "compile_invocations": len(compile_reports),
         "ccache": {
             "samples": len(cache_reports),
-            "hits": hits,
-            "misses": misses,
+            "hits": hits if cache_reports else None,
+            "misses": misses if cache_reports else None,
             "hit_rate_percent": round(hits / total * 100.0, 2) if total else None,
-            "cleanup_events_total": sum(int(item.get("cleanup_events") or 0) for item in cache_reports if item.get("cleanup_events_scope", "build") == "build"),
-            "global_cleanup_snapshot_max": max((int(item.get("cleanup_events") or 0) for item in cache_reports if item.get("cleanup_events_scope") == "global_snapshot"), default=0),
-            "max_cache_size_gib": max((float(item.get("cache_size_gib") or 0) for item in cache_reports), default=0),
-            "max_files_in_cache": max((int(item.get("files_in_cache") or 0) for item in cache_reports), default=0),
+            "cleanup_events_total": (
+                sum(int(item["cleanup_events"]) for item in cache_reports
+                    if item.get("cleanup_events_scope") == "build" and isinstance(item.get("cleanup_events"), (int, float)))
+                if any(item.get("cleanup_events_scope") == "build" and isinstance(item.get("cleanup_events"), (int, float)) for item in cache_reports)
+                else None
+            ),
+            "global_cleanup_snapshot_max": (
+                max(int(item["cleanup_events"]) for item in cache_reports
+                    if item.get("cleanup_events_scope") == "global_snapshot" and isinstance(item.get("cleanup_events"), (int, float)))
+                if any(item.get("cleanup_events_scope") == "global_snapshot" and isinstance(item.get("cleanup_events"), (int, float)) for item in cache_reports)
+                else None
+            ),
+            "max_cache_size_gib": (
+                max(float(item["cache_size_gib"]) for item in cache_reports if isinstance(item.get("cache_size_gib"), (int, float)))
+                if any(isinstance(item.get("cache_size_gib"), (int, float)) for item in cache_reports)
+                else None
+            ),
+            "max_files_in_cache": (
+                max(int(item["files_in_cache"]) for item in cache_reports if isinstance(item.get("files_in_cache"), (int, float)))
+                if any(isinstance(item.get("files_in_cache"), (int, float)) for item in cache_reports)
+                else None
+            ),
         },
+        "telemetry_availability": availability_counts,
         "cmake_phases": {
             name: {
                 "count": len(values),
@@ -500,21 +534,41 @@ def format_aggregate_summary(value: dict[str, Any]) -> str:
     if ccache.get("samples", 0):
         rate = ccache.get("hit_rate_percent")
         rate_text = f"{rate:.1f}%" if isinstance(rate, (int, float)) else "n/a"
+        cleanup = ccache.get("cleanup_events_total")
+        cleanup_text = str(cleanup) if isinstance(cleanup, (int, float)) else "n/a"
+        global_cleanup = ccache.get("global_cleanup_snapshot_max")
+        global_cleanup_text = str(global_cleanup) if isinstance(global_cleanup, (int, float)) else "n/a"
+        size = ccache.get("max_cache_size_gib")
+        size_text = f"{size:.2f} GiB" if isinstance(size, (int, float)) else "n/a"
+        files = ccache.get("max_files_in_cache")
+        files_text = str(files) if isinstance(files, (int, float)) else "n/a"
         lines.append(
-            f"- ccache: {ccache.get('hits', 0)} hits / {ccache.get('misses', 0)} misses "
-            f"({rate_text}); per-build cleanup events: {ccache.get('cleanup_events_total', 0)}; "
-            f"global cleanup snapshot max: {ccache.get('global_cleanup_snapshot_max', 0)}; "
-            f"largest observed cache: {ccache.get('max_cache_size_gib', 0):.2f} GiB / "
-            f"{ccache.get('max_files_in_cache', 0)} files"
+            f"- ccache: {ccache.get('hits')} hits / {ccache.get('misses')} misses "
+            f"({rate_text}); per-build cleanup events: {cleanup_text}; "
+            f"global cleanup snapshot max: {global_cleanup_text}; "
+            f"largest observed cache: {size_text} / {files_text} files"
         )
     else:
-        lines.append("- ccache: no build-local stats available")
-    for phase, item in build_telemetry.get("cmake_phases", {}).items():
+        lines.append("- ccache: unavailable (no per-build hit/miss counters)")
+    for name, label in (("ccache", "ccache"), ("cmake_ninja", "CMake/Ninja"), ("conan", "Conan phase")):
+        counts = build_telemetry.get("telemetry_availability", {}).get(name, {})
+        if counts:
+            lines.append(
+                f"- {label} telemetry availability: {counts.get('available', 0)} available / "
+                f"{counts.get('unavailable', 0)} unavailable / {counts.get('unreported', 0)} unreported"
+            )
+    cmake_phases = build_telemetry.get("cmake_phases", {})
+    if not cmake_phases:
+        lines.append("- CMake/Ninja phase metrics: unavailable (no numeric samples)")
+    for phase, item in cmake_phases.items():
         lines.append(
             f"- CMake {phase}: {item['count']} samples; median {item['median_ms'] / 1000:.2f}s; "
             f"P95 {item['p95_ms'] / 1000:.2f}s; max {item['max_ms'] / 1000:.2f}s"
         )
-    for phase, item in build_telemetry.get("conan_phases", {}).items():
+    conan_phases = build_telemetry.get("conan_phases", {})
+    if not conan_phases:
+        lines.append("- Conan phase metrics: unavailable (no numeric samples)")
+    for phase, item in conan_phases.items():
         lines.append(
             f"- Conan {phase}: {item['count']} samples; median {item['median_ms'] / 1000:.2f}s; "
             f"P95 {item['p95_ms'] / 1000:.2f}s; max {item['max_ms'] / 1000:.2f}s"
