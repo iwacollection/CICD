@@ -417,7 +417,7 @@ class CiPerformanceTests(unittest.TestCase):
             telemetry_dir = root / ".ci-telemetry"
             telemetry_dir.mkdir()
             (telemetry_dir / "ccache-global-stats.txt").write_text(
-                "Cache size (GB): 0.3 / 5.0 (6.0%)\\nFiles: 120\\nCleanups: 0\\n",
+                "Cache size (GB): 0.3 / 5.0 (6.0%)\nFiles: 120\nCleanups: 0\n",
                 encoding="utf-8",
             )
             telemetry = collect_build_telemetry(
