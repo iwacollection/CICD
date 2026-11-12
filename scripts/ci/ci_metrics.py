@@ -222,6 +222,12 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
         if isinstance(report.get("ccache"), dict)
     ]
     cache_reports = [item for item in all_ccache_reports if item.get("available")]
+    build_cleanup_reports = [
+        item for item in all_ccache_reports
+        if item.get("cleanup_events_scope") == "build"
+        and isinstance(item.get("cleanup_events"), (int, float))
+        and not isinstance(item.get("cleanup_events"), bool)
+    ]
     global_cache_reports = [
         item for item in all_ccache_reports
         if item.get("global_snapshot_available")
@@ -271,11 +277,19 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
             availability = {}
         phase_name = item.get("phase", "build")
         for name, counts in availability_counts.items():
-            # ccache counters are compiler/build telemetry. A test-only
-            # invocation deliberately clears its build-local ccache log and
-            # must not inflate the unavailable/unreported counts.
-            if name == "ccache" and phase_name != "build":
+            # ccache and CMake/Ninja are build-only telemetry. A test-only
+            # invocation deliberately clears their files because it does not
+            # compile or configure; those absences are not missing build data.
+            if phase_name == "test" and name in {"ccache", "cmake_ninja"}:
                 continue
+            # Conan build phases are counted on build records. A test record
+            # contributes only when it emitted a fresh test_ms measurement;
+            # stale build timings left in the workspace are not test evidence.
+            if phase_name == "test" and name == "conan":
+                conan_record = item.get("conan", {})
+                test_ms = conan_record.get("test_ms") if isinstance(conan_record, dict) else None
+                if not isinstance(test_ms, (int, float)) or isinstance(test_ms, bool):
+                    continue
             record = availability.get(name)
             status = record.get("status") if isinstance(record, dict) else None
             if status in {"available", "unavailable"}:
@@ -357,10 +371,8 @@ def _build_telemetry_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
             "misses": misses if cache_reports else None,
             "hit_rate_percent": round(hits / total * 100.0, 2) if total else None,
             "cleanup_events_total": (
-                sum(int(item["cleanup_events"]) for item in cache_reports
-                    if item.get("cleanup_events_scope") == "build" and isinstance(item.get("cleanup_events"), (int, float)))
-                if any(item.get("cleanup_events_scope") == "build" and isinstance(item.get("cleanup_events"), (int, float)) for item in cache_reports)
-                else None
+                sum(int(item["cleanup_events"]) for item in build_cleanup_reports)
+                if build_cleanup_reports else None
             ),
             "global_cleanup_snapshot_max": (
                 max(int(item["cleanup_events"]) for item in global_cache_reports
