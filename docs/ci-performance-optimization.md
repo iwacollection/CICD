@@ -389,6 +389,6 @@ This run establishes where the current example build time is spent: tool preflig
 
 ### Missing telemetry semantics
 
-The collector now emits a per-record `telemetry_availability` status for ccache, CMake/Ninja and Conan. Missing files, invalid/empty JSON or absent numeric phase measurements are explicitly `unavailable` with a reason. Missing per-build ccache hit/miss counters remain `null`; a global cache-size snapshot may still be reported separately, but it cannot fabricate per-build hits, misses or a hit rate. Aggregate reports count available, unavailable and unreported records, and render missing phase samples as unavailable rather than zero.
+The collector now emits a per-record `telemetry_availability` status for ccache, CMake/Ninja and Conan. Missing files, invalid UTF-8, invalid/empty JSON or absent numeric phase measurements are explicitly `unavailable` with a reason. Missing per-build ccache hit/miss counters remain `null`; global cache size, file count and cleanup snapshots are aggregated independently and remain visible even when build-local hit/miss counters are unavailable. Test-only records are excluded from ccache availability counts because they do not compile. Missing resource counters remain unavailable rather than being synthesized as zero.
 
 No broad timer-step consolidation is justified by the available evidence. Keep the existing stage boundaries; only consolidate markers if comparable repeated runs show their process/JSON overhead is material relative to the measured Job work.

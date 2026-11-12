@@ -94,6 +94,8 @@ def _read_json_telemetry(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return {}, {"status": "unavailable", "source": path.name, "reason": "file_missing"}
+    except UnicodeDecodeError:
+        return {}, {"status": "unavailable", "source": path.name, "reason": "invalid_utf8"}
     except OSError as exc:
         return {}, {"status": "unavailable", "source": path.name, "reason": f"read_error: {type(exc).__name__}"}
     try:

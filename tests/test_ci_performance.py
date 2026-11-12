@@ -325,6 +325,7 @@ class CiPerformanceTests(unittest.TestCase):
                 "ccache": {
                     "available": True, "hits": 8, "misses": 2,
                     "hit_rate_percent": 80.0, "cleanup_events": 1,
+                    "cleanup_events_scope": "build",
                     "cache_size_gib": 0.3, "files_in_cache": 120,
                 },
                 "resources": {
@@ -371,7 +372,7 @@ class CiPerformanceTests(unittest.TestCase):
                 "cmake_ninja": {},
                 "conan": {"test_ms": 250},
                 "telemetry_availability": {
-                    "ccache": {"status": "available"},
+                    "ccache": {"status": "unavailable", "reason": "per-build counters are not collected in test phase"},
                     "cmake_ninja": {"status": "unavailable", "reason": "file_missing"},
                     "conan": {"status": "available"},
                 },
@@ -399,7 +400,7 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(summary["resources"]["io_read_bytes_total"], 1000)
         self.assertEqual(summary["resources"]["io_pressure_some_usec_total"], 2500)
         self.assertEqual(summary["telemetry_availability"]["ccache"], {
-            "available": 2, "unavailable": 0, "unreported": 0
+            "available": 1, "unavailable": 0, "unreported": 0
         })
         self.assertEqual(summary["telemetry_availability"]["cmake_ninja"], {
             "available": 1, "unavailable": 1, "unreported": 0
@@ -439,9 +440,43 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertIsNone(summary["ccache"]["hits"])
         self.assertIsNone(summary["ccache"]["misses"])
         self.assertEqual(summary["telemetry_availability"]["ccache"]["unavailable"], 1)
+        self.assertEqual(summary["ccache"]["global_samples"], 1)
+        self.assertEqual(summary["ccache"]["max_cache_size_gib"], 0.3)
+        self.assertEqual(summary["ccache"]["max_files_in_cache"], 120)
+        self.assertEqual(summary["ccache"]["global_cleanup_snapshot_max"], 0)
         rendered = format_aggregate_summary({"build_telemetry_summary": summary})
         self.assertIn("ccache: unavailable", rendered)
+        self.assertIn("0.30 GiB / 120 files", rendered)
         self.assertIn("CMake/Ninja telemetry availability: 0 available / 1 unavailable", rendered)
+        self.assertIsNone(summary["resources"]["cpu_throttled_usec_total"])
+        self.assertIsNone(summary["resources"]["oom_kill_events_total"])
+        self.assertIsNone(summary["resources"]["io_read_bytes_total"])
+        self.assertIsNone(summary["resources"]["io_write_bytes_total"])
+        self.assertIsNone(summary["resources"]["io_pressure_some_usec_total"])
+        self.assertIn("Resource telemetry unavailable", rendered)
+
+    def test_invalid_utf8_build_telemetry_is_unavailable(self) -> None:
+        from compile_telemetry import collect_build_telemetry
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            telemetry_dir = root / ".ci-telemetry"
+            telemetry_dir.mkdir()
+            (telemetry_dir / "cmake-build.json").write_bytes(b"\\xff\\xfe")
+            telemetry = collect_build_telemetry(
+                root,
+                build_exit_code=0,
+                build_duration_ms=1000,
+            )
+
+        self.assertEqual(
+            telemetry["telemetry_availability"]["cmake_ninja"]["status"],
+            "unavailable",
+        )
+        self.assertEqual(
+            telemetry["telemetry_availability"]["cmake_ninja"]["reason"],
+            "invalid_utf8",
+        )
 
     def test_build_telemetry_reads_conan_phase_timings(self) -> None:
         from compile_telemetry import collect_build_telemetry
