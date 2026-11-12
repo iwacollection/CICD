@@ -350,3 +350,45 @@ The harness repeats warm no-op builds (three by default), replays the original s
 Supply --toolchain-identity and --runner-class (or set CI_TOOLCHAIN_IDENTITY and CI_RUNNER_CLASS). The toolchain identity must contain an immutable sha256:<64 hex> digest, such as an OCI image digest; a mutable label like host:gcc-host-v1 is not sufficient. comparison_context.comparable is true only when both the immutable digest and stable runner class are present. Missing or mutable identity is reported with explicit reasons and makes the run ineligible for before/after performance claims. Selected source/header files under ignored copy directories such as build/, .cache/ or cmake-build-* are rejected before the temporary copy, rather than silently disappearing.
 
 This is still an experiment harness, not evidence of production build speedup. The repository contains only small C++ smoke fixtures, and the benchmark input must be a real representative CMake project before Issue #73 can pass its cold/warm sample and performance acceptance criteria. The selected project, immutable toolchain identity and same runner class must be supplied and retained with the benchmark report.
+
+
+## 12. P2 timing boundaries and telemetry availability (2026-11-12)
+
+### Measurement boundaries
+
+The Conan subphase fields are emitted by `scripts/ci/conan_cmake_build.sh` and attached to the same build/test telemetry records by `compile_telemetry.py`. Their meanings are deliberately narrower than the overall GitHub Job runtime:
+
+| Metric | Start / end boundary | Included work | Exclusions and interpretation |
+|---|---|---|---|
+| `tool_preflight_ms` | Before lockfile/tool checks / after required Ninja and ccache commands are verified | Lockfile presence check, tool detection, missing-package `apt-get update/install`, final tool verification | Does not include Runner queue/provisioning, checkout, or the later Conan version check |
+| `conan_venv_setup_ms` | Before creation of the tool/cache/telemetry directories / after the pinned Conan virtualenv is ready | Directory creation, Python venv creation and pinned Conan pip install when absent | Excludes `CONAN_HOME` setup and the following `conan --version` check |
+| `dependency_resolution_ms` | Around `conan graph info` | Locked dependency graph resolution with host/build profiles | Does not include package listing, download or local installation |
+| `dependency_package_list_ms` | Around `conan list --graph` | Exact package-list generation from the resolved graph | Does not include remote transfer |
+| `dependency_download_ms` | Around `conan download --list` only when remote packages are required | Remote package transfer for the exact list | When status is `skipped-local-cache`, value 0 means the remote step was not run, not that a remote download completed instantaneously |
+| `dependency_local_install_generate_ms` | Around `conan install --no-remote --build=missing` | Local package installation, generator execution and any missing package source builds | Not a pure network-download measurement |
+| `dependency_warm_cache_reuse_ms` | Around the second `conan install --no-remote --build=never` | Warm local-cache reuse and generation | Before/after SHA identity calculation and diff are outside this timer; they are a separate correctness check |
+| `clean_configure_compile_total_ms` | Around the first `cmake_build.sh` invocation | CMake configure/generate plus Ninja compile/link and wrapper overhead | `configure_generate_ms` and `compile_link_ms` are nested subphase measurements, not additional wall time |
+| `warm_clean_rebuild_total_ms` | Before `cmake --build --target clean` / after the second `cmake_build.sh` | Clean plus warm-cache configure/generate and Ninja compile/link | The warm configure and compile/link fields are subphases of this wall-clock interval |
+| `test_ms` | Emitted only by a project/test-phase telemetry record that supplies it | That project's test command duration | Missing means unavailable/not emitted, not a zero-duration test |
+
+The separate end-to-end observer remains authoritative for workflow and Job queue/runtime boundaries. Stage timers begin inside a running Job and therefore cannot include GitHub scheduling, Runner provisioning before the first marker or post-job cleanup. Parallel Job runtimes and overlapping stage/edge windows must not be summed into a workflow wall-clock estimate.
+
+### Mainline observation after Conan phase instrumentation
+
+Evidence: [main Build Matrix #42818125110](https://github.com/iwacollection/CICD/actions/runs/42818125110), main SHA `ba91c24255323c48aca07052d53455b5e5744348`; [end-to-end observer #42818748315](https://github.com/iwacollection/CICD/actions/runs/42818748315); performance report artifact `ci-performance-report` (run artifact ID `13764913184`) and end-to-end report artifact `ci-end-to-end-report-42818125110` (artifact ID `13765653493`).
+
+- Workflow end-to-end: 262.00s; Job execution window: 259.00s; instrumented workflow span: 198.77s.
+- 29 Jobs: queue wait median 1.00s / P95 2.00s / max 5.00s; Job runtime median 17.00s / P95 57.00s / max 79.00s.
+- Build stage: 7 samples, median 2.34s / P95 53.76s / max 53.76s. The longest instrumented build Jobs were the Conan example projects; this is a fixture-workload observation, not a production workload result.
+- Conan aggregate samples (3 build records): tool preflight median 15.32s / P95 23.56s; virtualenv setup median 4.78s / P95 7.47s; dependency resolution median 0.45s / P95 0.54s; package list median 0.18s / P95 0.19s; local install/generate median 0.28s / P95 0.29s; warm reuse median 0.28s / P95 0.29s.
+- The same report records clean configure+compile totals median 17.36s / P95 20.38s, and warm clean rebuild totals median 0.17s / P95 0.37s. These are repeated within-job phases in the Conan helper, not independent cold/warm production runs.
+- The two Conan library job logs show first-pass ccache 1 hit / 0 misses and warm pass 2 hits / 0 misses, with an additional warm hit. The aggregate report records 8 hits / 0 misses across its available build-local ccache samples.
+- `dependency_download_ms=0` in this run had `dependency_download_status=skipped-local-cache`; no remote package download was required.
+
+This run establishes where the current example build time is spent: tool preflight and Conan environment setup are material portions of the Conan Job, while dependency resolution/list/install phases are comparatively small on this already-warm hosted-runner sample. It does **not** establish a before/after speedup: there is one mainline run, the three Conan samples are within that run, and the workload is still repository examples.
+
+### Missing telemetry semantics
+
+The collector now emits a per-record `telemetry_availability` status for ccache, CMake/Ninja and Conan. Missing files, invalid/empty JSON or absent numeric phase measurements are explicitly `unavailable` with a reason. Missing per-build ccache hit/miss counters remain `null`; a global cache-size snapshot may still be reported separately, but it cannot fabricate per-build hits, misses or a hit rate. Aggregate reports count available, unavailable and unreported records, and render missing phase samples as unavailable rather than zero.
+
+No broad timer-step consolidation is justified by the available evidence. Keep the existing stage boundaries; only consolidate markers if comparable repeated runs show their process/JSON overhead is material relative to the measured Job work.
