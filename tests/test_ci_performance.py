@@ -462,7 +462,7 @@ class CiPerformanceTests(unittest.TestCase):
             root = Path(directory)
             telemetry_dir = root / ".ci-telemetry"
             telemetry_dir.mkdir()
-            (telemetry_dir / "cmake-build.json").write_bytes(b"\\xff\\xfe")
+            (telemetry_dir / "cmake-build.json").write_bytes(bytes([0xFF, 0xFE]))
             telemetry = collect_build_telemetry(
                 root,
                 build_exit_code=0,
