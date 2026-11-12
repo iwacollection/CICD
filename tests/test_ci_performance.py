@@ -345,6 +345,11 @@ class CiPerformanceTests(unittest.TestCase):
                               "object_compile_edges": 1, "pending_actions_after_build": 0,
                               "incremental_noop": True},
                 },
+                "telemetry_availability": {
+                    "ccache": {"status": "available", "source": "ccache-log-stats.txt", "reason": None},
+                    "cmake_ninja": {"status": "available", "source": "cmake-build.json", "reason": None},
+                    "conan": {"status": "available", "source": "conan-build-timings.json", "reason": None},
+                },
                 "conan": {
                     "tool_preflight_ms": 80000,
                     "conan_venv_setup_ms": 5000,
@@ -365,6 +370,11 @@ class CiPerformanceTests(unittest.TestCase):
                 "resources": {"effective_jobs": 2, "delta": {"cpu": {"throttled_usec": 10}}},
                 "cmake_ninja": {},
                 "conan": {"test_ms": 250},
+                "telemetry_availability": {
+                    "ccache": {"status": "available"},
+                    "cmake_ninja": {"status": "unavailable", "reason": "file_missing"},
+                    "conan": {"status": "available"},
+                },
             }), encoding="utf-8")
             self.assertTrue(attach_build_telemetry(working, telemetry_dir))
             finalize_metrics(working, output)
@@ -388,6 +398,50 @@ class CiPerformanceTests(unittest.TestCase):
         self.assertEqual(summary["resources"]["memory_peak_bytes_max"], 4096)
         self.assertEqual(summary["resources"]["io_read_bytes_total"], 1000)
         self.assertEqual(summary["resources"]["io_pressure_some_usec_total"], 2500)
+        self.assertEqual(summary["telemetry_availability"]["ccache"], {
+            "available": 2, "unavailable": 0, "unreported": 0
+        })
+        self.assertEqual(summary["telemetry_availability"]["cmake_ninja"], {
+            "available": 1, "unavailable": 1, "unreported": 0
+        })
+        self.assertEqual(summary["telemetry_availability"]["conan"], {
+            "available": 2, "unavailable": 0, "unreported": 0
+        })
+
+    def test_missing_build_telemetry_is_unavailable_not_zero(self) -> None:
+        from ci_metrics import _build_telemetry_summary, format_aggregate_summary
+        from compile_telemetry import collect_build_telemetry
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            telemetry_dir = root / ".ci-telemetry"
+            telemetry_dir.mkdir()
+            (telemetry_dir / "ccache-global-stats.txt").write_text(
+                "Cache size (GB): 0.3 / 5.0 (6.0%)\\nFiles: 120\\nCleanups: 0\\n",
+                encoding="utf-8",
+            )
+            telemetry = collect_build_telemetry(
+                root,
+                build_exit_code=0,
+                build_duration_ms=1000,
+            )
+
+        self.assertFalse(telemetry["ccache"]["available"])
+        self.assertIsNone(telemetry["ccache"]["hits"])
+        self.assertIsNone(telemetry["ccache"]["misses"])
+        self.assertEqual(telemetry["ccache"]["cache_size_gib"], 0.3)
+        self.assertEqual(telemetry["telemetry_availability"]["ccache"]["status"], "unavailable")
+        self.assertEqual(telemetry["telemetry_availability"]["cmake_ninja"]["reason"], "file_missing")
+        self.assertEqual(telemetry["telemetry_availability"]["conan"]["reason"], "file_missing")
+
+        summary = _build_telemetry_summary([{"build_telemetry": [telemetry]}])
+        self.assertEqual(summary["ccache"]["samples"], 0)
+        self.assertIsNone(summary["ccache"]["hits"])
+        self.assertIsNone(summary["ccache"]["misses"])
+        self.assertEqual(summary["telemetry_availability"]["ccache"]["unavailable"], 1)
+        rendered = format_aggregate_summary({"build_telemetry_summary": summary})
+        self.assertIn("ccache: unavailable", rendered)
+        self.assertIn("CMake/Ninja telemetry availability: 0 available / 1 unavailable", rendered)
 
     def test_build_telemetry_reads_conan_phase_timings(self) -> None:
         from compile_telemetry import collect_build_telemetry
