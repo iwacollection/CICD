@@ -113,7 +113,7 @@ class CcacheBenchmarkTests(unittest.TestCase):
 
     def test_compiler_command_supports_toolchain_arguments(self) -> None:
         self.assertEqual(
-            _compiler_command("/usr/bin/ccache;/usr/bin/clang++ --target=x86_64-linux-gnu"),
+            _compiler_command("/usr/bin/ccache;/usr/bin/clang++;--target=x86_64-linux-gnu"),
             ["/usr/bin/ccache", "/usr/bin/clang++ --target=x86_64-linux-gnu"],
         )
         self.assertEqual(_compiler_command("ccache clang++ --target=aarch64"), [
