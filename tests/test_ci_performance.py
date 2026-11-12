@@ -403,11 +403,81 @@ class CiPerformanceTests(unittest.TestCase):
             "available": 1, "unavailable": 0, "unreported": 0
         })
         self.assertEqual(summary["telemetry_availability"]["cmake_ninja"], {
-            "available": 1, "unavailable": 1, "unreported": 0
+            "available": 1, "unavailable": 0, "unreported": 0
         })
         self.assertEqual(summary["telemetry_availability"]["conan"], {
             "available": 2, "unavailable": 0, "unreported": 0
         })
+
+    def test_build_cleanup_count_survives_missing_hit_miss_counters(self) -> None:
+        from ci_metrics import _build_telemetry_summary
+
+        summary = _build_telemetry_summary([{
+            "build_telemetry": [{
+                "phase": "build",
+                "ccache": {
+                    "available": False,
+                    "hits": None,
+                    "misses": None,
+                    "cleanup_events": 3,
+                    "cleanup_events_scope": "build",
+                },
+            }]
+        }])
+
+        self.assertEqual(summary["ccache"]["samples"], 0)
+        self.assertIsNone(summary["ccache"]["hits"])
+        self.assertIsNone(summary["ccache"]["misses"])
+        self.assertEqual(summary["ccache"]["cleanup_events_total"], 3)
+
+    def test_availability_counts_only_applicable_phase_telemetry(self) -> None:
+        from ci_metrics import _build_telemetry_summary
+
+        available = {"status": "available"}
+        unavailable = {"status": "unavailable", "reason": "not collected in test phase"}
+        summary = _build_telemetry_summary([{
+            "build_telemetry": [
+                {
+                    "phase": "build",
+                    "ccache": {"available": True, "hits": 2, "misses": 1},
+                    "conan": {"dependency_resolution_ms": 100},
+                    "telemetry_availability": {
+                        "ccache": available,
+                        "cmake_ninja": available,
+                        "conan": available,
+                    },
+                },
+                {
+                    "phase": "test",
+                    "conan": {"dependency_resolution_ms": 100},
+                    "telemetry_availability": {
+                        "ccache": unavailable,
+                        "cmake_ninja": unavailable,
+                        "conan": available,
+                    },
+                },
+                {
+                    "phase": "test",
+                    "conan": {"test_ms": 50},
+                    "telemetry_availability": {
+                        "ccache": unavailable,
+                        "cmake_ninja": unavailable,
+                        "conan": available,
+                    },
+                },
+            ]
+        }])
+
+        self.assertEqual(summary["telemetry_availability"]["ccache"], {
+            "available": 1, "unavailable": 0, "unreported": 0
+        })
+        self.assertEqual(summary["telemetry_availability"]["cmake_ninja"], {
+            "available": 1, "unavailable": 0, "unreported": 0
+        })
+        self.assertEqual(summary["telemetry_availability"]["conan"], {
+            "available": 2, "unavailable": 0, "unreported": 0
+        })
+        self.assertEqual(summary["conan_phases"]["test_ms"]["median_ms"], 50)
 
     def test_missing_build_telemetry_is_unavailable_not_zero(self) -> None:
         from ci_metrics import _build_telemetry_summary, format_aggregate_summary
