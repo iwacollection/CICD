@@ -124,12 +124,12 @@ class CcacheBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
             (build / "CMakeCache.txt").write_text(
-                "CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/ccache;/usr/bin/clang++ --target=x86_64-linux-gnu\\n"
-                "CMAKE_CXX_COMPILER_ID:STRING=Clang\\n"
-                "CMAKE_CXX_COMPILER_VERSION:STRING=19.1.0\\n",
+                "CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/ccache;/usr/bin/clang++ --target=x86_64-linux-gnu\n"
+                "CMAKE_CXX_COMPILER_ID:STRING=Clang\n"
+                "CMAKE_CXX_COMPILER_VERSION:STRING=19.1.0\n",
                 encoding="utf-8",
             )
-            result = SimpleNamespace(returncode=0, stdout="clang version 19.1.0\\n")
+            result = SimpleNamespace(returncode=0, stdout="clang version 19.1.0\n")
             with patch("ccache_benchmark.subprocess.run", return_value=result) as run:
                 identity = _compiler_identity(build)
         self.assertEqual(identity["version_line"], "clang version 19.1.0")
@@ -143,7 +143,7 @@ class CcacheBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
             (build / "CMakeCache.txt").write_text(
-                "CMAKE_CXX_COMPILER:FILEPATH=/missing/compiler\\n",
+                "CMAKE_CXX_COMPILER:FILEPATH=/missing/compiler\n",
                 encoding="utf-8",
             )
             with patch("ccache_benchmark.subprocess.run", side_effect=FileNotFoundError("compiler wrapper")):
@@ -265,7 +265,7 @@ class CcacheBenchmarkTests(unittest.TestCase):
     def test_ctest_uses_build_directory_as_cwd_for_older_versions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
-            listing = SimpleNamespace(returncode=0, stdout="Total Tests: 1\\n")
+            listing = SimpleNamespace(returncode=0, stdout="Total Tests: 1\n")
             with (
                 patch("ccache_benchmark.shutil.which", return_value="/usr/bin/ctest"),
                 patch("ccache_benchmark.subprocess.run", return_value=listing) as listing_run,
@@ -285,7 +285,7 @@ class CcacheBenchmarkTests(unittest.TestCase):
     def test_source_and_header_markers_are_valid_c_and_cpp_comments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             header = Path(directory) / "shared.h"
-            header.write_text("#pragma once\\n", encoding="utf-8")
+            header.write_text("#pragma once\n", encoding="utf-8")
             _append_marker(header, "ccache benchmark shared-header change")
             content = header.read_text(encoding="utf-8")
         self.assertIn("/* ccache benchmark shared-header change */", content)
